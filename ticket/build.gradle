@@ -1,0 +1,62 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.5'
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'com.avemonica'
+version = '0.0.1-SNAPSHOT'
+description = 'ticket'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    repositories {
+        // 优先使用阿里云的国内镜像源
+        maven { url 'https://maven.aliyun.com/repository/public/' }
+        maven { url 'https://maven.aliyun.com/repository/spring/' }
+        // 备用国外的中央仓库
+        mavenCentral()
+    }
+}
+
+dependencies {
+    // 1. Web 核心 (4.x 叫 starter-webmvc，3.x 叫 starter-web)
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // 2. Security 权限控制
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    // 3. Redis 缓存
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // 4. Kafka 消息队列 (4.x 叫 starter-kafka，3.x 叫 spring-kafka)
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // 5. 数据库与 MyBatis-Plus (我们刚才加的)
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'com.baomidou:mybatis-plus-spring-boot3-starter:3.5.5'
+    runtimeOnly 'com.mysql:mysql-connector-j'
+
+    // 6. JWT 电子门票
+    implementation 'io.jsonwebtoken:jjwt-api:0.11.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5'
+
+    // 7. 必备工具 Lombok
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // 8. 测试相关组件 (全部替换为 3.x 的正确名字)
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
