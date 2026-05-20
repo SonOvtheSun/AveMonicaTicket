@@ -1,0 +1,213 @@
+.public-header {
+    background: #ffffff; /* 🚨 必须是纯色背景！否则滚动时下面的文字会透上来 */
+    height: 74px;
+    line-height: 64px;
+    padding: 0;
+
+    /* 👇 核心魔法 1：吸顶定位 */
+    position: sticky;
+    top: 0;
+
+    /* 👇 核心魔法 2：确保它永远在最上层，压住图片、按钮甚至普通弹窗 */
+    z-index: 999;
+
+    /* 👇 核心魔法 3：高级悬浮阴影（比之前更明显一点，增加浮空感） */
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+
+    /* 配合阴影，可以把底边框去掉或者改得很淡 */
+    border-bottom: none;
+}
+
+.header-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+}
+
+/* --- 左侧 Logo 与 导航 --- */
+.header-left {
+    display: flex;
+    align-items: center;
+}
+
+/* 自定义图片 Logo */
+.home-logo-img {
+    height: 50px;
+    width: auto;
+    margin-right: 30px;
+    cursor: pointer;
+    object-fit: contain;
+    transition: transform 0.3s;
+}
+
+.home-logo-img:hover {
+    transform: scale(1.05);
+}
+
+.location-selector {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 14px;
+    color: #333;
+    cursor: pointer;
+    margin-right: 40px;
+}
+
+.main-nav {
+    display: flex;
+    gap: 30px;
+    font-size: 15px;
+    color: #333;
+}
+
+.main-nav span {
+    cursor: pointer;
+    position: relative;
+    transition: color 0.3s;
+}
+
+.main-nav span:hover {
+    color: #FF8899;
+}
+
+/* 导航高亮状态 */
+.main-nav span.active {
+    font-weight: bold;
+    color: #FF8899 !important;
+}
+
+/* 修正后的高亮下划线 */
+.main-nav span.active::after {
+    content: '';
+    position: absolute;
+    bottom: -6px; /* 紧贴文字下方 */
+    left: 0;
+    width: 100%;
+    height: 3px;
+    background-color: #FF8899 !important;
+    border-radius: 2px;
+}
+
+/* --- 中间搜索框 --- */
+.header-center {
+    flex: 1;
+    max-width: 300px;
+}
+
+.search-input {
+    border-radius: 20px !important;
+    background-color: #f5f5f5 !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.search-input input {
+    background-color: transparent !important;
+}
+
+/* --- 右侧账户区域 --- */
+.header-right {
+    min-width: 150px;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+/* 粉色登录按钮 */
+.login-btn {
+    background-color: #FF8899 !important;
+    border-color: #FF8899 !important;
+    border-radius: 20px;
+    font-weight: bold;
+    box-shadow: 0 2px 8px rgba(255, 136, 153, 0.3);
+    transition: all 0.3s;
+}
+
+.login-btn:hover {
+    background-color: #ff99aa !important;
+    border-color: #ff99aa !important;
+    transform: translateY(-1px);
+}
+
+/* 头像与下拉菜单触发器 */
+.user-profile-trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 20px;
+    transition: background 0.3s;
+}
+
+.user-profile-trigger:hover {
+    background: #f5f5f5;
+}
+
+.user-nickname {
+    font-size: 16px;
+    color: #333;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.user-dropdown-icon {
+    color: #999;
+}
+
+/* ==================================================
+   📱 响应式布局与防挤压优化
+   ================================================== */
+
+/* 1. 强制所有文本和容器不换行，彻底解决文字垂直断行溢出的问题 */
+.header-left,
+.header-right,
+.main-nav,
+.main-nav span,
+.location-selector {
+    white-space: nowrap !important;
+}
+
+/* 2. 优化搜索框的弹性伸缩 */
+.header-center {
+    flex: 1; /* 占据中间所有剩余空间 */
+    min-width: 100px; /* 设置最小宽度，防止被彻底挤没 */
+    max-width: 400px; /* 在大屏幕上限制最大宽度 */
+    margin: 0 20px;
+    transition: all 0.3s;
+}
+
+/* 3. 移动端/小窗口响应式适配（当屏幕宽度小于 850px 时触发） */
+@media screen and (max-width: 850px) {
+
+    /* 隐藏次要元素，为 Logo 和搜索框腾出空间 */
+    .location-selector,
+    .main-nav,
+    .admin-dashboard-btn {
+        display: none !important;
+    }
+
+    /* 缩小头部内边距 */
+    .header-inner {
+        padding: 0 12px;
+    }
+
+    /* 缩小搜索框的间距 */
+    .header-center {
+        margin: 0 10px;
+    }
+
+    /* 头像/登录按钮区域调整得更紧凑 */
+    .user-profile-trigger {
+        gap: 4px;
+    }
+    .user-nickname {
+        display: none; /* 小屏幕下可以隐藏用户名，只留头像 */
+    }
+}

@@ -1,0 +1,99 @@
+.admin-layout-container {
+    min-height: 100vh;
+}
+
+/* 左侧边栏样式 */
+.admin-sider {
+    border-right: 1px solid #f0f0f0;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.02);
+    z-index: 10;
+}
+
+.admin-logo-zone {
+    height: 64px;
+    display: flex;
+    align-items: center;
+    padding: 0 80px;
+    cursor: pointer;
+    background-color: #fff;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.logo-text {
+    font-size: 18px;
+    font-weight: bold;
+    color: #FF8899; /* 延续元气粉品牌色 */
+    letter-spacing: 0.5px;
+}
+
+/* 侧边栏菜单定制 */
+.admin-menu {
+    border-right: none !important;
+    padding-top: 16px;
+}
+
+.admin-menu .ant-menu-item {
+    height: 50px !important;
+    line-height: 50px !important;
+    margin-bottom: 8px !important;
+    border-radius: 8px;
+    width: calc(100% - 16px) !important;
+    margin-left: 8px !important;
+}
+
+/* 激活菜单项时的优雅主色调调和 */
+.admin-menu .ant-menu-item-selected {
+    background-color: rgba(255, 136, 153, 0.1) !important;
+    color: #FF8899 !important;
+}
+
+/* 顶部栏样式 */
+.admin-header {
+    background: #fff !important;
+    padding: 0 24px !important;
+    height: 64px !important;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+    z-index: 9;
+}
+
+.current-module-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+}
+
+.admin-profile-trigger {
+    display: flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.admin-profile-trigger:hover {
+    background-color: #f5f5f5;
+}
+
+.admin-avatar {
+    border: 2px solid #FF8899;
+    background-color: #fff;
+}
+
+.admin-name {
+    margin: 0 8px;
+    font-size: 16px;
+    color: #444;
+    font-weight: 500;
+}
+
+/* 内容承载区样式 */
+.admin-content-wrapper {
+    padding: 24px;
+    background-color: #f5f7fa;
+    height: calc(100vh - 64px);
+    overflow-y: auto;
+}

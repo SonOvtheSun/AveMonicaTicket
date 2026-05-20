@@ -1,3 +1,12 @@
+avemonica:
+  upload:
+    # 总的上传根目录（末尾不加斜杠，方便后面拼接）
+    base-path: ${user.dir}/src/images
+    # 业务子目录名称
+    avatar-dir: /avatar/
+    poster-dir: /poster/
+    scrollbar-dir: /scrollbar/
+
 server:
   port: 8080
 
@@ -7,13 +16,15 @@ spring:
     # 这里的 ave_ticket 要和上面创建的库名一致
     url: jdbc:mysql://localhost:3306/avemonica?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=GMT%2B8
     username: root
-    password: Sya20000204
+    password: "Sya20000204"
+
 
   # Redis 配置
   data:
     redis:
       host: localhost
       port: 6379
+      password: "Sya20000204"
       database: 0
 
   # Kafka 配置
@@ -26,3 +37,14 @@ spring:
       group-id: ticket-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB     # 单个文件最大限制 (推荐 10MB 足够传高清海报了)
+      max-request-size: 20MB  # 单次请求总计最大限制 (如果一次上传多张图)
+
+  logging:
+    level:
+      org.springframework.security: DEBUG
+      com.yourpackage.security: DEBUG

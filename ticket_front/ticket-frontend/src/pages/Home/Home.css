@@ -1,0 +1,370 @@
+/* 路径：src/pages/Home/Home.css */
+
+.home-layout {
+    background-color: #ffffff;
+    min-height: 100vh;
+    /* 加上这行保险：允许垂直滚动，隐藏水平滚动防止意外白边 */
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+}
+
+/* --- 内容区域 --- */
+.home-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 30px 20px;
+}
+
+/* --- Banner 轮播图 --- */
+.banner-section {
+    margin-bottom: 40px;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+}
+
+.banner-img {
+    height: 400px;
+    background-size: cover;
+    background-position: center;
+}
+
+/* ==================================================
+   🔥 轮播图箭头：终极清场版
+   ================================================== */
+
+/* 1. 容器样式设置：完美居中，并杀掉任何默认文字 */
+.ant-carousel .slick-prev,
+.ant-carousel .slick-next {
+    width: 44px !important;
+    height: 44px !important;
+    background-color: transparent !important;
+    border-radius: 50%;
+    z-index: 2;
+    transition: all 0.3s;
+
+    /* 完美的 Flex 居中 */
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+    /* ⚡ 绝杀 1：清除容器本身的一切文字特征，防止乱码/默认箭头文字出现 */
+    font-size: 0 !important;
+    color: transparent !important;
+    line-height: 0 !important;
+}
+
+/* 调整左右位置 */
+.ant-carousel .slick-prev { left: 20px !important; }
+.ant-carousel .slick-next { right: 20px !important; }
+
+/* 悬停时的粉色圆圈底色 */
+.ant-carousel .slick-prev:hover,
+.ant-carousel .slick-next:hover {
+    background-color: #FF8899 !important;
+    box-shadow: 0 0 10px rgba(255, 136, 153, 0.4) !important;
+}
+
+/* ⚡ 绝杀 2：彻底摧毁原生的幽灵伪元素箭头 */
+.ant-carousel .slick-prev::before,
+.ant-carousel .slick-next::before,
+.ant-carousel .slick-prev::after,
+.ant-carousel .slick-next::after {
+    content: none !important;    /* 直接清空内容 */
+    display: none !important;    /* 彻底不渲染 */
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+/* 2. 保护我们自己引入的 SVG 图标（只让它显示） */
+.ant-carousel .slick-prev svg,
+.ant-carousel .slick-next svg {
+    /* 强制设定真实图标的大小和颜色 */
+    width: 24px !important;
+    height: 24px !important;
+    font-size: 24px !important;
+    color: rgba(255, 255, 255, 0.8) !important;
+    display: block !important;
+    margin: 0 !important; /* 拔除任何外边距 */
+    transition: color 0.3s;
+}
+
+/* 悬停时 SVG 变纯白 */
+.ant-carousel .slick-prev:hover svg,
+.ant-carousel .slick-next:hover svg {
+    color: #ffffff !important;
+}
+
+/* 清除按钮自带底边框 */
+.ant-carousel .slick-arrow {
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* --- 演出列表 --- */
+.section-title {
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.title-icon {
+    color: #FF8899; /* 同步主题色 */
+}
+
+/* 演出卡片 */
+.event-card {
+    cursor: pointer;
+}
+
+.event-cover-wrapper {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 12px;
+}
+
+.event-cover {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s;
+}
+
+.event-card:hover .event-cover {
+    transform: scale(1.05);
+}
+
+.event-price {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    color: #FF8899; /* 价格文字同步为粉色 */
+    font-size: 18px;
+    font-weight: bold;
+    padding: 2px 8px;
+    background: linear-gradient(transparent, rgba(255,255,255,0.9) 30%, #fff);
+    width: 100%;
+}
+
+.event-price span {
+    font-size: 12px;
+    margin-right: 2px;
+}
+
+.event-info {
+    padding-right: 10px;
+}
+
+.event-title {
+    font-size: 14px;
+    color: #333;
+    line-height: 1.5;
+    height: 42px;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    margin: 0;
+    transition: color 0.3s;
+}
+
+.event-card:hover .event-title {
+    color: #FF8899; /* 卡片悬停时标题变为粉色 */
+}
+
+.admin-dashboard-btn {
+    margin-right: 20px; /* 和头像保持一点距离 */
+    border-radius: 20px !important;
+    color: #FF8899 !important;
+    border-color: #FF8899 !important;
+    background: transparent !important;
+    display: flex !important;
+    align-items: center;
+    gap: 6px;
+    font-weight: bold;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.admin-dashboard-btn:hover {
+    background: #FF8899 !important;
+    color: #ffffff !important; /* 悬停时反色，变成粉底白字 */
+    box-shadow: 0 4px 12px rgba(255, 136, 153, 0.3);
+    transform: translateY(-1px);
+}
+
+/* ==================================================
+   🔥 新增 C 端高级动效
+   ================================================== */
+
+/* 1. 卡片级联入场动画 */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-fade-in {
+    opacity: 0; /* 初始隐藏，等待动画执行 */
+    animation: fadeInUp 0.6s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
+}
+
+/* 2. 增强演出卡片的悬停质感 */
+.event-card {
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+    background: #fff;
+    padding-bottom: 8px; /* 给底部留点呼吸空间 */
+}
+
+.event-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+}
+
+.event-cover {
+    object-fit: contain;
+}
+
+/* 3. 增强图片遮罩效果 */
+.event-cover-wrapper::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0);
+    transition: background 0.3s ease;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.event-card:hover .event-cover-wrapper::after {
+    background: rgba(0, 0, 0, 0.05); /* 悬停时压暗一点点，突出文字 */
+}
+
+/* 确保价格标签层级在遮罩之上 */
+/* 修改后的价格标签：取消底部大面积白色虚化渐变，改为精致的小浮窗 */
+.event-price {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    color: #FF8899;
+    padding: 4px 10px;
+    background: rgba(0, 0, 0, 0.65);
+    border-radius: 6px;
+    backdrop-filter: blur(4px);
+    z-index: 2;
+    width: auto;
+
+    /* 👇 核心排版魔法：让大小不一的文字底部完美平齐 */
+    display: flex;
+    align-items: baseline;
+    gap: 2px; /* 三个元素之间的间距 */
+}
+
+/* 人民币符号 */
+.event-price .price-symbol {
+    font-size: 13px;
+    color: #ffffff;
+}
+
+/* 核心数字：调大字号，加粗 */
+.event-price .price-num {
+    font-size: 22px;
+    font-weight: bold;
+}
+
+/* 结尾的“起”字：调小字号，取消加粗 */
+.event-price .price-suffix {
+    font-size: 13px;
+    font-weight: normal;
+}
+
+.price-suffix {
+    color:#ffffff;
+}
+/* 4. 加载状态容器居中 */
+.loading-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 300px;
+    width: 100%;
+}
+
+/* ==================================================
+   🔥 5列网格布局 (专为演出卡片定制)
+   ================================================== */
+.event-grid {
+    display: grid;
+    /* 核心魔法：强制 5 列，每列等宽 */
+    grid-template-columns: repeat(5, 1fr);
+    gap: 30px 16px; /* 行间距 30px，列间距 16px */
+    width: 100%;
+}
+
+/* 响应式降级：屏幕变小后逐渐减少列数，防止卡片被挤扁 */
+@media (max-width: 1100px) { .event-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 850px)  { .event-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 600px)  { .event-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* ==================================================
+   🔥 卡片微调：适应缩小的体积
+   ================================================== */
+/* 缩小标题字号，防止在窄卡片里一行只能塞下几个字 */
+.event-grid .event-title {
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+    height: 36px !important; /* 严格限制两行高度 (13 * 1.4 * 2) */
+    margin-bottom: 6px !important;
+}
+
+/* 缩小底部时间地点的信息字号 */
+.event-grid .event-info-sub {
+    font-size: 11px;
+    color: #999;
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 稍微调小价格浮窗里的数字，防止遮挡过多的海报画面 */
+.event-price .price-num {
+    font-size: 18px !important;
+}
+
+@media screen and (max-width: 1200px) {
+    /* 1. 限制顶部轮播图的高度 */
+    /* 请确认你轮播图的类名是不是 .carousel-img，如果不是请替换 */
+    .carousel-img {
+        height: 220px !important; /* 在手机上强制矮一点，保留呼吸感 */
+        object-fit: cover !important; /* 核心：保持比例裁剪，填满区域但不变形 */
+    }
+
+    /* 2. 限制“即将上演”等卡片里竖版海报的高度 */
+    /* 请确认你卡片图片的类名是不是 .event-poster 或类似的名字 */
+    .event-poster,
+    .event-card img {
+        max-height: 280px !important; /* 锁死最大高度，防止竖版海报霸屏 */
+        width: 100% !important;
+        object-fit: cover !important;
+        object-position: top !important; /* 如果被裁剪，优先保留海报上半部分（通常是人脸和标题） */
+    }
+
+    /* 3. 如果窄屏幕下卡片变得太大，可以给卡片容器加点内边距或限制宽度 */
+    .event-card {
+        margin: 0 auto;
+        max-width: 400px; /* 防止在平板或横屏手机上拉得过宽 */
+    }
+}

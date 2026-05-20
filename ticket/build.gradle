@@ -40,6 +40,7 @@ dependencies {
     // 5. 数据库与 MyBatis-Plus (我们刚才加的)
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'
     implementation 'com.baomidou:mybatis-plus-spring-boot3-starter:3.5.5'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
     runtimeOnly 'com.mysql:mysql-connector-j'
 
     // 6. JWT 电子门票

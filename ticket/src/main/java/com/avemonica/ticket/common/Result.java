@@ -17,4 +17,18 @@ public class Result<T> {
         r.code = 500; r.message = msg;
         return r;
     }
+
+    public static <T> Result<T> error(Integer code, String msg) {
+        Result<T> r = new Result<>();
+        r.code = code; r.message = msg;
+        return r;
+    }
+
+    public static <T> Result<T> success(T data) {
+        Result<T> result = new Result<>();
+        result.setCode(200);
+        result.setMessage("操作成功");
+        result.setData(data);
+        return result;
+    }
 }

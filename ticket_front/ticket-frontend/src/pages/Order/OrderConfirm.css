@@ -1,0 +1,160 @@
+/* src/pages/Order/OrderConfirm.css */
+
+.order-page-container {
+    background-color: #f5f7fa;
+    min-height: 100vh;
+    padding-bottom: 100px; /* 给底部固定栏留出空间 */
+}
+
+.order-content {
+    max-width: 900px;
+    margin: 30px auto;
+}
+
+.order-section-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.02);
+}
+
+.section-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+}
+
+.section-title::before {
+    content: '';
+    display: inline-block;
+    width: 4px;
+    height: 18px;
+    background-color: #FF8899;
+    border-radius: 2px;
+    margin-right: 10px;
+}
+
+
+
+/* 演出信息横向排版 */
+.event-info-row {
+    display: flex;
+    gap: 20px;
+    background: #fafafa;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: left;
+}
+
+.event-info-poster {
+    width: 100px;
+    height: 133px;
+    object-fit: cover;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.event-info-detail {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.ticket-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px dashed #e8e8e8;
+}
+
+/* 支付方式与观演人选择块 */
+.selectable-card {
+    border: 1px solid #e8e8e8;
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+    overflow: hidden;
+}
+
+.selectable-card.active {
+    border-color: #FF8899;
+    background-color: #fff0f2;
+}
+
+.selectable-card.active::after {
+    content: '✓';
+    position: absolute;
+    bottom: -10px;
+    right: -10px;
+    width: 30px;
+    height: 30px;
+    background: #FF8899;
+    color: white;
+    font-weight: bold;
+    display: flex;
+    align-items: flex-start;
+    padding-top: 4px;
+    padding-left: 6px;
+    transform: rotate(-45deg);
+}
+
+/* 底部结算悬浮栏 */
+.bottom-settle-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: #fff;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.05);
+    z-index: 100;
+    display: flex;
+    justify-content: center;
+}
+
+.settle-inner {
+    width: 900px;
+    height: 80px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 20px;
+}
+
+/* ==================================================
+   🔥 PC端高质感返回按钮
+   ================================================== */
+.order-back-btn {
+    margin-bottom: 20px;
+    background: #ffffff !important;
+    border: 1px solid #e8e8e8 !important;
+    color: #666666 !important;
+    border-radius: 20px !important;
+    font-weight: 500;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    display: inline-flex;
+    align-items: center;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}
+
+/* 悬停动效：向左轻微平移，边框和文字染上标志性的主题粉 */
+.order-back-btn:hover {
+    color: #FF8899 !important;
+    border-color: #FF8899 !important;
+    background: #fff0f2 !important;
+    box-shadow: 0 4px 12px rgba(255, 136, 153, 0.15);
+    transform: translateX(-4px); /* 优雅的向左滑动引导 */
+}
+
+.order-back-btn .anticon {
+    font-size: 14px;
+    margin-right: 4px;
+}

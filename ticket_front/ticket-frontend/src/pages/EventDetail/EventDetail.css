@@ -1,0 +1,206 @@
+/* 路径：src/pages/EventDetail/EventDetail.css */
+
+.detail-page-container {
+    background-color: #fafafa;
+    min-height: 100vh;
+    position: relative;
+    padding-bottom: 80px;
+}
+
+/* 🔥 沉浸式高斯模糊背景 */
+.hero-blurred-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 450px;
+    background-size: cover;
+    background-position: center;
+    filter: blur(40px) brightness(0.6);
+    transform: scale(1.1); /* 防止模糊后边缘漏出白边 */
+    z-index: 0;
+    mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+}
+
+.content-wrapper {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 20px 0;
+}
+
+/* 顶部购票信息卡片 */
+.purchase-card {
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.08);
+    padding: 30px;
+    display: flex;
+    gap: 40px;
+    margin-bottom: 40px;
+}
+
+.poster-col {
+    flex: 0 0 320px;
+}
+
+.detail-poster {
+    width: 100%;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    object-fit: cover;
+    aspect-ratio: 3/4;
+}
+
+.info-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.event-title-large {
+    font-size: 26px;
+    font-weight: 800;
+    color: #333;
+    line-height: 1.4;
+    margin-bottom: 16px;
+}
+
+.info-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #666;
+    font-size: 15px;
+    margin-bottom: 12px;
+}
+
+.info-icon {
+    color: #FF8899;
+}
+
+/* 🔥 活力票档药丸按钮 */
+.tickets-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.ticket-pill {
+    padding: 12px 24px;
+    border-radius: 8px;
+    border: 2px solid #f0f0f0;
+    background: #fafafa;
+    color: #333; /* 🚨 新增：明确默认深灰字 */
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+/* 2. 悬停状态：背景变浅粉，文字变主色粉 */
+.ticket-pill:hover:not(.sold-out) {
+    border-color: #FF8899;
+    background: #fff0f2;
+    color: #FF8899; /* 🚨 新增：悬停时文字变成粉色，彻底解决看不清的问题 */
+}
+
+/* 3. 选中状态：保持不变，依然是粉底白字 */
+.ticket-pill.active {
+    border-color: #FF8899;
+    background: #FF8899;
+    color: white;
+    box-shadow: 0 8px 16px rgba(255, 136, 153, 0.3);
+    transform: translateY(-2px);
+}
+
+.ticket-pill.sold-out {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #f5f5f5;
+}
+
+.ticket-name {
+    font-size: 16px;
+    font-weight: bold;
+    display: block;
+    margin-bottom: 4px;
+}
+
+
+.ticket-price {
+    font-size: 14px;
+}
+
+/* 购买栏 */
+.action-bar {
+    margin-top: auto;
+    padding-top: 30px;
+    border-top: 1px dashed #eee;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.total-price {
+    font-size: 32px;
+    color: #FF8899;
+    font-weight: 900;
+}
+
+.buy-btn {
+    height: 54px !important;
+    padding: 0 50px !important;
+    font-size: 18px !important;
+    border-radius: 27px !important;
+    background: linear-gradient(135deg, #FF8899, #ff6b80) !important;
+    border: none !important;
+    box-shadow: 0 10px 20px rgba(255, 136, 153, 0.4) !important;
+    transition: transform 0.2s !important;
+}
+
+.buy-btn:hover {
+    transform: scale(1.05) !important;
+}
+
+/* 下方详情区块 */
+.section-block {
+    background: #fff;
+    border-radius: 16px;
+    padding: 30px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    margin-bottom: 24px;
+}
+
+.section-header {
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 20px;
+    border-left: 4px solid #FF8899;
+    padding-left: 12px;
+    text-align: left;
+}
+
+.artist-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    background: #fafafa;
+    border-radius: 12px;
+    transition: background 0.3s;
+}
+.artist-card:hover {
+    background: #fff0f2;
+}
+
+.details-long-img {
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    display: block;
+    border-radius: 8px;
+}

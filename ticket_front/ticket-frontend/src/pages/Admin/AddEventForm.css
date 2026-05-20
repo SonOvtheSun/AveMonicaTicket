@@ -1,0 +1,65 @@
+/* AddEventForm.css */
+
+/* ==========================================
+   输入框与下拉框 (Input & Select) 聚焦光晕
+   ========================================== */
+.ant-input:hover,
+.ant-input-number:hover,
+.ant-picker:hover {
+    border-color: #FF8899 !important;
+}
+
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-number:focus,
+.ant-input-number-focused,
+.ant-picker-focused {
+    border-color: #FF8899 !important;
+    box-shadow: 0 0 0 2px rgba(255, 136, 153, 0.2) !important;
+}
+
+.ant-select:not(.ant-select-disabled):hover .ant-select-selector {
+    border-color: #FF8899 !important;
+}
+
+.ant-select-focused:not(.ant-select-disabled) .ant-select-selector {
+    border-color: #FF8899 !important;
+    box-shadow: 0 0 0 2px rgba(255, 136, 153, 0.2) !important;
+}
+
+/* 多选下拉框的 Tag 颜色替换 */
+.ant-select-multiple .ant-select-selection-item {
+    background-color: rgba(255, 136, 153, 0.1) !important;
+    border-color: rgba(255, 136, 153, 0.3) !important;
+    color: #d1566c !important;
+}
+
+/* ==========================================
+   图片上传组件 (Upload) 交互
+   ========================================== */
+.ant-upload.ant-upload-select {
+    border-radius: 8px;
+    transition: border-color 0.3s;
+}
+
+.ant-upload-wrapper .ant-upload-select:hover {
+    border-color: #FF8899 !important;
+    color: #FF8899 !important;
+}
+
+/* ==========================================
+   票档动态删减按钮悬浮动效
+   ========================================== */
+.anticon-minus-circle {
+    transition: transform 0.2s, color 0.2s;
+}
+
+.anticon-minus-circle:hover {
+    color: #d9363e !important;
+    transform: scale(1.15);
+}
+
+/* 抽屉(Drawer) 底部遮罩平滑处理 */
+.ant-drawer-body {
+    padding-bottom: 80px; /* 给底部按钮留出空间，防止内容被遮挡 */
+}
