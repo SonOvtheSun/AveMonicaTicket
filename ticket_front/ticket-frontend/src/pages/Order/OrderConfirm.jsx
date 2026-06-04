@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Alert, Tag, Divider, Checkbox, Button, message, Space, Row, Col } from 'antd';
+import { Alert, Tag, Divider, Checkbox, Button, message, Space, Row, Col, Form, Input, Select, Modal } from 'antd';
 import { CheckCircleFilled, InfoCircleOutlined, PayCircleOutlined, AlipayCircleOutlined, WechatOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
 import './OrderConfirm.css';
+import axios from "axios";
 
 
 const OrderConfirm = () => {
@@ -24,48 +25,158 @@ const OrderConfirm = () => {
 
     // 状态管理
     const [spectators, setSpectators] = useState([]); // 观演人列表
-    const [selectedSpectatorId, setSelectedSpectatorId] = useState(null);
+    const [selectedSpectatorIds, setSelectedSpectatorIds] = useState([]);
     const [paymentMethod, setPaymentMethod] = useState('alipay');
     const [agreed, setAgreed] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const maxTickets = 1; // 假设当前订单限制购买几张票，这通常从上一个页面传过来
 
-    // 模拟拉取用户预存的观演人信息 (逻辑6)
+    // 新增观演人弹窗控制
+    const [spectatorModalVisible, setSpectatorModalVisible] = useState(false);
+    const [spectatorForm] = Form.useForm();
+
     useEffect(() => {
-        // TODO: 替换为真实的 axios 请求获取当前用户的实名观演人
-        const mockSpectators = [
-            { id: 1, name: '张三', idCard: '11010519900101****' },
-            { id: 2, name: '李四', idCard: '31010519951212****' }
-        ];
-        setSpectators(mockSpectators);
-        if (mockSpectators.length > 0) {
-            setSelectedSpectatorId(mockSpectators[0].id); // 默认选中第一个
-        }
+        fetchSpectators();
     }, []);
+
+    const fetchSpectators = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get('/api/user/spectator/list', {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.data.code === 200) {
+                setSpectators(res.data.data);
+            }
+        } catch (error) {
+            message.error('获取观演人列表失败');
+        }
+    };
+
+    // 🚨 2. 新增多选逻辑处理函数
+    const handleSelectSpectator = (spId) => {
+        if (selectedSpectatorIds.includes(spId)) {
+            // 如果已选，则取消选中
+            setSelectedSpectatorIds(selectedSpectatorIds.filter(id => id !== spId));
+        } else {
+            // 如果未选，先判断是否已经达到了购票数量
+            if (selectedSpectatorIds.length >= quantity) {
+                message.warning(`本订单仅需绑定 ${quantity} 位观演人`);
+                return;
+            }
+            setSelectedSpectatorIds([...selectedSpectatorIds, spId]);
+        }
+    };
+
+    // 🚨 补充：新增观演人提交逻辑
+    const handleAddSpectator = async () => {
+        try {
+            const values = await spectatorForm.validateFields();
+            if (spectators.length >= 50) return message.warning('最多只能保存 50 个常用购票人');
+
+            const token = localStorage.getItem('token');
+            const res = await axios.post('/api/user/spectator/add', values, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (res.data.code === 200) {
+                message.success('添加成功！');
+                setSpectatorModalVisible(false);
+                spectatorForm.resetFields();
+                fetchSpectators(); // 🚨 重新拉取最新列表，页面会自动多出一个选人卡片
+            } else {
+                message.error(res.data.message || '添加失败');
+            }
+        } catch (error) {
+            console.log('表单校验失败', error);
+        }
+    };
 
     const totalPrice = (selectedTicket.price * quantity).toFixed(2);
 
-    // 提交订单逻辑
     const handleSubmitOrder = async () => {
-        if (!selectedSpectatorId) return message.warning('请选择实名观演人');
+        if (selectedSpectatorIds.length !== quantity) {
+            return message.warning(`请选择 ${quantity} 位实名观演人`);
+        }
         if (!agreed) return message.warning('请阅读并同意购票服务条款');
 
         setSubmitting(true);
         try {
-            // TODO: 这里是触发后端“高并发创建订单”的接口
-            // 后端逻辑：接收到请求 -> 校验频次/拦截器 -> 发送到 MQ -> 返回“排队中”或立即返回订单号
-            console.log('提交订单参数:', {
+            const token = localStorage.getItem('token');
+            const res = await axios.post('/api/order/create', {
+                eventId: event.id,
                 ticketId: selectedTicket.id,
                 quantity: quantity,
-                spectatorId: selectedSpectatorId,
+                spectatorIds: selectedSpectatorIds,
                 paymentMethod: paymentMethod
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
             });
 
-            setTimeout(() => {
-                message.success('订单创建成功，即将跳转支付...');
-                setSubmitting(false);
-                // navigate(`/pay?orderId=xxxxx`);
-            }, 1000);
+            if (res.data.code === 200) {
+                // ==========================================
+                // 🚀 分支 1：后端升级了异步排队架构 (触发轮询转圈动画)
+                // ==========================================
+                if (res.data.message === '排队中') {
+                    const queueToken = res.data.data;
+                    const hideLoading = message.loading('千军万马过独木桥，正在为您排队占座...', 0);
 
+                    const pollTimer = setInterval(async () => {
+                        try {
+                            const pollRes = await axios.get(`/api/order/result/${queueToken}`, {
+                                headers: { Authorization: `Bearer ${token}` }
+                            });
+
+                            if (pollRes.data.code === 200 && pollRes.data.data) {
+                                const resultStr = pollRes.data.data;
+                                clearInterval(pollTimer);
+                                clearTimeout(timeoutTimer);
+                                hideLoading();
+                                setSubmitting(false);
+
+                                if (resultStr.startsWith('FAIL:')) {
+                                    message.error(resultStr.substring(5) || '抢票失败，请重试');
+                                } else {
+                                    message.success('抢票成功！请在 10 分钟内完成支付');
+                                    navigate('/simulate-pay', {
+                                        state: { orderId: resultStr, price: totalPrice }
+                                    });
+                                }
+                            }
+                        } catch (e) {
+                            console.log('轮询状态异常', e);
+                        }
+                    }, 1500);
+
+                    const timeoutTimer = setTimeout(() => {
+                        clearInterval(pollTimer);
+                        hideLoading();
+                        setSubmitting(false);
+                        message.error('排队超时，当前参与人数过多，请稍后再试');
+                    }, 15000);
+                }
+                    // ==========================================
+                    // 🚀 分支 2：后端是同步架构 (无缝直接跳转支付页)
+                // ==========================================
+                else {
+                    setSubmitting(false);
+                    message.success('抢票成功！请在 10 分钟内完成支付');
+
+                    // 兼容处理：获取真实的订单 ID (支持直接返回ID，或返回带id属性的对象)
+                    const generatedOrderId = typeof res.data.data === 'object' ? res.data.data.id : res.data.data;
+
+                    navigate('/simulate-pay', {
+                        state: {
+                            orderId: generatedOrderId,
+                            price: totalPrice
+                        }
+                    });
+                }
+            } else {
+                // 业务异常拦截（比如：没有拿到Lua锁、票卖光了等）
+                message.error(res.data.message || '系统繁忙，请稍后再试');
+                setSubmitting(false);
+            }
         } catch (error) {
             message.error('系统繁忙，请稍后再试');
             setSubmitting(false);
@@ -129,13 +240,18 @@ const OrderConfirm = () => {
 
                 {/* 2. 观演人信息模块 */}
                 <div className="order-section-card">
-                    <div className="section-title">选择观演人</div>
+                    <div className="section-title">
+                        选择观演人 <span style={{fontSize: 14, color: '#999', fontWeight: 'normal'}}>
+                (已选 {selectedSpectatorIds.length}/{quantity} 人)
+                </span>
+                    </div>
                     <Row gutter={16}>
                         {spectators.map(sp => (
                             <Col span={8} key={sp.id}>
                                 <div
-                                    className={`selectable-card ${selectedSpectatorId === sp.id ? 'active' : ''}`}
-                                    onClick={() => setSelectedSpectatorId(sp.id)}
+                                    // 判断当前 ID 是否在选中数组中
+                                    className={`selectable-card ${selectedSpectatorIds.includes(sp.id) ? 'active' : ''}`}
+                                    onClick={() => handleSelectSpectator(sp.id)}
                                 >
                                     <div style={{ fontWeight: 'bold', fontSize: 16 }}>{sp.name}</div>
                                     <div style={{ color: '#888', marginTop: 4 }}>{sp.idCard}</div>
@@ -143,7 +259,11 @@ const OrderConfirm = () => {
                             </Col>
                         ))}
                         <Col span={8}>
-                            <div className="selectable-card" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', borderStyle: 'dashed', color: '#FF8899' }}>
+                            <div
+                                className="selectable-card"
+                                style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', borderStyle: 'dashed', color: '#FF8899', cursor: 'pointer' }}
+                                onClick={() => setSpectatorModalVisible(true)} // 🚨 绑定唤起弹窗事件
+                            >
                                 + 新增实名观演人
                             </div>
                         </Col>
@@ -204,6 +324,59 @@ const OrderConfirm = () => {
                     </div>
                 </div>
             </div>
+            {/* 🚨 补充：复用 UserProfile 的新增购票人弹窗 */}
+            <Modal
+                title="新增常用购票人"
+                open={spectatorModalVisible}
+                onOk={handleAddSpectator}
+                onCancel={() => {
+                    setSpectatorModalVisible(false);
+                    spectatorForm.resetFields();
+                }}
+                okText="保存"
+                cancelText="取消"
+                okButtonProps={{ style: { backgroundColor: '#FF8899', border: 'none' } }}
+            >
+                <Form form={spectatorForm} layout="vertical" style={{ marginTop: 20 }}>
+                    <Form.Item label="真实姓名" name="name" rules={[{ required: true, message: '请输入观演人真实姓名' }]}>
+                        <Input placeholder="请输入证件上的真实姓名" />
+                    </Form.Item>
+
+                    <Form.Item label="证件类型" name="idType" initialValue={1}>
+                        <Select placeholder="请选择证件类型">
+                            <Select.Option value={1}>身份证</Select.Option>
+                            <Select.Option value={2}>护照</Select.Option>
+                            <Select.Option value={3}>港澳台居民居住证</Select.Option>
+                        </Select>
+                    </Form.Item>
+
+                    <Form.Item
+                        label="证件号码"
+                        name="idCard"
+                        dependencies={['idType']}
+                        rules={[
+                            { required: true, message: '请输入证件号码' },
+                            ({ getFieldValue }) => ({
+                                validator(_, value) {
+                                    if (!value) return Promise.resolve();
+                                    const type = getFieldValue('idType');
+                                    if (type === 1) {
+                                        const reg = /^[1-9]\d{5}(18|19|20)\d{2}((0[1-9])|(1[0-2]))(([0-2][1-9])|10|20|30|31)\d{3}[0-9Xx]$/;
+                                        if (!reg.test(value)) return Promise.reject(new Error('身份证格式不正确'));
+                                    } else if (type === 2) {
+                                        if (!/^[a-zA-Z0-9]{5,17}$/.test(value)) return Promise.reject(new Error('护照格式不正确'));
+                                    } else if (type === 3) {
+                                        if (value.length < 8) return Promise.reject(new Error('证件号码长度不正确'));
+                                    }
+                                    return Promise.resolve();
+                                },
+                            }),
+                        ]}
+                    >
+                        <Input placeholder="请输入证件号码" maxLength={18} />
+                    </Form.Item>
+                </Form>
+            </Modal>
         </div>
     );
 };

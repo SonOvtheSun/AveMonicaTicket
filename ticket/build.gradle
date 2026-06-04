@@ -27,12 +27,15 @@ repositories {
 dependencies {
     // 1. Web 核心 (4.x 叫 starter-webmvc，3.x 叫 starter-web)
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
 
     // 2. Security 权限控制
     implementation 'org.springframework.boot:spring-boot-starter-security'
 
     // 3. Redis 缓存
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.redisson:redisson-spring-boot-starter:3.27.2'
+    implementation 'com.github.ben-manes.caffeine:caffeine'
 
     // 4. Kafka 消息队列 (4.x 叫 starter-kafka，3.x 叫 spring-kafka)
     implementation 'org.springframework.kafka:spring-kafka'

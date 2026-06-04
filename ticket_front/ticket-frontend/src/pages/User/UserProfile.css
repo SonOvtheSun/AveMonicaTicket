@@ -1,0 +1,77 @@
+.user-profile-container {
+    background-color: #f5f7fa;
+    min-height: 100vh;
+    padding-bottom: 40px;
+}
+
+.profile-content {
+    max-width: 1200px;
+    margin: 30px auto;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+    display: flex;
+    min-height: 600px;
+}
+
+/* 覆盖 Antd 默认的 Tabs 样式 */
+.profile-content .ant-tabs-left > .ant-tabs-nav {
+    width: 220px;
+    background-color: #fafafa;
+    border-right: 1px solid #f0f0f0;
+    padding-top: 20px;
+}
+
+.profile-content .ant-tabs-tab {
+    padding: 16px 24px !important;
+    font-size: 16px;
+    margin: 0 !important;
+}
+
+.profile-content .ant-tabs-tab-active {
+    background-color: #fff;
+    border-right: 3px solid #FF8899 !important;
+}
+
+.profile-content .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+    color: #FF8899 !important;
+    font-weight: bold;
+}
+
+.profile-content .ant-tabs-ink-bar {
+    display: none !important; /* 隐藏默认的蓝条，使用上面的右边框代替 */
+}
+
+.tab-pane-content {
+    padding: 40px;
+    width: 100%;
+}
+
+.section-header {
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 30px;
+    color: #333;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #eee;
+}
+
+/* 常用购票人/地址 卡片样式 */
+.info-card {
+    border: 1px solid #e8e8e8;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    transition: all 0.3s;
+    position: relative;
+}
+.info-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    border-color: #FF8899;
+}
+.info-card-actions {
+    position: absolute;
+    right: 16px;
+    top: 16px;
+}

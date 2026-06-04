@@ -10,6 +10,10 @@ import UserManager from "./pages/Admin/UserManager.jsx";
 import ArtistLibrary from "./pages/Admin/ArtistLibrary.jsx";
 import EventDetail from "./pages/EventDetail/EventDetail.jsx";
 import OrderConfirm from "./pages/Order/OrderConfirm.jsx";
+import SimulatePay from "./pages/Order/SimulatePay.jsx";
+import PaySuccess from './pages/Order/PaySuccess';
+import UserProfile from "./pages/User/UserProfile.jsx";
+import UserOrders from "./pages/User/UserOrders.jsx";
 
 axios.interceptors.request.use(
     (config) => {
@@ -45,6 +49,11 @@ function App() {
                 {/* 认证页面路径 */}
                 <Route path="/auth" element={<Auth />} />
                 <Route path={"/order/confirm"} element={<OrderConfirm />} />
+                <Route path="/simulate-pay" element={<SimulatePay />} />
+                <Route path="/pay/success" element={<PaySuccess />} />
+                <Route path="/user/profile" element={<UserProfile />} />
+                <Route path="/user/orders" element={<UserOrders />} />
+
 
                 <Route path="/admin" element={<AdminLayout />}>
                     {/* 👈 加这一行：当访问 /admin 时，自动重定向到 /admin/events */}

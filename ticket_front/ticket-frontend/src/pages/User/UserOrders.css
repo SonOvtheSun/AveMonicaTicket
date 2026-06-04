@@ -1,0 +1,192 @@
+.orders-page-container {
+    min-height: 100vh;
+    background-color: #f5f5f5;
+}
+
+.orders-content {
+    max-width: 1000px;
+    margin: 30px auto;
+    background: #fff;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.page-header {
+    font-size: 24px;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 20px;
+    border-left: 4px solid #FF8899;
+    padding-left: 12px;
+}
+
+.orders-tabs .ant-tabs-nav {
+    margin-bottom: 24px;
+}
+
+/* 订单卡片整体容器 */
+.order-card {
+    border: 1px solid #ebebeb;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    background: #fff;
+    transition: box-shadow 0.3s, border-color 0.3s;
+    overflow: hidden;
+    cursor: pointer; /* 提示可点击 */
+}
+
+.order-card:hover {
+    box-shadow: 0 4px 12px rgba(255, 136, 153, 0.15);
+    border-color: #FF8899;
+}
+
+/* 顶部：订单号、状态、删除按钮 */
+.order-card-header {
+    background: #fafafa;
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #ebebeb;
+}
+
+.order-no {
+    color: #666;
+    font-size: 13px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.expire-hint {
+    color: #ff4d4f;
+    font-size: 12px;
+}
+
+/* 主体：海报、标题、价格 */
+.order-card-body {
+    padding: 20px;
+    display: flex;
+    gap: 20px;
+}
+
+.order-poster {
+    width: 80px;
+    height: 110px;
+    border-radius: 4px;
+    object-fit: cover;
+    border: 1px solid #f0f0f0;
+}
+
+.order-info {
+    flex: 1;
+    min-width: 0; /* 关键：确保内部的文本超长省略生效 */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.event-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 12px;
+    /* 需求3: 标题过长省略 */
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.event-meta {
+    color: #999;
+    font-size: 13px;
+    line-height: 1.8;
+}
+
+.order-price-sec {
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 100px;
+}
+
+.price-label {
+    color: #999;
+    font-size: 13px;
+}
+
+.price-amount {
+    font-size: 20px;
+    font-weight: bold;
+    color: #333;
+    margin-top: 4px;
+}
+
+/* 底部：操作按钮栏 */
+.order-card-footer {
+    padding: 12px 20px;
+    border-top: 1px solid #ebebeb;
+    display: flex;
+    justify-content: flex-end;
+    background: #fff;
+}
+
+.btn-pink {
+    background-color: #FF8899;
+    border: none;
+}
+
+.btn-pink:hover {
+    background-color: #ff7085;
+}
+
+/* 弹窗内部样式 */
+.modal-base-info p {
+    margin-bottom: 8px;
+    color: #555;
+}
+
+.ticket-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border: 1px solid #f0f0f0;
+    border-radius: 6px;
+    background: #fafafa;
+}
+
+.ticket-name {
+    font-size: 15px;
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: #333;
+}
+
+.ticket-seat {
+    color: #666;
+    font-size: 13px;
+    background: #eee;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.unissued-tag {
+    width: 80px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f5f5f5;
+    color: #999;
+    font-size: 12px;
+    text-align: center;
+    border: 1px dashed #d9d9d9;
+    border-radius: 4px;
+}

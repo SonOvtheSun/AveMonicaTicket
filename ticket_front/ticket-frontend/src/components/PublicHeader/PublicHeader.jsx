@@ -22,7 +22,12 @@ const PublicHeader = () => {
     // 用户下拉菜单
     const userMenuProps = {
         items: [
-            { key: 'account', icon: <User size={16} />, label: '我的账户' },
+            {
+                key: 'account',
+                icon: <User size={16} />,
+                label: '我的账户',
+                onClick: () => navigate('/user/profile')
+            },
             { key: 'orders', icon: <FileText size={16} />, label: '订单' },
             { key: 'favorites', icon: <Heart size={16} />, label: '收藏' },
             { type: 'divider' },

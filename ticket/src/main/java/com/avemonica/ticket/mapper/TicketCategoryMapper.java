@@ -16,4 +16,7 @@ public interface TicketCategoryMapper extends BaseMapper<TicketCategory> {
     @Update("UPDATE tb_ticket_category SET remaining_stock = remaining_stock - #{quantity} " +
             "WHERE id = #{ticketId} AND remaining_stock >= #{quantity}")
     int deductStock(@Param("ticketId") Long ticketId, @Param("quantity") Integer quantity);
+
+    @Update("UPDATE tb_ticket_category SET remaining_stock = remaining_stock + #{quantity} WHERE id = #{id}")
+    void addStock(Long ticketId, Integer quantity);
 }

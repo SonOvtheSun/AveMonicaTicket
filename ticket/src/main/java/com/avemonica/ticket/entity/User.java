@@ -27,4 +27,10 @@ public class User {
     private LocalDateTime updateTime;
     private String idCard;
     private String address;
+    private Integer idType;
+    private String realName;
+    private Integer gender;
+    private LocalDateTime birthday;
+    private String bio;
+    private String email;
 }

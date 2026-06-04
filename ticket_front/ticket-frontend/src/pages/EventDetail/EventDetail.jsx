@@ -18,17 +18,42 @@ const EventDetail = () => {
     const [quantity, setQuantity] = useState(1);
 
     useEffect(() => {
+        // 定义实时拉取库存的函数
+        const fetchRealTimeStock = async () => {
+            try {
+                const stockRes = await axios.get(`/api/event/stock/${id}`);
+                if (stockRes.data.code === 200) {
+                    const stockMap = stockRes.data.data;
+
+                    // 🚨 巧妙更新：只更新 event 状态里的 tickets 的 remainingStock 字段，不会导致页面海报等元素闪烁
+                    setEvent(prevEvent => {
+                        if (!prevEvent) return prevEvent;
+                        const updatedTickets = prevEvent.tickets.map(t => ({
+                            ...t,
+                            remainingStock: stockMap[t.id] !== undefined ? stockMap[t.id] : t.remainingStock
+                        }));
+                        return { ...prevEvent, tickets: updatedTickets };
+                    });
+                }
+            } catch (err) {
+                console.log('拉取实时库存失败', err); // 后台静默失败即可，不打扰用户
+            }
+        };
+
         const fetchDetail = async () => {
             try {
+                // 1. 依然先拉取带缓存的静态大 JSON
                 const res = await axios.get(`/api/event/${id}`);
                 if (res.data.code === 200) {
                     setEvent(res.data.data);
-                    // 默认选中第一个有库存的票档
                     const firstAvailable = res.data.data.tickets?.find(t => t.remainingStock > 0);
                     if (firstAvailable) setSelectedTicket(firstAvailable);
+
+                    // 2. 🚨 静态页面渲染完毕后，立刻单独拉取一次绝对准确的库存
+                    fetchRealTimeStock();
                 } else {
                     message.error(res.data.message);
-                    navigate('/'); // 获取失败退回首页
+                    navigate('/');
                 }
             } catch (err) {
                 message.error('网络请求失败');
@@ -36,8 +61,17 @@ const EventDetail = () => {
                 setLoading(false);
             }
         };
+
         fetchDetail();
-        window.scrollTo(0, 0); // 进页面时回到顶部
+        window.scrollTo(0, 0);
+
+        // 🚨 3. 开启定时轮询：每隔 3 秒自动刷新一次库存！
+        const timer = setInterval(() => {
+            fetchRealTimeStock();
+        }, 3000);
+
+        // 卸载组件时务必清除定时器，防止内存泄漏
+        return () => clearInterval(timer);
     }, [id, navigate]);
 
     // 计算总价
@@ -45,6 +79,12 @@ const EventDetail = () => {
 
     const handleBuy = async () => {
         if (!selectedTicket) return message.warning('请先选择票档');
+
+        // 🚨 动态校验：从实时更新的 event 状态里，找出当前选中票档的最新库存
+        const currentTicketInfo = event.tickets?.find(t => t.id === selectedTicket.id);
+        if (currentTicketInfo && currentTicketInfo.remainingStock <= 0) {
+            return message.error('抱歉，您选中的票档刚刚被抢空了，请选择其他票档！');
+        }
 
         const token = localStorage.getItem('token');
         if (!token) {

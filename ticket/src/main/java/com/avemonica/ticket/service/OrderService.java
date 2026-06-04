@@ -6,6 +6,9 @@ import com.avemonica.ticket.entity.Order;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 
-public interface OrderService extends IService<Order>{
+import java.util.List;
 
+public interface OrderService extends IService<Order>{
+    Order createTicketOrder(Order order, List<Long> spectatorIds);
+    void cancelOrder(Long orderId, Long userId);
 }

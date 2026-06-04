@@ -102,19 +102,29 @@
 }
 
 /* 2. 悬停状态：背景变浅粉，文字变主色粉 */
-.ticket-pill:hover:not(.sold-out) {
-    border-color: #FF8899;
-    background: #fff0f2;
-    color: #FF8899; /* 🚨 新增：悬停时文字变成粉色，彻底解决看不清的问题 */
+.ticket-pill:not(.active):not(.sold-out):hover {
+    border-color: #FF8899 !important;
+    background: #fff0f2 !important;
+}
+
+/* 🚨 核心修复：强行穿透子元素！未选中的有效票档悬停时，里面的文字必须变粉色 */
+.ticket-pill:not(.active):not(.sold-out):hover .ticket-name,
+.ticket-pill:not(.active):not(.sold-out):hover .ticket-price {
+    color: #FF8899 !important;
 }
 
 /* 3. 选中状态：保持不变，依然是粉底白字 */
 .ticket-pill.active {
-    border-color: #FF8899;
-    background: #FF8899;
-    color: white;
+    border-color: #FF8899 !important;
+    background: #FF8899 !important;
+    color: #ffffff !important;
     box-shadow: 0 8px 16px rgba(255, 136, 153, 0.3);
     transform: translateY(-2px);
+}
+
+.ticket-pill.active .ticket-name,
+.ticket-pill.active .ticket-price {
+    color: #ffffff !important;
 }
 
 .ticket-pill.sold-out {

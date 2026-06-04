@@ -1,32 +1,22 @@
 package com.avemonica.ticket.entity;
+
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.Date;
 
 @Data
-@TableName("tb_order")
-public class Order {
+@TableName("tb_spectator") // 假设你的观演人表叫这个
+public class Spectator {
     @TableId(type = IdType.AUTO)
     private Long id;
-
-    private Long eventId;
-
     private Long userId;
-
-    private Long ticketId;
-
-    private BigDecimal payPrice;
-
-    private Integer status;
-
+    private String name;
+    private String idCard;
+    private Integer idType;
+    private Integer isDeleted;
+    private Integer isDefault;
     private LocalDateTime createTime;
-
-    private Integer quantity;
-
-    private String orderNo;
 }
