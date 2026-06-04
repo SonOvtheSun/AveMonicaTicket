@@ -108,7 +108,9 @@ const EventDetail = () => {
                     state: {
                         event: event,
                         selectedTicket: selectedTicket,
-                        quantity: quantity
+                        quantity: quantity,
+                        submitToken: res.data.data
+
                     }
                 });
             } else if (res.data.code === 2001){

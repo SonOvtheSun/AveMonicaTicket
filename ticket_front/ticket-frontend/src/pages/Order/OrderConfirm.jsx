@@ -108,7 +108,8 @@ const OrderConfirm = () => {
                 ticketId: selectedTicket.id,
                 quantity: quantity,
                 spectatorIds: selectedSpectatorIds,
-                paymentMethod: paymentMethod
+                paymentMethod: paymentMethod,
+                submitToken: location.state.submitToken
             }, {
                 headers: { Authorization: `Bearer ${token}` }
             });

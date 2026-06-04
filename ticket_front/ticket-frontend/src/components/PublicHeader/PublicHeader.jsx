@@ -28,7 +28,12 @@ const PublicHeader = () => {
                 label: '我的账户',
                 onClick: () => navigate('/user/profile')
             },
-            { key: 'orders', icon: <FileText size={16} />, label: '订单' },
+            {
+                key: 'orders',
+                icon: <FileText size={16} />,
+                label: '订单' ,
+                onClick: () => navigate('/user/orders')
+            },
             { key: 'favorites', icon: <Heart size={16} />, label: '收藏' },
             { type: 'divider' },
             {
