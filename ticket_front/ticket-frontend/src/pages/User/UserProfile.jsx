@@ -57,9 +57,8 @@ const UserProfile = () => {
             name: province,
             children: Object.entries(cities).map(([city, districts]) => ({
                 name: city,
-                children: Object.entries(districts).map(([district, streets]) => ({
-                    name: district,
-                    children: streets.map(street => ({ name: street }))
+                children: Object.entries(districts).map(district => ({
+                    name: district
                 }))
             }))
         }));

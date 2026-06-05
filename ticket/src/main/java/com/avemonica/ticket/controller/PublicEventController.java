@@ -14,10 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.StringUtils;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -54,13 +51,19 @@ public class PublicEventController {
     private static final String EVENT_CACHE_KEY_PREFIX = "event:detail:";
 
     @GetMapping("/upcoming")
-    public Result<List<Event>> getUpcomingEvents() {
+    public Result<List<Event>> getUpcomingEvents(@RequestParam(required = false, defaultValue = "全国") String city) {
         // 首页列表由于带了 RAND() 随机推荐，通常可以只做 Redis 级别的缓存，或者对热门列表做定时预热。
         // 为了演示核心机制，我们将重点放在下方的【演出详情】接口
         LambdaQueryWrapper<Event> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Event::getStatus, 1)
                 .gt(Event::getShowTime, LocalDateTime.now())
                 .last("ORDER BY RAND() LIMIT 10");
+
+        // 🚨 核心新增：根据前端传来的城市在数据库层面进行精准检索
+        if (StringUtils.hasText(city) && !"全国".equals(city)) {
+            // 使用 like 进行模糊匹配，兼容前端传 "北京" 数据库存 "北京市" 的情况
+            wrapper.like(Event::getCity, city.replace("市", ""));
+        }
 
         List<Event> events = eventService.list(wrapper);
         for (Event event : events) {

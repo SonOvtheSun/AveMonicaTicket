@@ -10,12 +10,15 @@ const EventDetail = () => {
     const { id } = useParams(); // 从 URL 路由获取演出 ID
     const navigate = useNavigate();
 
+
     const [event, setEvent] = useState(null);
     const [loading, setLoading] = useState(true);
 
     // 购票控制状态
     const [selectedTicket, setSelectedTicket] = useState(null);
     const [quantity, setQuantity] = useState(1);
+
+    const isPresale = event?.status === 1;
 
     useEffect(() => {
         // 定义实时拉取库存的函数
@@ -78,6 +81,11 @@ const EventDetail = () => {
     const totalPrice = selectedTicket ? (selectedTicket.price * quantity).toFixed(2) : '0.00';
 
     const handleBuy = async () => {
+        if (isPresale) {
+            message.success('预约成功！演出正式开售前将通过短信/站内信通知您。');
+            return;
+        }
+
         if (!selectedTicket) return message.warning('请先选择票档');
 
         // 🚨 动态校验：从实时更新的 event 状态里，找出当前选中票档的最新库存
@@ -167,7 +175,11 @@ const EventDetail = () => {
                         </div>
                         <div className="info-row">
                             <EnvironmentOutlined className="info-icon" />
-                            <span>{event.venue} | {event.address}</span>
+                            {/* 🚨 补充显示 city 字段，并做一下判空保护，防止老数据没有城市报错 */}
+                            <span>
+                                {event.city ? `${event.city} | ` : ''}
+                                {event.venue} | {event.address}
+                            </span>
                         </div>
 
                         <div style={{ marginTop: '24px', textAlign: 'left' }}>
@@ -214,8 +226,9 @@ const EventDetail = () => {
                                 <span style={{ color: '#FF8899', fontSize: 20 }}>¥</span>
                                 <span className="total-price">{totalPrice}</span>
                             </div>
+                            {/* 🚨 3. 修改：动态渲染按钮文案 */}
                             <Button type="primary" className="buy-btn" onClick={handleBuy}>
-                                立即购票
+                                {isPresale ? '立即预约' : '立即购票'}
                             </Button>
                         </div>
                     </div>

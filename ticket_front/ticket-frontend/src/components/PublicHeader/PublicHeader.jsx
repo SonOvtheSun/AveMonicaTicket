@@ -1,14 +1,64 @@
 import React, { useState, useEffect } from 'react';
-import { Input, Dropdown, Avatar, Button, message } from 'antd';
+import { Input, Dropdown, Avatar, Button, message, Cascader } from 'antd';
 import { Search, MapPin, ChevronDown, User, FileText, Heart, LogOut, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './PublicHeader.css'; // 我们下一步会把相关 CSS 移到这里
+import pcasData from '../../assets/pcas.json';
 
 const PublicHeader = () => {
     const navigate = useNavigate();
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [currentUser, setCurrentUser] = useState(null);
+
+    const [selectedCity, setSelectedCity] = useState(localStorage.getItem('currentCity') || '全国');
+
+    // 🚨 4. 解析 pcas.json，提取“省-市”两级（与发布演出的逻辑一致）
+    const cityOptions = React.useMemo(() => {
+        if (!pcasData) return [];
+
+        const options = Object.keys(pcasData).map(province => {
+            const cityKeys = Object.keys(pcasData[province]);
+            // 处理直辖市
+            const validCities = cityKeys.map(cityKey => {
+                if (cityKey === '市辖区' || cityKey === '县' || cityKey.includes('直辖')) {
+                    return province;
+                }
+                return cityKey;
+            });
+            // 去重
+            const uniqueCities = [...new Set(validCities)];
+            return {
+                value: province,
+                label: province,
+                children: uniqueCities.map(cityName => ({
+                    value: cityName,
+                    label: cityName
+                }))
+            };
+        });
+
+        // 在最前面插入“全国”选项
+        return [
+            { value: '全国', label: '全国' },
+            ...options
+        ];
+    }, []);
+
+    // 🚨 5. 城市切换处理函数
+    const handleCityChange = (value) => {
+        if (value && value.length > 0) {
+            // 如果选的是省市层级，取最后一级（市）；如果选的是全国，就是 '全国'
+            const city = value[value.length - 1];
+            setSelectedCity(city);
+
+            // 可选：将选择的城市存入 localStorage，方便其他页面读取
+            localStorage.setItem('currentCity', city);
+
+            // 可选：如果你想在切换城市后刷新首页，可以抛出一个自定义事件
+            window.location.reload();
+        }
+    };
 
     // 退出登录
     const handleLogout = () => {
@@ -18,6 +68,8 @@ const PublicHeader = () => {
         message.success('已安全退出登录');
         navigate('/'); // 退出后强制回到首页
     };
+
+
 
     // 用户下拉菜单
     const userMenuProps = {
@@ -75,9 +127,16 @@ const PublicHeader = () => {
                         className="home-logo-img"
                         onClick={() => navigate('/')}
                     />
-                    <div className="location-selector">
-                        <MapPin size={16} /> 北京 <ChevronDown size={14} />
-                    </div>
+                    <Cascader
+                        options={cityOptions}
+                        onChange={handleCityChange}
+                        expandTrigger="hover"
+                        placement="bottomLeft"
+                    >
+                        <div className="location-selector" style={{ cursor: 'pointer' }}>
+                            <MapPin size={16} /> {selectedCity} <ChevronDown size={14} />
+                        </div>
+                    </Cascader>
                     <nav className="main-nav">
                         <span className="active" onClick={() => navigate('/')}>首页</span>
                         <span>演出</span>

@@ -3,9 +3,11 @@ package com.avemonica.ticket.controller;
 import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.dto.OrderCreateMessage;
 import com.avemonica.ticket.dto.TicketIssueMessage;
+import com.avemonica.ticket.entity.Event;
 import com.avemonica.ticket.entity.Order;
 import com.avemonica.ticket.entity.OrderSpectator;
 import com.avemonica.ticket.entity.TicketCategory;
+import com.avemonica.ticket.mapper.EventMapper;
 import com.avemonica.ticket.mapper.OrderSpectatorMapper;
 import com.avemonica.ticket.mapper.TicketCategoryMapper;
 import com.avemonica.ticket.service.OrderService;
@@ -48,6 +50,8 @@ public class OrderController {
     private TicketCategoryMapper ticketCategoryMapper;
     @Autowired
     private OrderSpectatorMapper orderSpectatorMapper;
+    @Autowired
+    private EventMapper eventMapper;
 
     // ==========================================
     // 常量与配置区 (消除硬编码)
@@ -62,6 +66,7 @@ public class OrderController {
     private static final String KEY_PURCHASED_SPEC = "event:purchased:spectators:";
     private static final String KEY_SPEC_LOCK = "event:spectator:lock:";
     private static final String KEY_ORDER_RESULT = "order:result:";
+    private static final String KEY_EVENT_STATUS = "event:status:";
 
     private DefaultRedisScript<Long> tokenBucketScript;
     private DefaultRedisScript<Long> spectatorLockScript;
@@ -94,6 +99,20 @@ public class OrderController {
         if (userId == null) return Result.error(502, "登录已过期，请重新登录");
 
         Long eventId = Long.valueOf(params.get("eventId").toString());
+
+        // 🚨 核心校验：基于新的 Integer 状态码进行全面拦截
+        // 状态码：1-预售中；2-在售；3-停售；4-隐藏；-1-不存在
+        // ==========================================
+        Integer eventStatus = getEventStatusWithFallback(eventId);
+        if (eventStatus == -1) {
+            return Result.error("该演出信息不存在！");
+        }
+        if (eventStatus == 1) {
+            return Result.error("该演出正处于预售阶段，暂未开放购票！");
+        }
+        if (eventStatus == 3 || eventStatus == 4) {
+            return Result.error("该演出已停售或下架，无法购票！");
+        }
 
         // 1. 同一账户防刷防连点
         String userIdCountKey = KEY_USER_LOCK + userId;
@@ -128,6 +147,22 @@ public class OrderController {
         Long ticketId = Long.valueOf(params.get("ticketId").toString());
         int quantity = Integer.parseInt(params.get("quantity").toString());
         String clientToken = (String) params.get("submitToken");
+
+
+        // ==========================================
+        // 🚨 核心校验：基于新的 Integer 状态码进行全面拦截
+        // 状态码：1-预售中；2-在售；3-停售；4-隐藏；-1-不存在
+        // ==========================================
+        Integer eventStatus = getEventStatusWithFallback(eventId);
+        if (eventStatus == -1) {
+            return Result.error("该演出信息不存在！");
+        }
+        if (eventStatus == 1) {
+            return Result.error("该演出正处于预售阶段，暂未开放购票！");
+        }
+        if (eventStatus == 3 || eventStatus == 4) {
+            return Result.error("该演出已停售或下架，无法购票！");
+        }
 
         // 1. 防越权 API 绕过校验
         String redisTokenKey = KEY_SUBMIT_TOKEN + userId + ":" + eventId;
@@ -295,6 +330,39 @@ public class OrderController {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 获取演出状态（带数据库兜底及回写机制）
+     * 返回值：1-预售中；2-在售；3-停售；4-隐藏；-1-演出不存在
+     */
+    private Integer getEventStatusWithFallback(Long eventId) {
+        String redisKey = KEY_EVENT_STATUS + eventId;
+
+        // 1. 尝试从 Redis 获取 (Redis 里存的是字符串)
+        String statusStr = redisTemplate.opsForValue().get(redisKey);
+        if (statusStr != null) {
+            return Integer.valueOf(statusStr);
+        }
+
+        // 2. Redis 未查到，从数据库兜底调取
+        Event event = eventMapper.selectById(eventId);
+        if (event != null && event.getStatus() != null) {
+            Integer status = event.getStatus();
+
+            // 3. 顺手回写 Redis，将 int 转为 String 存入，设置10分钟过期
+            redisTemplate.opsForValue().set(
+                    redisKey,
+                    String.valueOf(status),
+                    10,
+                    java.util.concurrent.TimeUnit.MINUTES
+            );
+
+            return status;
+        }
+
+        // 4. 如果数据库也完全没有这条记录，返回 -1
+        return -1;
     }
 
     /**

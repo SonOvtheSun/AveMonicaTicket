@@ -1,10 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Form, Input, DatePicker, Button, Upload, Space, InputNumber, message, Divider, Select, Row, Col, Modal, Avatar, Spin } from 'antd';
+import { Form, Input, DatePicker, Button, Upload, Space, InputNumber, message, Divider, Select, Row, Col, Modal, Avatar, Spin, Cascader } from 'antd';
 import { PlusOutlined, MinusCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import dayjs from 'dayjs'; // 🚨 引入 dayjs，用于解析后端传来的时间字符串以回显
 import './AddEventForm.css';
+import pcasData from '../../assets/pcas.json';
 import ImgCrop from 'antd-img-crop';
+
+// 🚨 2. 解析 JSON：只取前两级 (省 -> 市)，过滤掉区县，并处理直辖市
+const cityOptions = Object.keys(pcasData).map(province => {
+    const cityKeys = Object.keys(pcasData[province]);
+
+    // 处理直辖市的情况：将"市辖区"或"县"替换为省/直辖市名称本身
+    const validCities = cityKeys.map(cityKey => {
+        if (cityKey === '市辖区' || cityKey === '县' || cityKey.includes('直辖')) {
+            return province;
+        }
+        return cityKey;
+    });
+
+    // 去重，防止出现多个同名选项
+    const uniqueCities = [...new Set(validCities)];
+
+    return {
+        value: province,
+        label: province,
+        children: uniqueCities.map(cityName => ({
+            value: cityName,
+            label: cityName
+        }))
+    };
+});
 
 // 🚨 接收父组件传来的 editingRecord
 const AddEventForm = ({ onSuccess, editingRecord }) => {
@@ -156,6 +182,21 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             setPosterFileList(initPoster);
             setDetailsFileList(initDetails);
 
+            let initialCityCascade = [];
+
+            // 🚨 5. 逆向推导：根据城市名找到它所属的省份，用于前端回显
+            if (editingRecord.city) {
+                const targetCity = editingRecord.city;
+                for (const province in pcasData) {
+                    const cities = Object.keys(pcasData[province]);
+                    // 如果普通城市在列表里，或者该城市是直辖市
+                    if (cities.includes(targetCity) || (targetCity === province && (cities.includes('市辖区') || cities.includes('县')))) {
+                        initialCityCascade = [province, targetCity];
+                        break;
+                    }
+                }
+            }
+
             // 3. 处理票档回显 (后端 totalStock 映射回表单的 stock)
             const mappedTickets = editingRecord.tickets && editingRecord.tickets.length > 0
                 ? editingRecord.tickets.map(t => ({
@@ -179,6 +220,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             // 5. 瞬间将所有处理好的数据注入表单
             form.setFieldsValue({
                 ...editingRecord,
+                cityCascade: initialCityCascade,
                 showTime: parsedTime,
                 tickets: mappedTickets,
                 artistIds: artistIds
@@ -298,6 +340,12 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             return;
         }
 
+        let finalCity = '';
+        if (values.cityCascade && values.cityCascade.length > 0) {
+            // 取数组的最后一项（确保拿到的是市）
+            finalCity = values.cityCascade[values.cityCascade.length - 1];
+        }
+
         setLoading(true);
         try {
             const payload = {
@@ -307,6 +355,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 venue: values.venue,
                 address: values.address,
                 status: values.status,
+                city: finalCity,
                 artistIds: values.artistIds,
                 tickets: values.tickets,
                 posterUrl: finalPosterUrl,
@@ -366,6 +415,20 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                     </Form.Item>
                 </Col>
             </Row>
+
+            {/* 🚨 3. 新增城市选择器，限制只能选到市级 */}
+            <Form.Item
+                name="cityCascade"
+                label="所在城市"
+                rules={[{ required: true, message: '请选择演出所在城市' }]}
+            >
+                <Cascader
+                    options={cityOptions}
+                    placeholder="请选择省份与城市"
+                    size="large"
+                    expandTrigger="hover"
+                />
+            </Form.Item>
 
             <Row gutter={16}>
                 <Col span={10}>

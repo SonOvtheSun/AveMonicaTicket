@@ -15,15 +15,30 @@ const Home = () => {
     const [upcomingEvents, setUpcomingEvents] = useState([]);
     const [loadingEvents, setLoadingEvents] = useState(true);
 
+    // 🚨 1. 独立维护当前城市状态，默认从 localStorage 拿
+    const [currentCity, setCurrentCity] = useState(localStorage.getItem('currentCity') || '全国');
 
-    // 初始化：获取用户信息 & 获取即将上演的演出
+    // 🚨 2. 全局监听顶部 Header 派发的城市变化事件
     useEffect(() => {
         document.title = "Ave Monica - 与同好们同聚";
 
+        const handleCityChange = (e) => {
+            setCurrentCity(e.detail);
+        };
+
+        window.addEventListener('cityChanged', handleCityChange);
+        return () => window.removeEventListener('cityChanged', handleCityChange);
+    }, []);
+
+    // 初始化：获取用户信息 & 获取即将上演的演出
+    useEffect(() => {
         // 2. 获取首页演出数据 (调用我们刚才写的公开接口)
         const fetchEvents = async () => {
             try {
-                const res = await axios.get('/api/event/upcoming');
+                console.log("当前请求的城市参数:", currentCity);
+                const res = await axios.get('/api/event/upcoming',{
+                    params: {city:currentCity}
+                });
                 if (res.data.code === 200) {
                     setUpcomingEvents(res.data.data);
                 } else {
@@ -37,7 +52,7 @@ const Home = () => {
         };
 
         fetchEvents();
-    }, []);
+    }, [currentCity]);
 
     // 轮播图自定义箭头
     const CustomPrevArrow = (props) => {
