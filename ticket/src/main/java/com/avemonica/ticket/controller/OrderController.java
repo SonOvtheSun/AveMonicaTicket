@@ -243,6 +243,44 @@ public class OrderController {
         return Result.success("支付成功，正在为您出票");
     }
 
+    /**
+     * 获取我的订单列表
+     */
+    @GetMapping("/list")
+    public Result<List<com.avemonica.ticket.vo.OrderVO>> getOrderList(@RequestParam(defaultValue = "all") String status) {
+        Long userId = null;
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            userId = Long.valueOf(((User) auth.getPrincipal()).getUsername());
+        } catch (Exception e) {
+            return Result.error("登录已过期，请重新登录");
+        }
+
+        List<com.avemonica.ticket.vo.OrderVO> list = orderService.getUserOrderList(userId, status);
+        return Result.success(list);
+    }
+
+    /**
+     * 删除订单 (前端点垃圾桶图标触发)
+     */
+    @PostMapping("/delete/{orderId}")
+    public Result<String> deleteOrder(@PathVariable Long orderId) {
+        Long userId = null;
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            userId = Long.valueOf(((User) auth.getPrincipal()).getUsername());
+        } catch (Exception e) {
+            return Result.error("登录已过期，请重新登录");
+        }
+
+        try {
+            orderService.deleteOrder(orderId, userId);
+            return Result.success("订单删除成功");
+        } catch (Exception e) {
+            return Result.error("删除失败：" + e.getMessage());
+        }
+    }
+
     // ==========================================
     // 私有辅助方法区
     // ==========================================

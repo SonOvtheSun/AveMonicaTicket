@@ -80,6 +80,8 @@ public class Event {
      */
     private Integer auditStatus;
 
+    private String city;
+
     /**
      * 绑定的票档列表（非数据库字段，仅用于向前端返回嵌套数据）
      */

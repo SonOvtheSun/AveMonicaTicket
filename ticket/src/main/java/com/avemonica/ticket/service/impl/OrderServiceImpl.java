@@ -9,6 +9,7 @@ import com.avemonica.ticket.service.EventArtistService;
 import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.OrderService;
 import com.avemonica.ticket.service.UserService;
+import com.avemonica.ticket.vo.OrderVO;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
@@ -26,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -48,6 +50,11 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Autowired
     private OrderSpectatorMapper orderSpectatorMapper;
+
+    @Autowired
+    private EventMapper eventMapper; // 假设你已有 EventMapper
+    @Autowired
+    private OrderTicketMapper orderTicketMapper; // 存储真实电子票的 Mapper (对应 tb_order_ticket)
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -133,5 +140,113 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
     }
 
+    @Override
+    public List<OrderVO> getUserOrderList(Long userId, String status) {
+        // 1. 查询该用户的主订单
+        LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<Order>()
+                .eq(Order::getUserId, userId)
+                .orderByDesc(Order::getCreateTime);
+
+        if (status != null && !"all".equals(status)) {
+            wrapper.eq(Order::getStatus, Integer.parseInt(status));
+        }
+        List<Order> orders = this.list(wrapper);
+
+        // 2. 组装 VO 返回给前端
+        List<OrderVO> voList = new ArrayList<>();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+        for (Order order : orders) {
+            OrderVO vo = new OrderVO();
+            vo.setId(order.getId().toString());
+            vo.setCreateTime(order.getCreateTime() != null ? order.getCreateTime().format(formatter) : "");
+            vo.setStatus(order.getStatus());
+            vo.setTotalAmount(order.getPayPrice());
+
+            // 2.1 组装演出信息
+            Event event = eventMapper.selectById(order.getEventId());
+            OrderVO.EventVO eventVO = new OrderVO.EventVO();
+            if (event != null) {
+                eventVO.setName(event.getTitle());
+                eventVO.setPoster(event.getPosterUrl());
+                eventVO.setCity(event.getCity()); // 假设你的 Event 实体有 city 字段
+                eventVO.setVenue(event.getVenue());
+                eventVO.setTime(event.getShowTime() != null ? event.getShowTime().format(formatter) : "时间待定");
+            }
+            vo.setEvent(eventVO);
+            vo.setEventId(order.getEventId().toString());
+
+            if (order.getStatus() == 3 || order.getStatus() == 6) {
+                // 假设你有 payTime 字段，如果没有可以用 updateTime 代替展示
+                vo.setPaymentMethod("支付宝支付"); // 这里可以根据实际业务取值
+            }
+
+            // 2.2 组装电子票信息
+            List<OrderVO.TicketVO> ticketVOs = new ArrayList<>();
+            TicketCategory category = ticketMapper.selectById(order.getTicketId());
+            String categoryName = category != null ? category.getName() : "未知票档";
+
+            if (order.getStatus() == 1 || order.getStatus() == 2) {
+                // 状态A：待支付或已取消 -> 根本还没出票
+                for (int i = 0; i < order.getQuantity(); i++) {
+                    OrderVO.TicketVO tVO = new OrderVO.TicketVO();
+                    tVO.setId("T_PENDING_" + order.getId() + "_" + i);
+                    tVO.setName(categoryName);
+                    tVO.setCheckStatus(4); // 🚨 触发前端需求11：后台配座中(未出票)
+                    ticketVOs.add(tVO);
+                }
+            } else {
+                // 状态B：已支付 -> 去 tb_order_ticket 查真实的票
+                List<OrderTicket> realTickets = orderTicketMapper.selectList(
+                        new LambdaQueryWrapper<OrderTicket>().eq(OrderTicket::getOrderId, order.getId())
+                );
+
+                if (realTickets.isEmpty()) {
+                    // 状态C：虽然支付了，但 Kafka 后台还没消费完，真实的票还没落库
+                    for (int i = 0; i < order.getQuantity(); i++) {
+                        OrderVO.TicketVO tVO = new OrderVO.TicketVO();
+                        tVO.setId("T_QUEUE_" + order.getId() + "_" + i);
+                        tVO.setName(categoryName);
+                        tVO.setCheckStatus(4); // 🚨 同样展示后台配座中
+                        ticketVOs.add(tVO);
+                    }
+                } else {
+                    // 状态D：完美出票，下发座位号和二维码
+                    for (OrderTicket rt : realTickets) {
+                        OrderVO.TicketVO tVO = new OrderVO.TicketVO();
+                        tVO.setId(rt.getId().toString());
+                        tVO.setName(rt.getTicketName());
+                        tVO.setSeatInfo(rt.getSeatInfo());
+                        tVO.setCheckStatus(rt.getCheckStatus());
+                        tVO.setQrCode(rt.getQrCode()); // 生成的 uuid 核销码
+                        ticketVOs.add(tVO);
+                    }
+                }
+            }
+            vo.setTickets(ticketVOs);
+            voList.add(vo);
+        }
+        return voList;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteOrder(Long orderId, Long userId) {
+        Order order = this.getById(orderId);
+        if (order == null || !order.getUserId().equals(userId)) {
+            throw new RuntimeException("订单不存在或无权操作");
+        }
+
+        // 只有已取消（2）或已完成（3）的订单允许删除。待支付（1）和待检票（6）不能删！
+        if (order.getStatus() == 1 || order.getStatus() == 6) {
+            throw new RuntimeException("当前订单状态不允许删除，请先取消订单");
+        }
+
+        // 执行物理删除 (如果有逻辑删除需求，可以改为 update status)
+        this.removeById(orderId);
+
+        // 清理关系表，防止脏数据
+        orderSpectatorMapper.delete(new LambdaQueryWrapper<OrderSpectator>().eq(OrderSpectator::getOrderId, orderId));
+    }
 
 }

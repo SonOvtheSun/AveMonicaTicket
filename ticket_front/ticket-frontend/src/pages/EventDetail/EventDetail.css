@@ -5,6 +5,7 @@
     min-height: 100vh;
     position: relative;
     padding-bottom: 80px;
+    overflow-x: hidden;
 }
 
 /* 🔥 沉浸式高斯模糊背景 */
@@ -43,21 +44,56 @@
 }
 
 .poster-col {
-    flex: 0 0 320px;
+    flex: 0 0 280px;
+    width: 280px;
+    height: 373px; /* 3:4 比例 */
+    flex-shrink: 0; /* 🚨 核心防御：防止在小屏幕或由于右侧文字过长被挤压缩小 */
+}
+
+/* ==========================================================================
+   🚨 核心修复：利用 .purchase-card 父级进行精准作用域锁定，防止类名冲突污染
+   ========================================================================== */
+
+/* 强行锁死左侧海报容器的物理尺寸 */
+.purchase-card .poster-col {
+    flex: 0 0 280px !important;
+    width: 280px !important;
+    height: 393px !important; /* 严格维持 3:4 黄金比例 */
+    flex-shrink: 0 !important;
+}
+
+/* 强行让海报图片在容器内 100% 满格填充 */
+.purchase-card .detail-poster {
+    width: 100% !important;
+    height: 100% !important;
+    display: block !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15) !important;
+    object-fit: cover !important; /* 确保图片拉伸不Url变形 */
+}
+
+/* 强行修正右侧信息栏靠左对齐，不受全局居中样式污染 */
+.purchase-card .info-col {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    text-align: left !important;
 }
 
 .detail-poster {
     width: 100%;
+    height: 100%;
+    display: block; /* 防止 img 标签底部的留白幽灵像素 */
     border-radius: 12px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.15);
     object-fit: cover;
-    aspect-ratio: 3/4;
 }
 
 .info-col {
     flex: 1;
     display: flex;
     flex-direction: column;
+    text-align: left; /* 🚨 核心防御：强行覆盖外层的 text-align: center 污染，让标题和信息靠左对齐 */
 }
 
 .event-title-large {
@@ -118,13 +154,22 @@
     border-color: #FF8899 !important;
     background: #FF8899 !important;
     color: #ffffff !important;
-    box-shadow: 0 8px 16px rgba(255, 136, 153, 0.3);
-    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 136, 153, 0.3);
+    /* 重置一下基础位移，把动画空间留给 hover */
+    transform: translateY(0) scale(1);
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .ticket-pill.active .ticket-name,
 .ticket-pill.active .ticket-price {
     color: #ffffff !important;
+}
+
+/* 🚨 4. 新增：选中状态下的 Hover 交互反馈 */
+.ticket-pill.active:hover {
+    transform: translateY(-4px) scale(1.03); /* 向上浮起并略微放大 */
+    box-shadow: 0 10px 24px rgba(255, 136, 153, 0.5); /* 阴影加深扩散 */
+    filter: brightness(1.05); /* 颜色稍微提亮一点点 */
 }
 
 .ticket-pill.sold-out {
