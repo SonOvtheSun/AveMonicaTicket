@@ -56,7 +56,7 @@ public class Event {
     private String detailsUrl;
 
     /**
-     * 演出状态 (0:下架, 1:在售, 2:预售)
+     * 演出状态 (1.预售中；2.在售；3.停售；4.隐藏)
      */
     private Integer status;
 
@@ -81,6 +81,12 @@ public class Event {
     private Integer auditStatus;
 
     private String city;
+
+    /**
+     * 开票时间（仅在 status = 2 预售时必须设定）
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
+    private LocalDateTime saleTime;
 
     /**
      * 绑定的票档列表（非数据库字段，仅用于向前端返回嵌套数据）

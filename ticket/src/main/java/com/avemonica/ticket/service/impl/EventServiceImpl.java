@@ -66,6 +66,7 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
             event.setStatus(Event.STATUS_OFFLINE);
         }
 
+
         this.save(event);
 
         // 2. 批量保存票档 tb_ticket_category

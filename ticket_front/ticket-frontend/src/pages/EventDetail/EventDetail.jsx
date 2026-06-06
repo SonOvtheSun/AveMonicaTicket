@@ -4,6 +4,7 @@ import { Spin, message, Row, Col, Avatar, Button, InputNumber } from 'antd';
 import { CalendarOutlined, EnvironmentOutlined, UserOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import './EventDetail.css';
+import dayjs from 'dayjs';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
 
 const EventDetail = () => {
@@ -18,7 +19,12 @@ const EventDetail = () => {
     const [selectedTicket, setSelectedTicket] = useState(null);
     const [quantity, setQuantity] = useState(1);
 
+    // 在组件内顶部状态声明区追加：
+    const [countdown, setCountdown] = useState({ days: 0, hours: '00', minutes: '00', seconds: '00' });
+    const [saleAvailable, setSaleAvailable] = useState(false);
+
     const isPresale = event?.status === 1;
+
 
     useEffect(() => {
         // 定义实时拉取库存的函数
@@ -76,6 +82,54 @@ const EventDetail = () => {
         // 卸载组件时务必清除定时器，防止内存泄漏
         return () => clearInterval(timer);
     }, [id, navigate]);
+
+    useEffect(() => {
+        // 如果演出不存在，或者状态不是 1 (已上架)，直接不能买
+        if (!event || event.status !== 1) {
+            setSaleAvailable(false);
+            return;
+        }
+
+        if (!event.saleTime || dayjs().isAfter(dayjs(event.saleTime)) || dayjs().isSame(dayjs(event.saleTime))) {
+            setSaleAvailable(true);
+            return;
+        }
+
+        const targetTime = dayjs(event.saleTime);
+        setSaleAvailable(false);
+
+        const updateCountdown = () => {
+            const now = dayjs();
+            const diffMs = targetTime.diff(now);
+
+            if (diffMs <= 0) {
+                setCountdown({ days: 0, hours: '00', minutes: '00', seconds: '00' });
+                setSaleAvailable(true);
+                clearInterval(timer);
+                // fetchRealTimeStock(); (交由轮询处理)
+            } else {
+                const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+
+                // 🚨 分别储存，补齐两位数
+                setCountdown({
+                    days,
+                    hours: hours.toString().padStart(2, '0'),
+                    minutes: minutes.toString().padStart(2, '0'),
+                    seconds: seconds.toString().padStart(2, '0')
+                });
+                setSaleAvailable(false);
+            }
+        };
+
+        updateCountdown();
+        const timer = setInterval(updateCountdown, 1000);
+
+        return () => clearInterval(timer);
+    }, [event]);
+
 
     // 计算总价
     const totalPrice = selectedTicket ? (selectedTicket.price * quantity).toFixed(2) : '0.00';
@@ -182,6 +236,43 @@ const EventDetail = () => {
                             </span>
                         </div>
 
+                        {/* 🚨 新增：高颜值的预售倒计时横幅 */}
+                        {event.status === 1 && !saleAvailable && (
+                            <div className="presale-countdown-card">
+                                <div className="countdown-top-line">
+                                    <span className="countdown-prefix">距离正式开抢还剩</span>
+                                </div>
+
+                                <div className="countdown-main">
+                                    <span className="countdown-only">仅</span>
+
+                                    <div className="countdown-group">
+                                        <span className="countdown-num">{String(countdown.days).padStart(2, '0')}</span>
+                                        <span className="countdown-unit">天</span>
+                                    </div>
+
+                                    <div className="countdown-group">
+                                        <span className="countdown-num">{countdown.hours}</span>
+                                        <span className="countdown-unit">时</span>
+                                    </div>
+
+                                    <div className="countdown-group">
+                                        <span className="countdown-num">{countdown.minutes}</span>
+                                        <span className="countdown-unit">分</span>
+                                    </div>
+
+                                    <div className="countdown-group">
+                                        <span className="countdown-num">{countdown.seconds}</span>
+                                        <span className="countdown-unit">秒</span>
+                                    </div>
+                                </div>
+
+                                <div className="countdown-sale-time">
+                                    {event.saleTime ? dayjs(event.saleTime).format('MM月DD日 HH:mm开抢') : '即将开抢'}
+                                </div>
+                            </div>
+                        )}
+
                         <div style={{ marginTop: '24px', textAlign: 'left' }}>
                             <div style={{ fontWeight: 'bold', color: '#333', marginBottom: 8 }}>选择票档</div>
                             <div className="tickets-container">
@@ -227,8 +318,25 @@ const EventDetail = () => {
                                 <span className="total-price">{totalPrice}</span>
                             </div>
                             {/* 🚨 3. 修改：动态渲染按钮文案 */}
-                            <Button type="primary" className="buy-btn" onClick={handleBuy}>
-                                {isPresale ? '立即预约' : '立即购票'}
+                            <Button
+                                type="primary"
+                                className="action-buy-btn"
+                                onClick={handleBuy}
+                                style={{
+                                    // 样式控制：如果非 1，说明停售/隐藏，直接变灰
+                                    background: event.status !== 1
+                                        ? '#ccc'
+                                        : 'linear-gradient(135deg, #FF8899, #ff6b80)',
+                                    boxShadow: event.status !== 1 ? 'none' : '0 4px 12px rgba(255, 136, 153, 0.4)',
+                                    border: 'none',
+                                    // 如果状态是 3 或 4，按钮禁用
+                                    pointerEvents: event.status !== 1 ? 'none' : 'auto'
+                                }}
+                            >
+                                {/* 🚨 按钮文案终极版：动态计算 */}
+                                {event.status === 1
+                                    ? (!saleAvailable ? '立即预约' : '立即购票')
+                                    : '已停售'}
                             </Button>
                         </div>
                     </div>

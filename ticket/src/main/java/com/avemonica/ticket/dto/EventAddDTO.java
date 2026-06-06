@@ -16,6 +16,7 @@ public class EventAddDTO {
     private String detailsUrl;     // 详情图
     private Integer status;        // 状态 (默认可传2:预售)
     private String city;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8") private LocalDateTime saleTime;
 
     private List<Long> artistIds;            // 多选：参演艺人ID列表
     private List<TicketCategoryDTO> tickets; // 动态增减：多档票价列表

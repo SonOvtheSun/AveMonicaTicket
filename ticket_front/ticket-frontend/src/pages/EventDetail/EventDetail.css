@@ -4,8 +4,8 @@
     background-color: #fafafa;
     min-height: 100vh;
     position: relative;
-    padding-bottom: 80px;
-    overflow-x: hidden;
+    padding-bottom: 80px; /* 给底部悬浮栏留出空间 */
+    overflow-x: hidden; /* 防止高斯模糊背景造成横向溢出 */
 }
 
 /* 🔥 沉浸式高斯模糊背景 */
@@ -200,6 +200,62 @@
     justify-content: space-between;
 }
 
+.action-buy-btn {
+    width: 172px !important;
+    height: 54px !important;
+    padding: 0 !important;
+    border-radius: 999px !important;
+    border: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    color: #fff !important;
+    line-height: 1 !important;
+    box-shadow: 0 10px 22px rgba(255, 120, 145, 0.28) !important;
+    transition: all 0.25s ease !important;
+}
+
+/* 保证 antd 按钮里的文字也是白色 */
+.action-buy-btn > span {
+    color: #fff !important;
+    font-weight: 700 !important;
+}
+
+/* hover 效果 */
+.action-buy-btn:hover {
+    transform: translateY(-1px) scale(1.02) !important;
+    filter: brightness(1.03) !important;
+    border: none !important;
+    color: #fff !important;
+}
+
+.action-buy-btn:hover > span {
+    color: #fff !important;
+}
+
+/* 点击效果 */
+.action-buy-btn:active {
+    transform: scale(0.98) !important;
+}
+
+/* 聚焦时不要出现 antd 默认蓝边 */
+.action-buy-btn:focus,
+.action-buy-btn:focus-visible {
+    outline: none !important;
+    box-shadow: 0 10px 22px rgba(255, 120, 145, 0.28) !important;
+    border: none !important;
+}
+
+/* 已停售时更像禁用态 */
+.action-buy-btn[style*="#ccc"] {
+    color: #fff !important;
+    opacity: 0.9;
+    cursor: not-allowed !important;
+    transform: none !important;
+}
+
 .total-price {
     font-size: 32px;
     color: #FF8899;
@@ -258,4 +314,171 @@
     margin: 0 auto;
     display: block;
     border-radius: 8px;
+}
+
+/* =========================
+   预售倒计时 - 紧凑小号版
+   ========================= */
+.presale-countdown-card {
+    margin-top: 14px;
+    margin-bottom: 6px;
+    padding: 14px 18px 14px;
+    border-radius: 16px;
+    background:
+            linear-gradient(135deg, rgba(255, 226, 236, 0.95), rgba(255, 248, 244, 0.98)),
+            linear-gradient(135deg, #ffe3ea, #fff6f2);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    box-shadow:
+            0 10px 22px rgba(255, 136, 153, 0.12),
+            inset 0 1px 0 rgba(255,255,255,0.85);
+    position: relative;
+    overflow: hidden;
+}
+
+.presale-countdown-card::before {
+    content: '';
+    position: absolute;
+    top: -30px;
+    left: -30px;
+    width: 120px;
+    height: 120px;
+    background: radial-gradient(circle, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0) 70%);
+    pointer-events: none;
+}
+
+.presale-countdown-card::after {
+    content: '';
+    position: absolute;
+    right: -30px;
+    top: -20px;
+    width: 120px;
+    height: 120px;
+    background: radial-gradient(circle, rgba(255, 192, 203, 0.14) 0%, rgba(255, 192, 203, 0) 72%);
+    pointer-events: none;
+}
+
+.countdown-top-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    color: #7f6d73;
+    font-size: 13px;
+    font-weight: 500;
+    position: relative;
+    z-index: 1;
+}
+
+.countdown-hourglass {
+    font-size: 14px;
+    line-height: 1;
+}
+
+.countdown-prefix {
+    letter-spacing: 0;
+}
+
+.countdown-main {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    position: relative;
+    z-index: 1;
+}
+
+.countdown-only {
+    font-size: 16px;
+    font-weight: 700;
+    color: #5c4a50;
+    margin-right: 0;
+}
+
+.countdown-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.countdown-num {
+    min-width: 34px;
+    height: 34px;
+    padding: 0 8px;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #ff2d8f 0%, #ff4d9d 100%);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1;
+    box-shadow:
+            0 6px 12px rgba(255, 45, 143, 0.18),
+            inset 0 1px 0 rgba(255,255,255,0.25);
+    font-variant-numeric: tabular-nums;
+}
+
+.countdown-unit {
+    font-size: 16px;
+    font-weight: 700;
+    color: #4d4346;
+}
+
+.countdown-sale-time {
+    margin-top: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 18px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.72);
+    color: #7f7377;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.9);
+    position: relative;
+    z-index: 1;
+}
+
+.presale-countdown-card:hover {
+    transform: translateY(-1px);
+    transition: all 0.25s ease;
+}
+
+@media (max-width: 768px) {
+    .presale-countdown-card {
+        padding: 12px 14px;
+        border-radius: 14px;
+    }
+
+    .countdown-top-line {
+        font-size: 12px;
+    }
+
+    .countdown-main {
+        gap: 8px;
+    }
+
+    .countdown-only {
+        font-size: 15px;
+    }
+
+    .countdown-num {
+        min-width: 30px;
+        height: 30px;
+        font-size: 18px;
+        border-radius: 8px;
+        padding: 0 6px;
+    }
+
+    .countdown-unit {
+        font-size: 14px;
+    }
+
+    .countdown-sale-time {
+        margin-top: 10px;
+        font-size: 12px;
+        padding: 7px 14px;
+    }
 }

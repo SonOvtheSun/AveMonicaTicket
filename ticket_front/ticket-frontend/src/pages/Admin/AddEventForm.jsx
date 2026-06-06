@@ -197,6 +197,17 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 }
             }
 
+            form.setFieldsValue({
+                ...editingRecord,
+                cityCascade: initialCityCascade,
+
+                // 🚨 新增：演出时间回显转换（你原本应该已经写了 showTime 的转换）
+                showTime: editingRecord.showTime ? dayjs(editingRecord.showTime) : null,
+
+                // 🚨 新增：开票时间回显转换
+                saleTime: editingRecord.saleTime ? dayjs(editingRecord.saleTime) : null,
+            });
+
             // 3. 处理票档回显 (后端 totalStock 映射回表单的 stock)
             const mappedTickets = editingRecord.tickets && editingRecord.tickets.length > 0
                 ? editingRecord.tickets.map(t => ({
@@ -350,12 +361,16 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         try {
             const payload = {
                 title: values.title,
-                // 这里要判断一下，因为 dayjs 解析后的可能含有 format 方法
+                // 演出时间格式化
                 showTime: values.showTime && values.showTime.format ? values.showTime.format('YYYY-MM-DD HH:mm:ss') : values.showTime,
+
+                // 🚨 新增：开票时间格式化（带判空保护）
+                saleTime: values.saleTime && values.saleTime.format ? values.saleTime.format('YYYY-MM-DD HH:mm:ss') : values.saleTime,
+
+                city: finalCity,
                 venue: values.venue,
                 address: values.address,
                 status: values.status,
-                city: finalCity,
                 artistIds: values.artistIds,
                 tickets: values.tickets,
                 posterUrl: finalPosterUrl,
@@ -407,14 +422,27 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 <Col span={12}>
                     <Form.Item name="status" label="项目状态 (将在通过审核后生效)" rules={[{ required: true }]}>
                         <Select size="large" options={[
-                            { label: '预售中', value: 1 },
-                            { label: '在售中', value: 2 },
+                            { label: '上架（含预售/在售）', value: 1 },
                             { label: '已停售', value: 3 },
                             { label: '隐藏', value: 4 },
                         ]} />
                     </Form.Item>
                 </Col>
             </Row>
+
+            <Form.Item
+                name="saleTime"
+                label="预开票时间"
+                // 🚨 移除之前强制必填的 validator 逻辑，现在完全变成可选填
+            >
+                <DatePicker
+                    showTime
+                    format="YYYY-MM-DD HH:mm:ss"
+                    style={{ width: '100%' }}
+                    size="large"
+                    placeholder="选填：若填写则发布后进入预售倒计时；若留空则立即开售"
+                />
+            </Form.Item>
 
             {/* 🚨 3. 新增城市选择器，限制只能选到市级 */}
             <Form.Item

@@ -88,7 +88,7 @@ public class AdminEventController {
         if (isPass) {
             // 场景 A：审核通过
             event.setAuditStatus(1); // 1: 审核通过
-            event.setStatus(3);      // 顺便将显示状态初始化为 1: 预售中
+            event.setStatus(3);      // 顺便将显示状态初始化为 3: 停售
         } else {
             // 场景 B：审核驳回
             event.setAuditStatus(2); // 2: 已驳回
@@ -96,7 +96,7 @@ public class AdminEventController {
         }
 
         eventService.updateById(event);
-        return Result.success(isPass ? "演出项目已审核通过并转为预售状态" : "已驳回该演出项目的发布申请");
+        return Result.success(isPass ? "演出项目已审核通过" : "已驳回该演出项目的发布申请");
     }
 
     @PutMapping("/status/{id}")
@@ -111,6 +111,7 @@ public class AdminEventController {
         }
         event.setStatus(status);
         eventService.updateById(event);
+
 
         return Result.success("状态更新成功", null);
     }

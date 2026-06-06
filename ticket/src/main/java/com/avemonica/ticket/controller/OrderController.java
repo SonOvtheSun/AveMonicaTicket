@@ -25,6 +25,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -100,18 +101,20 @@ public class OrderController {
 
         Long eventId = Long.valueOf(params.get("eventId").toString());
 
-        // 🚨 核心校验：基于新的 Integer 状态码进行全面拦截
-        // 状态码：1-预售中；2-在售；3-停售；4-隐藏；-1-不存在
-        // ==========================================
-        Integer eventStatus = getEventStatusWithFallback(eventId);
-        if (eventStatus == -1) {
+        // 🚨 核心拦截 1：直接获取 Event 实体，以便同时获取状态和开票时间
+        Event event = eventMapper.selectById(eventId);
+        if (event == null) {
             return Result.error("该演出信息不存在！");
         }
-        if (eventStatus == 1) {
-            return Result.error("该演出正处于预售阶段，暂未开放购票！");
+
+        // 🚨 核心拦截 2：状态拦截 (1-上架/预售/在售，3-停售，4-隐藏)
+        if (event.getStatus() != 1) {
+            return Result.error("该演出尚未上架或已停售，无法购票！");
         }
-        if (eventStatus == 3 || eventStatus == 4) {
-            return Result.error("该演出已停售或下架，无法购票！");
+
+        // 🚨 核心拦截 3：基于时间的惰性风控计算 (状态为1，但时间还没到)
+        if (event.getSaleTime() != null && LocalDateTime.now().isBefore(event.getSaleTime())) {
+            return Result.error("该演出尚未正式开售，请等待倒计时结束！");
         }
 
         // 1. 同一账户防刷防连点
@@ -135,7 +138,9 @@ public class OrderController {
         String submitToken = generateToken();
         redisTemplate.opsForValue().set(KEY_SUBMIT_TOKEN + userId + ":" + eventId, submitToken, 30, TimeUnit.MINUTES);
 
-        return Result.success("恭喜进入订单确认页");
+        // 🚨 核心修复：前端 EventDetail.jsx 中是通过 res.data.data 来获取 submitToken 的
+        // 所以必须把 submitToken 放到 success 的数据载荷中返回
+        return Result.success("恭喜进入订单确认页", submitToken);
     }
 
     @PostMapping("/create")
