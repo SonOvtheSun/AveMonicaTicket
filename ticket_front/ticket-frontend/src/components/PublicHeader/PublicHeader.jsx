@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Input, Dropdown, Avatar, Button, message, Cascader } from 'antd';
 import { Search, MapPin, ChevronDown, User, FileText, Heart, LogOut, Settings } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -66,7 +66,7 @@ const PublicHeader = () => {
             localStorage.setItem('currentCity', city);
 
             // 可选：如果你想在切换城市后刷新首页，可以抛出一个自定义事件
-            window.location.reload();
+            window.dispatchEvent(new CustomEvent('headerCityChange', { detail: city }));
         }
     };
 

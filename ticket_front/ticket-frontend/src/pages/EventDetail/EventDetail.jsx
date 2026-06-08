@@ -36,6 +36,29 @@ const EventDetail = () => {
     const hidePurchaseOptions = isStatus3Future;
     const sortedTickets = sortTicketsByPriceAsc(event?.tickets || []);
 
+    // 🚨 新增：专门监听 Header 城市切换的广播
+    useEffect(() => {
+        const handleHeaderSync = (e) => {
+            const newHeaderCity = e.detail; // 从事件中取出 Header 选中的城市
+
+            // 逻辑转换：Header的"全国" -> 筛选栏的"全部"
+            if (newHeaderCity === '全国' || !newHeaderCity) {
+                setCity('全部');
+            } else {
+                setCity(newHeaderCity);
+
+                // 可选细节优化：如果选了一个不在 CITY_LIST 里的冷门城市，
+                // 可以考虑把它动态加到 CITY_LIST 里，或者直接 setCity 也能正常搜出来
+            }
+        };
+
+        // 打开收音机，监听频道
+        window.addEventListener('headerCityChange', handleHeaderSync);
+
+        // 组件卸载时，关闭收音机防止内存泄漏
+        return () => window.removeEventListener('headerCityChange', handleHeaderSync);
+    }, []);
+
 
     useEffect(() => {
         // 定义实时拉取库存的函数

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { DatePicker, Pagination, Spin, Empty, ConfigProvider } from 'antd';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
@@ -22,6 +22,13 @@ const EventsPage = () => {
     // 从导航栏搜索跳过来时，可能携带 keyword
     const searchParams = new URLSearchParams(location.search);
     const initialKeyword = searchParams.get('keyword') || '';
+    // 初始化时，尝试读取全局城市（注意：Header 里的"全国"对应筛选栏的"全部"）
+
+    const getInitialCity = () => {
+        let globalCity = localStorage.getItem('currentCity') || '全国';
+        globalCity = globalCity.replace('市', ''); // 把"北京市"变成"北京"
+        return globalCity === '全国' ? '全部' : globalCity;
+    };
 
     // 筛选状态
     const [city, setCity] = useState('全部');
@@ -63,6 +70,28 @@ const EventsPage = () => {
         }
     };
 
+    // 🚨 新增：专门监听 Header 城市切换的广播
+    useEffect(() => {
+        const handleHeaderSync = (e) => {
+            let newHeaderCity = e.detail;
+            if (newHeaderCity === '全国' || !newHeaderCity) {
+                setCity('全部');
+            } else {
+                newHeaderCity = newHeaderCity.replace('市', ''); // 统一处理
+                setCity(newHeaderCity);
+            }
+        };
+        window.addEventListener('headerCityChange', handleHeaderSync);
+        return () => window.removeEventListener('headerCityChange', handleHeaderSync);
+    }, []);
+
+    const dynamicCityList = useMemo(() => {
+        if (city !== '全部' && !CITY_LIST.includes(city)) {
+            return [...CITY_LIST, city];
+        }
+        return CITY_LIST;
+    }, [city]);
+
     // 当任何筛选条件发生变化时，回到第一页重新拉取
     useEffect(() => {
         fetchEvents(1);
@@ -101,7 +130,8 @@ const EventsPage = () => {
                         <div className="filter-row">
                             <span className="filter-label">演出城市</span>
                             <div className="filter-options">
-                                {CITY_LIST.map(c => (
+                                {/* 🚨 换成 dynamicCityList */}
+                                {dynamicCityList.map(c => (
                                     <span key={c} className={`filter-item ${city === c ? 'active' : ''}`} onClick={() => setCity(c)}>
                                         {c}
                                     </span>
