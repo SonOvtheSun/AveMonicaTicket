@@ -14,6 +14,7 @@ import SimulatePay from "./pages/Order/SimulatePay.jsx";
 import PaySuccess from './pages/Order/PaySuccess';
 import UserProfile from "./pages/User/UserProfile.jsx";
 import UserOrders from "./pages/User/UserOrders.jsx";
+import BannerManager from "./pages/Admin/BannerManager.jsx";
 
 axios.interceptors.request.use(
     (config) => {
@@ -64,6 +65,7 @@ function App() {
                     <Route path="audit" element={<AuditManager />} />
                     <Route path="users" element={<UserManager />} />
                     <Route path="artists" element={<ArtistLibrary />} />
+                    <Route path="banners" element={<BannerManager />} />
                 </Route>
             </Routes>
         </BrowserRouter>

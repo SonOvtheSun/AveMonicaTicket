@@ -255,11 +255,30 @@ const AuditManager = () => {
                 {detailRecord && detailType === 'event' && (
                     <Descriptions column={2} bordered size="small">
                         <Descriptions.Item label="演出标题" span={2}>{detailRecord.title}</Descriptions.Item>
+
+                        {/* 🚨 新增：演出城市与场馆对齐显示 */}
+                        <Descriptions.Item label="演出城市">
+                            <Tag color="blue">{detailRecord.city || '未指定'}</Tag>
+                        </Descriptions.Item>
                         <Descriptions.Item label="场馆">{detailRecord.venue}</Descriptions.Item>
-                        <Descriptions.Item label="时间">{detailRecord.showTime ? dayjs(detailRecord.showTime).format('YYYY-MM-DD HH:mm') : ''}</Descriptions.Item>
+
+                        {/* 🚨 新增：将演出时间和开票时间放在同一行对比显示 */}
+                        <Descriptions.Item label="演出时间">
+                            {detailRecord.showTime ? dayjs(detailRecord.showTime).format('YYYY-MM-DD HH:mm:ss') : '待定'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="预开票时间">
+                            {detailRecord.saleTime ? (
+                                <span style={{ color: '#e60026', fontWeight: 'bold' }}>
+                                    {dayjs(detailRecord.saleTime).format('YYYY-MM-DD HH:mm:ss')}
+                                </span>
+                            ) : (
+                                <span style={{ color: '#999' }}>待定</span>
+                            )}
+                        </Descriptions.Item>
+
                         <Descriptions.Item label="详细地址" span={2}>{detailRecord.address}</Descriptions.Item>
 
-                        {/* 👇 新增：完美对齐看板样式的参演音乐人标签显示 */}
+                        {/* 👇 保持不变的参演音乐人显示逻辑 */}
                         <Descriptions.Item label="参演音乐人" span={2}>
                             {detailRecord.artists && detailRecord.artists.length > 0 ? (
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>

@@ -15,6 +15,8 @@ const Home = () => {
     const [upcomingEvents, setUpcomingEvents] = useState([]);
     const [loadingEvents, setLoadingEvents] = useState(true);
 
+    const [banners, setBanners] = useState([]);
+
     // 🚨 1. 独立维护当前城市状态，默认从 localStorage 拿
     const [currentCity, setCurrentCity] = useState(localStorage.getItem('currentCity') || '全国');
 
@@ -51,7 +53,20 @@ const Home = () => {
             }
         };
 
+        const fetchBanners = async () => {
+            try {
+                // 公开接口，后端只需返回 tb_banner 中 startTime <= now() 且 endTime >= now() 的数据
+                const res = await axios.get('/api/event/banner/active');
+                if (res.data.code === 200) {
+                    setBanners(res.data.data);
+                }
+            } catch (error) {
+                console.error('拉取横幅失败', error);
+            }
+        };
+
         fetchEvents();
+        fetchBanners();
     }, [currentCity]);
 
     // 轮播图自定义箭头
@@ -86,19 +101,25 @@ const Home = () => {
             <Content className="home-content">
                 {/* --- 顶部 Banner --- */}
                 <div className="banner-section">
-                    <Carousel
-                        autoplay
-                        effect="fade"
-                        arrows={true}
-                        prevArrow={<CustomPrevArrow />}
-                        nextArrow={<CustomNextArrow />}
-                    >
-                        <div className="banner-slide">
-                            <div className="banner-img" style={{ backgroundImage: `url(https://picsum.photos/1200/200?random=10)` }} />
-                        </div>
-                        <div className="banner-slide">
-                            <div className="banner-img" style={{ backgroundImage: `url(https://picsum.photos/1200/200?random=11)` }} />
-                        </div>
+                    <Carousel autoplay effect="fade" arrows={true} prevArrow={<CustomPrevArrow />} nextArrow={<CustomNextArrow />}>
+                        {Array.from({ length: 10 }).map((_, index) => {
+                            // 尝试获取当前索引的后端 banner 数据
+                            const banner = banners[index];
+
+                            return (
+                                <div key={banner?.id || `placeholder-${index}`} className="banner-slide">
+                                    <div
+                                        className="banner-img"
+                                        style={{
+                                            // 如果有后端海报则用海报，否则使用指定的默认占位图
+                                            backgroundImage: `url(${banner?.posterUrl || '/uploads/poster/defalut.png'})`,
+                                            cursor: banner?.eventId ? 'pointer' : 'default'
+                                        }}
+                                        onClick={() => banner?.eventId && navigate(`/event/${banner.eventId}`)}
+                                    />
+                                </div>
+                            );
+                        })}
                     </Carousel>
                 </div>
 

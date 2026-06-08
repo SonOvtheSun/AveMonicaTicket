@@ -10,7 +10,8 @@ import {
     User as UserIcon,
     Home,
     CheckSquare,
-    MessageSquare, Mic2// 新增：用于审核菜单的图标
+    MessageSquare, Mic2,
+    Projector// 新增：用于审核菜单的图标
 } from 'lucide-react';
 import { useNavigate, Outlet, useLocation } from 'react-router-dom';
 import axios from 'axios';
@@ -80,6 +81,12 @@ const AdminLayout = () => {
             key: '/admin/audit',
             icon: <CheckSquare size={18} />,
             label: '演出与艺人审核'
+        },
+
+        (hasAccess('banner:manage') || isSuperAdmin) && {
+            key: '/admin/banners',
+            icon: <Projector size={18} />,
+            label: '首页横幅管理'
         },
         hasAccess('comment:manage') && {
             key: '/admin/comments',

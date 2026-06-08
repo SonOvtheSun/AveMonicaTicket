@@ -59,13 +59,22 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         if (isSuperAdmin) {
             // 超管：直接通过，状态由前端传过来的决定 (默认预售)
             event.setAuditStatus(Event.AUDIT_APPROVED);
-            if (event.getStatus() == null) event.setStatus(Event.STATUS_PRESALE);
+            if (event.getStatus() == null) event.setStatus(1);
         } else {
             // 普通管理员：强制待审核，且强制设定为下架状态 (不可见)
             event.setAuditStatus(Event.AUDIT_PENDING);
             event.setStatus(Event.STATUS_OFFLINE);
         }
+        if (event.getStatus() != null && event.getStatus() == 1 && event.getSaleTime() == null) {
+            throw new BusinessException("发布失败：演出设置为上架状态时，必须明确设定开票时间！");
+        }
 
+        if (event.getSaleTime() != null && event.getShowTime() != null) {
+            // 如果开票时间 晚于 (演出时间 - 24小时)
+            if (event.getSaleTime().isAfter(event.getShowTime().minusHours(24))) {
+                throw new BusinessException("风控拦截：开票时间必须早于演出时间至少 24 小时，请重新设置！");
+            }
+        }
 
         this.save(event);
 
@@ -117,9 +126,20 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
         if(!isSuperAdmin){
             event.setAuditStatus(Event.AUDIT_PENDING);
-            event.setStatus(Event.STATUS_HIDDEN);
+            event.setStatus(4);
         } else{
             event.setAuditStatus(event.getAuditStatus());
+        }
+
+        if (newEvent.getStatus() != null && newEvent.getStatus() == 1 && newEvent.getSaleTime() == null) {
+            throw new BusinessException("修改失败：演出设置为上架状态时，必须明确设定开票时间！");
+        }
+
+        if (event.getSaleTime() != null && event.getShowTime() != null) {
+            // 如果开票时间 晚于 (演出时间 - 24小时)
+            if (event.getSaleTime().isAfter(event.getShowTime().minusHours(24))) {
+                throw new BusinessException("风控拦截：开票时间必须早于演出时间至少 24 小时，请重新设置！");
+            }
         }
 
         this.updateById(newEvent);
@@ -203,7 +223,10 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         wrapper.orderByDesc(Event::getCreateTime);
 
         if (StringUtils.hasText(keyword)) {
-            wrapper.and(w -> w.like(Event::getTitle, keyword)
+            boolean isNumeric = keyword.matches("\\d+");
+
+            wrapper.and(w -> {
+                    w.like(Event::getTitle, keyword)
                     .or()
                     .like(Event::getVenue, keyword)
                     // 👇 跨表子查询魔法：根据艺人名字反查出所有的演出 ID
@@ -212,7 +235,14 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
                     .inSql(Event::getId,
                             "SELECT event_id FROM tb_event_artist WHERE artist_id IN " +
                                     "(SELECT id FROM tb_artist WHERE name LIKE '%" + keyword + "%')"
-                    ));
+
+                    );
+                    if (isNumeric) {
+                        w.or().eq(Event::getId, Long.valueOf(keyword));
+                    }
+            });
+
+
         }
 
         // 1. 查基础演出

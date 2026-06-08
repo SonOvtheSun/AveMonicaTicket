@@ -1,6 +1,7 @@
 package com.avemonica.ticket.controller;
 
 import com.avemonica.ticket.common.Result;
+import com.avemonica.ticket.entity.Banner;
 import com.avemonica.ticket.entity.Event;
 import com.avemonica.ticket.entity.TicketCategory;
 import com.avemonica.ticket.service.EventService;
@@ -30,6 +31,9 @@ public class PublicEventController {
 
     @Autowired
     private TicketService ticketService;
+
+    @Autowired
+    private com.avemonica.ticket.service.BannerService bannerService;
 
     @Autowired
     private com.avemonica.ticket.mapper.ArtistMapper artistMapper;
@@ -74,6 +78,8 @@ public class PublicEventController {
         }
         return Result.success(events);
     }
+
+
 
     /**
      * 获取演出详情：多级缓存核心战区 (Caffeine -> Redis -> MySQL)
@@ -166,5 +172,22 @@ public class PublicEventController {
                 .collect(java.util.stream.Collectors.toMap(TicketCategory::getId, TicketCategory::getRemainingStock));
 
         return Result.success(stockMap);
+    }
+
+    // 🚨 在 PublicEventController.java 的末尾追加这个方法
+    @GetMapping("/banner/active")
+    public Result<List<Banner>> getActiveBanners() {
+        LocalDateTime now = LocalDateTime.now();
+
+        // 惰性过滤：由于有定时器兜底，主表数据量极小。
+        // 查询条件：开始时间 <= 当前时间，且结束时间 >= 当前时间
+        List<Banner> activeBanners = bannerService.list(
+                new LambdaQueryWrapper<Banner>()
+                        .le(Banner::getStartTime, now)
+                        .ge(Banner::getEndTime, now)
+                        .orderByDesc(Banner::getCreateTime)
+        );
+
+        return Result.success(activeBanners);
     }
 }

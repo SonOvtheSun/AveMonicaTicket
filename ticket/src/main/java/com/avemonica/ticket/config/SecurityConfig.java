@@ -61,8 +61,10 @@ public class SecurityConfig {
     @Bean
     public org.springframework.web.cors.CorsConfigurationSource corsConfigurationSource() {
         org.springframework.web.cors.CorsConfiguration configuration = new org.springframework.web.cors.CorsConfiguration();
-        // 允许来自前端 Vite 的地址
-        configuration.setAllowedOrigins(java.util.Arrays.asList("http://localhost:5173"));
+
+        // 🚨 核心修复：将 setAllowedOrigins 替换为 setAllowedOriginPatterns，放行所有本地域名和 IP
+        configuration.setAllowedOriginPatterns(java.util.Arrays.asList("*"));
+
         // 允许所有的请求方法 (GET, POST, OPTIONS 等)
         configuration.setAllowedMethods(java.util.Arrays.asList("*"));
         // 允许所有的请求头

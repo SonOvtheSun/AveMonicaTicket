@@ -173,8 +173,9 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
     // ==========================================
     useEffect(() => {
         if (editingRecord) {
-            // 1. 处理时间回显 (将后端的字符串 'YYYY-MM-DD HH:mm:ss' 转为 Day.js 对象)
-            const parsedTime = editingRecord.showTime ? dayjs(editingRecord.showTime) : null;
+            // 🚨 1. 统一处理时间回显 (将后端的字符串转为 Day.js 对象，防白屏崩溃)
+            const parsedShowTime = editingRecord.showTime ? dayjs(editingRecord.showTime) : null;
+            const parsedSaleTime = editingRecord.saleTime ? dayjs(editingRecord.saleTime) : null;
 
             const initPoster = editingRecord.posterUrl ? [{ uid: '-1', name: 'poster.png', status: 'done', url: editingRecord.posterUrl }] : [];
             const initDetails = editingRecord.detailsUrl ? [{ uid: '-2', name: 'details.png', status: 'done', url: editingRecord.detailsUrl }] : [];
@@ -184,12 +185,11 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
 
             let initialCityCascade = [];
 
-            // 🚨 5. 逆向推导：根据城市名找到它所属的省份，用于前端回显
+            // 2. 逆向推导：根据城市名找到它所属的省份，用于前端回显
             if (editingRecord.city) {
                 const targetCity = editingRecord.city;
                 for (const province in pcasData) {
                     const cities = Object.keys(pcasData[province]);
-                    // 如果普通城市在列表里，或者该城市是直辖市
                     if (cities.includes(targetCity) || (targetCity === province && (cities.includes('市辖区') || cities.includes('县')))) {
                         initialCityCascade = [province, targetCity];
                         break;
@@ -197,27 +197,16 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 }
             }
 
-            form.setFieldsValue({
-                ...editingRecord,
-                cityCascade: initialCityCascade,
-
-                // 🚨 新增：演出时间回显转换（你原本应该已经写了 showTime 的转换）
-                showTime: editingRecord.showTime ? dayjs(editingRecord.showTime) : null,
-
-                // 🚨 新增：开票时间回显转换
-                saleTime: editingRecord.saleTime ? dayjs(editingRecord.saleTime) : null,
-            });
-
-            // 3. 处理票档回显 (后端 totalStock 映射回表单的 stock)
+            // 3. 处理票档回显
             const mappedTickets = editingRecord.tickets && editingRecord.tickets.length > 0
                 ? editingRecord.tickets.map(t => ({
                     name: t.name,
                     price: t.price,
-                    stock: t.totalStock // 编辑时，运营人员修改的是总库存量
+                    stock: t.totalStock
                 }))
                 : [{ name: '', price: null, stock: null }];
 
-            // 4. 处理艺人多选回显 (提取已绑定艺人的 ID 数组)
+            // 4. 处理艺人多选回显
             const artistIds = editingRecord.artists ? editingRecord.artists.map(a => a.id).filter(id => id != null) : [];
             if (editingRecord.artists) {
                 const initArtistOpts = editingRecord.artists.map(a => ({
@@ -228,18 +217,18 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 setArtistOptions(initArtistOpts);
             }
 
-            // 5. 瞬间将所有处理好的数据注入表单
+            // 🚨 5. 终极合并：一次性将所有处理好的数据注入表单，绝不重复覆盖！
             form.setFieldsValue({
-                ...editingRecord,
+                ...editingRecord, // 先把后端所有原始字段铺平
                 cityCascade: initialCityCascade,
-                showTime: parsedTime,
+                showTime: parsedShowTime, // 用安全的 dayjs 对象覆盖原始字符串
+                saleTime: parsedSaleTime, // 用安全的 dayjs 对象覆盖原始字符串
                 tickets: mappedTickets,
                 artistIds: artistIds
             });
 
-
         } else {
-            // 如果没有 editingRecord，说明是【新建模式】，清空表单并填入默认值
+            // 新建模式
             form.resetFields();
             form.setFieldsValue({
                 status: 1,
@@ -248,9 +237,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             setPosterFileList([]);
             setDetailsFileList([]);
         }
-
-
-    }, [editingRecord, form]); // 监听 editingRecord 的变化
+    }, [editingRecord, form]);
 
 
     const normFile = (e) => {
@@ -433,14 +420,26 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             <Form.Item
                 name="saleTime"
                 label="预开票时间"
-                // 🚨 移除之前强制必填的 validator 逻辑，现在完全变成可选填
+                dependencies={['status']} // 依赖状态变化进行重新校验
+                rules={[
+                    ({ getFieldValue }) => ({
+                        validator(_, value) {
+                            const currentStatus = Number(getFieldValue('status'));
+                            // 当演出状态为 1 (上架) 时，必须填写时间
+                            if (currentStatus === 1 && !value) {
+                                return Promise.reject(new Error('演出设置为“上架”状态时，必须设定开票时间！'));
+                            }
+                            return Promise.resolve();
+                        },
+                    }),
+                ]}
             >
                 <DatePicker
                     showTime
                     format="YYYY-MM-DD HH:mm:ss"
                     style={{ width: '100%' }}
                     size="large"
-                    placeholder="选填：若填写则发布后进入预售倒计时；若留空则立即开售"
+                    placeholder="上架状态必须填写 (设为过去时间即代表立即开售)"
                 />
             </Form.Item>
 
