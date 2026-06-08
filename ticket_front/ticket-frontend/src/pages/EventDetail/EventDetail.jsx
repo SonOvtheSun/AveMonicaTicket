@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, message, Row, Col, Avatar, Button, InputNumber } from 'antd';
-import { CalendarOutlined, EnvironmentOutlined, UserOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { CalendarOutlined, EnvironmentOutlined, UserOutlined, ArrowLeftOutlined, TagsOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import './EventDetail.css';
 import dayjs from 'dayjs';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
+
+const sortTicketsByPriceAsc = (tickets = []) =>
+    [...tickets].sort((a, b) => Number(a.price ?? 0) - Number(b.price ?? 0));
 
 const EventDetail = () => {
     const { id } = useParams(); // 从 URL 路由获取演出 ID
@@ -24,6 +27,14 @@ const EventDetail = () => {
     const [saleAvailable, setSaleAvailable] = useState(false);
 
     const isPresale = event?.status === 1;
+
+    // status=3 且演出时间未到：隐藏购票信息，仅展示“敬请期待”
+    const showTimeObj = event?.showTime ? dayjs(event.showTime) : null;
+    const isShowTimeValid = !!showTimeObj && showTimeObj.isValid();
+    const isStatus3Future = event?.status === 3 && isShowTimeValid && showTimeObj.isAfter(dayjs());
+    const isStatus3Past = event?.status === 3 && isShowTimeValid && showTimeObj.isBefore(dayjs());
+    const hidePurchaseOptions = isStatus3Future;
+    const sortedTickets = sortTicketsByPriceAsc(event?.tickets || []);
 
 
     useEffect(() => {
@@ -55,7 +66,8 @@ const EventDetail = () => {
                 const res = await axios.get(`/api/event/${id}`);
                 if (res.data.code === 200) {
                     setEvent(res.data.data);
-                    const firstAvailable = res.data.data.tickets?.find(t => t.remainingStock > 0);
+                    const firstAvailable = sortTicketsByPriceAsc(res.data.data.tickets || [])
+                        .find(t => t.remainingStock > 0);
                     if (firstAvailable) setSelectedTicket(firstAvailable);
 
                     // 2. 🚨 静态页面渲染完毕后，立刻单独拉取一次绝对准确的库存
@@ -135,6 +147,11 @@ const EventDetail = () => {
     const totalPrice = selectedTicket ? (selectedTicket.price * quantity).toFixed(2) : '0.00';
 
     const handleBuy = async () => {
+        if (isStatus3Future) {
+            message.info('演出暂未开放购票，敬请期待');
+            return;
+        }
+
         if (isPresale) {
             message.success('预约成功！演出正式开售前将通过短信/站内信通知您。');
             return;
@@ -209,9 +226,9 @@ const EventDetail = () => {
             <div className="content-wrapper">
                 {/* 返回上一页小按钮 */}
                 <div style={{display:'flex'}}>
-                <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)} style={{ marginBottom: 20, color: '#fff', fontSize: 16 }}>
-                    返回
-                </Button>
+                    <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)} style={{ marginBottom: 20, color: '#fff', fontSize: 16 }}>
+                        返回
+                    </Button>
                 </div>
 
                 {/* 2. 购票主信息卡片 */}
@@ -225,15 +242,19 @@ const EventDetail = () => {
 
                         <div className="info-row">
                             <CalendarOutlined className="info-icon" />
-                            <span>{event.showTime || '时间待定'}</span>
+                            <span>演出时间：{event.showTime || '时间待定'}</span>
+                        </div>
+                        <div className="info-row">
+                            <TagsOutlined className="info-icon" />
+                            <span>风格：{event.style || '暂未设置'}</span>
                         </div>
                         <div className="info-row">
                             <EnvironmentOutlined className="info-icon" />
-                            {/* 🚨 补充显示 city 字段，并做一下判空保护，防止老数据没有城市报错 */}
-                            <span>
-                                {event.city ? `${event.city} | ` : ''}
-                                {event.venue} | {event.address}
-                            </span>
+                            <span>场馆：{event.venue || '场馆待定'}</span>
+                        </div>
+                        <div className="info-row">
+                            <EnvironmentOutlined className="info-icon" />
+                            <span>详细地址：{event.address || '地址待定'}</span>
                         </div>
 
                         {/* 🚨 新增：高颜值的预售倒计时横幅 */}
@@ -273,50 +294,56 @@ const EventDetail = () => {
                             </div>
                         )}
 
-                        <div style={{ marginTop: '24px', textAlign: 'left' }}>
-                            <div style={{ fontWeight: 'bold', color: '#333', marginBottom: 8 }}>选择票档</div>
-                            <div className="tickets-container">
-                                {event.tickets?.map(ticket => {
-                                    const isSoldOut = ticket.remainingStock <= 0;
-                                    const isActive = selectedTicket?.id === ticket.id;
+                        {!hidePurchaseOptions && (
+                            <div style={{ marginTop: '24px', textAlign: 'left' }}>
+                                <div style={{ fontWeight: 'bold', color: '#333', marginBottom: 8 }}>选择票档</div>
+                                <div className="tickets-container">
+                                    {sortedTickets.map(ticket => {
+                                        const isSoldOut = ticket.remainingStock <= 0;
+                                        const isActive = selectedTicket?.id === ticket.id;
 
-                                    return (
-                                        <div
-                                            key={ticket.id}
-                                            className={`ticket-pill ${isActive ? 'active' : ''} ${isSoldOut ? 'sold-out' : ''}`}
-                                            onClick={() => !isSoldOut && setSelectedTicket(ticket)}
-                                        >
-                                            <span className="ticket-name">{ticket.name}</span>
-                                            <span className="ticket-price">¥ {ticket.price} {isSoldOut ? '(售罄)' : ''}</span>
-                                        </div>
-                                    );
-                                })}
+                                        return (
+                                            <div
+                                                key={ticket.id}
+                                                className={`ticket-pill ${isActive ? 'active' : ''} ${isSoldOut ? 'sold-out' : ''}`}
+                                                onClick={() => !isSoldOut && setSelectedTicket(ticket)}
+                                            >
+                                                <span className="ticket-name">{ticket.name}</span>
+                                                <span className="ticket-price">¥ {ticket.price} {isSoldOut ? '(售罄)' : ''}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
                             </div>
-                        </div>
+                        )}
 
-                        <div style={{ marginTop: '24px', marginBottom: '40px', textAlign: 'left' }}>
-                            <div style={{ fontWeight: 'bold', color: '#333', marginBottom: 10 }}>购买数量</div>
+                        {!hidePurchaseOptions && (
+                            <div style={{ marginTop: '24px', marginBottom: '40px', textAlign: 'left' }}>
+                                <div style={{ fontWeight: 'bold', color: '#333', marginBottom: 10 }}>购买数量</div>
 
-                            {/* 🚨 用 flex 容器包裹输入框和提示语，确保它们在同一行并垂直居中靠左 */}
-                            <div style={{ display: 'flex', alignItems: 'center' }}>
-                                <InputNumber
-                                    min={1}
-                                    max={6}
-                                    value={quantity}
-                                    onChange={setQuantity}
-                                    size="large"
-                                    disabled={!selectedTicket}
-                                />
-                                <span style={{ marginLeft: 12, color: '#999', fontSize: 13 }}>每笔订单限购 6 张</span>
+                                {/* 🚨 用 flex 容器包裹输入框和提示语，确保它们在同一行并垂直居中靠左 */}
+                                <div style={{ display: 'flex', alignItems: 'center' }}>
+                                    <InputNumber
+                                        min={1}
+                                        max={6}
+                                        value={quantity}
+                                        onChange={setQuantity}
+                                        size="large"
+                                        disabled={!selectedTicket}
+                                    />
+                                    <span style={{ marginLeft: 12, color: '#999', fontSize: 13 }}>每笔订单限购 6 张</span>
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         <div className="action-bar">
-                            <div>
-                                <span style={{ color: '#666', marginRight: 8 }}>总计:</span>
-                                <span style={{ color: '#FF8899', fontSize: 20 }}>¥</span>
-                                <span className="total-price">{totalPrice}</span>
-                            </div>
+                            {!hidePurchaseOptions && (
+                                <div>
+                                    <span style={{ color: '#666', marginRight: 8 }}>总计:</span>
+                                    <span style={{ color: '#FF8899', fontSize: 20 }}>¥</span>
+                                    <span className="total-price">{totalPrice}</span>
+                                </div>
+                            )}
                             {/* 🚨 3. 修改：动态渲染按钮文案 */}
                             <Button
                                 type="primary"
@@ -329,14 +356,19 @@ const EventDetail = () => {
                                         : 'linear-gradient(135deg, #FF8899, #ff6b80)',
                                     boxShadow: event.status !== 1 ? 'none' : '0 4px 12px rgba(255, 136, 153, 0.4)',
                                     border: 'none',
-                                    // 如果状态是 3 或 4，按钮禁用
+                                    marginLeft: hidePurchaseOptions ? 'auto' : 0,
+                                    // 如果状态不是 1，按钮禁用
                                     pointerEvents: event.status !== 1 ? 'none' : 'auto'
                                 }}
                             >
                                 {/* 🚨 按钮文案终极版：动态计算 */}
                                 {event.status === 1
                                     ? (!saleAvailable ? '立即预约' : '立即购票')
-                                    : '已停售'}
+                                    : isStatus3Future
+                                        ? '敬请期待'
+                                        : isStatus3Past
+                                            ? '已结束'
+                                            : '已停售'}
                             </Button>
                         </div>
                     </div>

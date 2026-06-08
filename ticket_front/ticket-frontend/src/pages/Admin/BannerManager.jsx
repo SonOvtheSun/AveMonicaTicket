@@ -216,6 +216,7 @@ const BannerManager = () => {
                             action="/api/common/upload"
                             listType="picture-card"
                             maxCount={1}
+                            headers={{ Authorization: `Bearer ${localStorage.getItem('token')}` }}
                             fileList={fileList}
                             onChange={({ fileList }) => setFileList(fileList)}
                         >

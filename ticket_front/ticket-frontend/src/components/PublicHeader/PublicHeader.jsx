@@ -1,17 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { Input, Dropdown, Avatar, Button, message, Cascader } from 'antd';
 import { Search, MapPin, ChevronDown, User, FileText, Heart, LogOut, Settings } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import './PublicHeader.css'; // 我们下一步会把相关 CSS 移到这里
 import pcasData from '../../assets/pcas.json';
 
 const PublicHeader = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [currentUser, setCurrentUser] = useState(null);
 
     const [selectedCity, setSelectedCity] = useState(localStorage.getItem('currentCity') || '全国');
+
+    // 根据当前路由动态控制头部导航高亮
+    const navItems = [
+        { label: '首页', path: '/', match: (pathname) => pathname === '/' },
+        { label: '演出', path: '/events', match: (pathname) => pathname === '/events' || pathname.startsWith('/event/') },
+        { label: '音乐人', path: '/artists', match: (pathname) => pathname === '/artists' || pathname.startsWith('/artist/') },
+    ];
+
+    const isNavActive = (item) => item.match(location.pathname);
 
     // 🚨 4. 解析 pcas.json，提取“省-市”两级（与发布演出的逻辑一致）
     const cityOptions = React.useMemo(() => {
@@ -138,9 +148,15 @@ const PublicHeader = () => {
                         </div>
                     </Cascader>
                     <nav className="main-nav">
-                        <span className="active" onClick={() => navigate('/')}>首页</span>
-                        <span>演出</span>
-                        <span>音乐人</span>
+                        {navItems.map(item => (
+                            <span
+                                key={item.path}
+                                className={isNavActive(item) ? 'active' : ''}
+                                onClick={() => navigate(item.path)}
+                            >
+                                {item.label}
+                            </span>
+                        ))}
                     </nav>
                 </div>
 

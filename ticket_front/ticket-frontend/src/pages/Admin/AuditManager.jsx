@@ -256,6 +256,15 @@ const AuditManager = () => {
                     <Descriptions column={2} bordered size="small">
                         <Descriptions.Item label="演出标题" span={2}>{detailRecord.title}</Descriptions.Item>
 
+                        {/* 🚨 新增：演出音乐风格 */}
+                        <Descriptions.Item label="演出风格" span={2}>
+                            {detailRecord.style ? (
+                                <Tag color="purple">{detailRecord.style}</Tag>
+                            ) : (
+                                <span style={{ color: '#999' }}>暂无风格</span>
+                            )}
+                        </Descriptions.Item>
+
                         {/* 🚨 新增：演出城市与场馆对齐显示 */}
                         <Descriptions.Item label="演出城市">
                             <Tag color="blue">{detailRecord.city || '未指定'}</Tag>
@@ -303,6 +312,25 @@ const AuditManager = () => {
                                 </div>
                             ) : (
                                 <span style={{ color: '#999', fontSize: 12 }}>暂无配置音乐人</span>
+                            )}
+                        </Descriptions.Item>
+
+                        {/* 🚨 新增：票务档位策略查看 */}
+                        <Descriptions.Item label="票务档位" span={2}>
+                            {detailRecord.tickets && detailRecord.tickets.length > 0 ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {detailRecord.tickets.map((ticket, idx) => (
+                                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#fff0f3', padding: '6px 12px', borderRadius: '6px', border: '1px solid #ffe6e8' }}>
+                                            <Tag color="#FF8899" style={{ margin: 0 }}>{ticket.name}</Tag>
+                                            <span style={{ color: '#e60026', fontWeight: 'bold', width: '80px' }}>¥ {ticket.price}</span>
+                                            <span style={{ color: '#666', fontSize: '13px' }}>
+                                                初始库存: <b>{ticket.totalStock || ticket.stock || 0}</b> 张
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <span style={{ color: '#999', fontSize: 12 }}>暂未设置票档</span>
                             )}
                         </Descriptions.Item>
 

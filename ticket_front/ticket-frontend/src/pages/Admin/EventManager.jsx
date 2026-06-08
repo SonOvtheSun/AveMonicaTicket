@@ -239,15 +239,19 @@ const EventManager = () => {
             // 需求 4：用优雅的悬浮气泡显示多行票档信息
             render: (_, record) => {
                 const tickets = record.tickets || [];
+
+                if (tickets.length === 0) {
+                    return <span style={{ color: '#999', fontSize: 12 }}>暂未设置票档</span>;
+                }
+
                 const popoverContent = (
                     <div style={{ minWidth: 200, maxWidth: 300 }}>
-                        {tickets.length > 0 ? tickets.map((t, index) => (
+                        {tickets.map((t, index) => (
                             <div key={index} style={{ marginBottom: 8, borderBottom: '1px solid #f0f0f0', paddingBottom: 6 }}>
                                 <div><Tag color="#FF8899">{t.name}</Tag> <strong style={{color: '#ff4d4f'}}>¥{t.price}</strong></div>
-                                {/* ⚠️ 修改这里：把 t.stock 改为后端的 t.remainingStock */}
-                                <div style={{fontSize: 12, color: '#888', marginTop: 4}}>剩余库存：{t.remainingStock} 张</div>
+                                <div style={{fontSize: 12, color: '#888', marginTop: 4}}>剩余库存：{t.remainingStock ?? t.stock ?? 0} 张</div>
                             </div>
-                        )) : <div style={{ color: '#999' }}>暂未配置票档</div>}
+                        ))}
                     </div>
                 );
 
@@ -278,27 +282,27 @@ const EventManager = () => {
                 <Space size="middle">
                     {/* 场景 A：拥有发布/编辑权限的人 (超管、演出管理方) */}
                     {hasPublishPerm && (
-                            <>
-                                <Button type="text" icon={<Edit size={14} />} style={{ color: '#1890ff', padding: 0 }} onClick={() => handleEditClick(record)}>编辑</Button>
-                                {record.status !== 4 ? (
-                                    <Button type="text" icon={<EyeOff size={14} />} onClick={() => handleQuickHide(record.id)} style={{ color: '#faad14', padding: 0 }}>隐藏</Button>
-                                ) : (
-                                    <Button type="text" icon={<Eye size={14} />} onClick={() => handleQuickShow(record.id)} style={{ color: '#52c41a', padding: 0 }}>恢复</Button>
-                                )}
-                                <Button type="text" icon={<Trash2 size={14} />} onClick={() => handleDelete(record.id)} style={{ color: '#ff4d4f', padding: 0 }}>删除</Button>
-                            </>
-                        )}
+                        <>
+                            <Button type="text" icon={<Edit size={14} />} style={{ color: '#1890ff', padding: 0 }} onClick={() => handleEditClick(record)}>编辑</Button>
+                            {record.status !== 4 ? (
+                                <Button type="text" icon={<EyeOff size={14} />} onClick={() => handleQuickHide(record.id)} style={{ color: '#faad14', padding: 0 }}>隐藏</Button>
+                            ) : (
+                                <Button type="text" icon={<Eye size={14} />} onClick={() => handleQuickShow(record.id)} style={{ color: '#52c41a', padding: 0 }}>恢复</Button>
+                            )}
+                            <Button type="text" icon={<Trash2 size={14} />} onClick={() => handleDelete(record.id)} style={{ color: '#ff4d4f', padding: 0 }}>删除</Button>
+                        </>
+                    )}
                     {/* 场景 B：仅有审核权限的人 (审核员) */}
                     {(hasAuditPerm || isSuperAdmin) && (
-                            <Button
-                                type="text"
-                                icon={<ShieldOff size={14} />}
-                                onClick={() => handleTakeDown(record.id)}
-                                style={{ color: '#ff4d4f', padding: 0 }}
-                                disabled={record.auditStatus === 0} // 如果已经是未审核状态，则禁用按钮
-                            >
-                                {record.auditStatus === 0 ? '已下架' : '下架'}
-                            </Button>)
+                        <Button
+                            type="text"
+                            icon={<ShieldOff size={14} />}
+                            onClick={() => handleTakeDown(record.id)}
+                            style={{ color: '#ff4d4f', padding: 0 }}
+                            disabled={record.auditStatus === 0} // 如果已经是未审核状态，则禁用按钮
+                        >
+                            {record.auditStatus === 0 ? '已下架' : '下架'}
+                        </Button>)
                     }
 
                 </Space>

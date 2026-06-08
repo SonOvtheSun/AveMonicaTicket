@@ -20,4 +20,5 @@ public class EventAddDTO {
 
     private List<Long> artistIds;            // 多选：参演艺人ID列表
     private List<TicketCategoryDTO> tickets; // 动态增减：多档票价列表
+    private String style;
 }

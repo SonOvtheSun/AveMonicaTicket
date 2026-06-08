@@ -1,38 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Form, Input, DatePicker, Button, Upload, Space, InputNumber, message, Divider, Select, Row, Col, Modal, Avatar, Spin, Cascader } from 'antd';
+import { Form, Input, DatePicker, Button, Upload, Space, InputNumber, message, Divider, Select, Row, Col, Modal, Avatar, Spin, Cascader, Tag } from 'antd';
 import { PlusOutlined, MinusCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import axios from 'axios';
-import dayjs from 'dayjs'; // 🚨 引入 dayjs，用于解析后端传来的时间字符串以回显
+import dayjs from 'dayjs';
 import './AddEventForm.css';
 import pcasData from '../../assets/pcas.json';
 import ImgCrop from 'antd-img-crop';
 
-// 🚨 2. 解析 JSON：只取前两级 (省 -> 市)，过滤掉区县，并处理直辖市
 const cityOptions = Object.keys(pcasData).map(province => {
     const cityKeys = Object.keys(pcasData[province]);
-
-    // 处理直辖市的情况：将"市辖区"或"县"替换为省/直辖市名称本身
     const validCities = cityKeys.map(cityKey => {
-        if (cityKey === '市辖区' || cityKey === '县' || cityKey.includes('直辖')) {
-            return province;
-        }
+        if (cityKey === '市辖区' || cityKey === '县' || cityKey.includes('直辖')) return province;
         return cityKey;
     });
-
-    // 去重，防止出现多个同名选项
     const uniqueCities = [...new Set(validCities)];
-
     return {
         value: province,
         label: province,
-        children: uniqueCities.map(cityName => ({
-            value: cityName,
-            label: cityName
-        }))
+        children: uniqueCities.map(cityName => ({ value: cityName, label: cityName }))
     };
 });
 
-// 🚨 接收父组件传来的 editingRecord
 const AddEventForm = ({ onSuccess, editingRecord }) => {
     const [form] = Form.useForm();
     const [loading, setLoading] = useState(false);
@@ -46,15 +34,30 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
     const [artistKeyword, setArtistKeyword] = useState('');
     const [hasMoreArtists, setHasMoreArtists] = useState(false);
 
-    // 用于防抖的定时器
+    // 风格预设选项
+    const styleOptions = [
+        { value: '古典', label: '古典' }, { value: '流行', label: '流行' }, { value: '世界音乐', label: '世界音乐' },
+        { value: '独立', label: '独立' }, { value: '摇滚', label: '摇滚' }, { value: '爵士', label: '爵士' },
+        { value: 'HipHop', label: 'HipHop' }, { value: '轻音乐', label: '轻音乐' }, { value: '民谣', label: '民谣' },
+        { value: '动漫', label: '动漫' }, { value: '朋克', label: '朋克' }, { value: '电子', label: '电子' },
+        { value: '金属', label: '金属' }, { value: '雷鬼', label: '雷鬼' }, { value: '极端金属', label: '极端金属' },
+        { value: '核', label: '核' },
+    ];
+
+    const eventStyleOptions = [
+        { value: '古典', label: '古典' }, { value: '流行', label: '流行' }, { value: '世界音乐', label: '世界音乐' },
+        { value: '独立', label: '独立' }, { value: '摇滚', label: '摇滚' }, { value: '爵士', label: '爵士' },
+        { value: 'HipHop', label: 'HipHop' }, { value: '轻音乐', label: '轻音乐' }, { value: '民谣', label: '民谣' },
+        { value: '动漫', label: '动漫' }, { value: '朋克', label: '朋克' }, { value: '电子', label: '电子' },
+        { value: '金属', label: '金属' }, { value: '雷鬼', label: '雷鬼' }, { value: '核', label: '核' }
+    ];
+
     const searchTimeoutRef = useRef(null);
 
-    // 🚨 1. 补全所有的本地状态池，彻底接管图片数据
     const [posterFileList, setPosterFileList] = useState([]);
     const [detailsFileList, setDetailsFileList] = useState([]);
     const [avatarFileList, setAvatarFileList] = useState([]);
 
-    // 💡 核心魔法：远程分页搜索艺人
     const fetchRemoteArtists = async (keyword, page = 1, append = false) => {
         if (!keyword) {
             if (!append) {
@@ -79,16 +82,11 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 }));
 
                 setArtistOptions(prev => {
-                    // 🚨 防丢失机制：保留表单中已经被选中的艺人，防止搜索其他词时导致已选标签变成纯 ID
                     const selectedIds = form.getFieldValue('artistIds') || [];
                     const preservedOptions = prev.filter(p => selectedIds.includes(p.value));
-
-                    // 合并新老数据去重
                     const merged = append ? [...prev] : [...preservedOptions];
                     newOptions.forEach(opt => {
-                        if (!merged.find(m => m.value === opt.value)) {
-                            merged.push(opt);
-                        }
+                        if (!merged.find(m => m.value === opt.value)) merged.push(opt);
                     });
                     return merged;
                 });
@@ -106,13 +104,11 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
     const handleSearchArtist = (value) => {
         setArtistKeyword(value);
         if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-
         searchTimeoutRef.current = setTimeout(() => {
             fetchRemoteArtists(value, 1, false);
-        }, 500); // 停顿 0.5 秒后发请求
+        }, 500);
     };
 
-    // 💡 点击加载更多
     const loadMoreArtists = (e) => {
         e.preventDefault();
         fetchRemoteArtists(artistKeyword, artistPage + 1, true);
@@ -121,7 +117,6 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
     const customUpload = async (options, uploadType) => {
         const { file, onSuccess, onError, onProgress } = options;
         const formData = new FormData();
-
         formData.append('file', file, file.name || `cropped-${uploadType}.jpg`);
         formData.append('type', uploadType);
 
@@ -166,14 +161,8 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         fetchArtists();
     }, []);
 
-
-
-    // ==========================================
-    // 💡 核心魔法：智能回显与重置
-    // ==========================================
     useEffect(() => {
         if (editingRecord) {
-            // 🚨 1. 统一处理时间回显 (将后端的字符串转为 Day.js 对象，防白屏崩溃)
             const parsedShowTime = editingRecord.showTime ? dayjs(editingRecord.showTime) : null;
             const parsedSaleTime = editingRecord.saleTime ? dayjs(editingRecord.saleTime) : null;
 
@@ -184,8 +173,6 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             setDetailsFileList(initDetails);
 
             let initialCityCascade = [];
-
-            // 2. 逆向推导：根据城市名找到它所属的省份，用于前端回显
             if (editingRecord.city) {
                 const targetCity = editingRecord.city;
                 for (const province in pcasData) {
@@ -197,16 +184,14 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 }
             }
 
-            // 3. 处理票档回显
             const mappedTickets = editingRecord.tickets && editingRecord.tickets.length > 0
                 ? editingRecord.tickets.map(t => ({
                     name: t.name,
                     price: t.price,
-                    stock: t.totalStock
+                    stock: t.totalStock ?? t.stock ?? t.remainingStock
                 }))
-                : [{ name: '', price: null, stock: null }];
+                : [];
 
-            // 4. 处理艺人多选回显
             const artistIds = editingRecord.artists ? editingRecord.artists.map(a => a.id).filter(id => id != null) : [];
             if (editingRecord.artists) {
                 const initArtistOpts = editingRecord.artists.map(a => ({
@@ -217,28 +202,27 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 setArtistOptions(initArtistOpts);
             }
 
-            // 🚨 5. 终极合并：一次性将所有处理好的数据注入表单，绝不重复覆盖！
             form.setFieldsValue({
-                ...editingRecord, // 先把后端所有原始字段铺平
+                ...editingRecord,
                 cityCascade: initialCityCascade,
-                showTime: parsedShowTime, // 用安全的 dayjs 对象覆盖原始字符串
-                saleTime: parsedSaleTime, // 用安全的 dayjs 对象覆盖原始字符串
+                showTime: parsedShowTime,
+                saleTime: parsedSaleTime,
                 tickets: mappedTickets,
-                artistIds: artistIds
+                artistIds: artistIds,
+                style: editingRecord.style ? [editingRecord.style] : [],
             });
 
         } else {
-            // 新建模式
             form.resetFields();
             form.setFieldsValue({
                 status: 1,
-                tickets: [{ name: '', price: null, stock: null }]
+                style: [],
+                tickets: []
             });
             setPosterFileList([]);
             setDetailsFileList([]);
         }
     }, [editingRecord, form]);
-
 
     const normFile = (e) => {
         if (Array.isArray(e)) return e;
@@ -259,27 +243,10 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
 
     const parseUploadedUrl = (fileList) => {
         if (!fileList || fileList.length === 0) return '';
-
         const file = fileList[0];
-
-        console.log("【解析器截获的真实状态】:", file.status, " 响应内容:", file.response);
-
-        // 1. 如果是新上传成功的图片，且后端 Result 带有 code 结构
-        if (file.response && file.response.code === 200) {
-            return file.response.data;
-        }
-
-        // 2. 兼容部分特殊情况：后端直接返回了路径字符串本身
-        if (file.response && typeof file.response === 'string') {
-            return file.response;
-        }
-
-        // 3. 如果是编辑回显、或者组件状态残留时的 url
-        if (file.url) {
-            return file.url;
-        }
-
-        // 4. 保底金牌：如果状态已经是 done 但上面没截取到，尝试从 xhr 响应文本里硬解析
+        if (file.response && file.response.code === 200) return file.response.data;
+        if (file.response && typeof file.response === 'string') return file.response;
+        if (file.url) return file.url;
         if (file.status === 'done' && file.xhr?.responseText) {
             try {
                 const resObj = JSON.parse(file.xhr.responseText);
@@ -288,7 +255,6 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 return '';
             }
         }
-
         return '';
     };
 
@@ -297,12 +263,13 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         try {
             const avatarUrl = parseUploadedUrl(avatarFileList);
             const regionStr = (values.region && values.region.length > 0) ? values.region[0] : '';
+            const styleStr = Array.isArray(values.style) ? values.style[0] : values.style;
             const res = await axios.post('/api/admin/artist/add', {
                 name: values.name,
                 description: values.description,
                 avatarUrl: avatarUrl,
                 region: regionStr,
-                style: values.style
+                style: styleStr
             });
             if (res.data.code === 200) {
                 message.success('艺人提交成功！');
@@ -319,9 +286,6 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         }
     };
 
-    // ==========================================
-    // 💡 智能分流提交逻辑 (POST vs PUT)
-    // ==========================================
     const onFinish = async (values) => {
         if (posterFileList.length > 0 && posterFileList[0].status === 'uploading') {
             return message.warning('主海报正在后台传输，请等待提示“上传成功”！');
@@ -340,36 +304,39 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
 
         let finalCity = '';
         if (values.cityCascade && values.cityCascade.length > 0) {
-            // 取数组的最后一项（确保拿到的是市）
             finalCity = values.cityCascade[values.cityCascade.length - 1];
         }
+        const styleStr = Array.isArray(values.style) && values.style.length > 0 ? values.style[0] : '';
+
+        const finalTickets = (values.tickets || [])
+            .filter(t => t && (t.name || t.price != null || t.stock != null))
+            .map(t => ({
+                name: t.name,
+                price: t.price,
+                stock: t.stock
+            }));
 
         setLoading(true);
         try {
             const payload = {
                 title: values.title,
-                // 演出时间格式化
                 showTime: values.showTime && values.showTime.format ? values.showTime.format('YYYY-MM-DD HH:mm:ss') : values.showTime,
-
-                // 🚨 新增：开票时间格式化（带判空保护）
                 saleTime: values.saleTime && values.saleTime.format ? values.saleTime.format('YYYY-MM-DD HH:mm:ss') : values.saleTime,
-
                 city: finalCity,
                 venue: values.venue,
                 address: values.address,
                 status: values.status,
                 artistIds: values.artistIds,
-                tickets: values.tickets,
+                tickets: finalTickets,
                 posterUrl: finalPosterUrl,
+                style: styleStr,
                 detailsUrl: finalDetailsUrl || 'https://via.placeholder.com/800x1200?text=Default+Details'
             };
 
             let res;
             if (editingRecord) {
-                // 编辑模式：调用刚才后端的 PUT 接口
                 res = await axios.put(`/api/admin/event/${editingRecord.id}`, payload);
             } else {
-                // 新增模式：调用 POST 接口
                 res = await axios.post('/api/admin/event/add', payload);
             }
 
@@ -388,12 +355,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
     };
 
     return (
-        <Form
-            form={form}
-            layout="vertical"
-            onFinish={onFinish}
-            // initialValues 被移除了，因为我们全权交给了 useEffect 里的 setFieldsValue 动态控制
-        >
+        <Form form={form} layout="vertical" onFinish={onFinish}>
             <Divider orientation="left" style={{ borderColor: '#FF8899', color: '#FF8899', marginTop: 0 }}>核心基础数据</Divider>
 
             <Form.Item name="title" label="演出标题" rules={[{ required: true, message: '请输入演出精炼标题' }]}>
@@ -420,41 +382,53 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             <Form.Item
                 name="saleTime"
                 label="预开票时间"
-                dependencies={['status']} // 依赖状态变化进行重新校验
+                dependencies={['status', 'showTime']}
                 rules={[
                     ({ getFieldValue }) => ({
                         validator(_, value) {
                             const currentStatus = Number(getFieldValue('status'));
-                            // 当演出状态为 1 (上架) 时，必须填写时间
+                            const showTimeValue = getFieldValue('showTime');
+
                             if (currentStatus === 1 && !value) {
                                 return Promise.reject(new Error('演出设置为“上架”状态时，必须设定开票时间！'));
+                            }
+                            if (value && showTimeValue) {
+                                const saleDate = dayjs(value);
+                                const showDate = dayjs(showTimeValue);
+                                const limitTime = showDate.subtract(24, 'hour');
+                                if (saleDate.isAfter(limitTime)) {
+                                    return Promise.reject(new Error('开票时间必须早于演出时间至少 24 小时！'));
+                                }
                             }
                             return Promise.resolve();
                         },
                     }),
                 ]}
             >
-                <DatePicker
-                    showTime
-                    format="YYYY-MM-DD HH:mm:ss"
-                    style={{ width: '100%' }}
-                    size="large"
-                    placeholder="上架状态必须填写 (设为过去时间即代表立即开售)"
-                />
+                <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" style={{ width: '100%' }} size="large" placeholder="上架状态必填，且早于演出前24小时" />
             </Form.Item>
 
-            {/* 🚨 3. 新增城市选择器，限制只能选到市级 */}
-            <Form.Item
-                name="cityCascade"
-                label="所在城市"
-                rules={[{ required: true, message: '请选择演出所在城市' }]}
-            >
-                <Cascader
-                    options={cityOptions}
-                    placeholder="请选择省份与城市"
-                    size="large"
-                    expandTrigger="hover"
-                />
+            {/* 🚨 演出风格平铺标签区 */}
+            <Form.Item label="演出风格" tooltip="点击下方快捷标签一键填入，或在框内手动输入后敲回车添加">
+                <Form.Item name="style" noStyle>
+                    <Select mode="tags" maxCount={1} placeholder="请选择或输入演出风格" size="large" allowClear />
+                </Form.Item>
+                <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {eventStyleOptions.map(opt => (
+                        <Tag
+                            key={opt.value}
+                            color="#fff0f3"
+                            style={{ color: '#FF8899', border: '1px solid #FF8899', cursor: 'pointer', padding: '4px 14px', fontSize: 13, margin: 0, borderRadius: 16 }}
+                            onClick={() => form.setFieldsValue({ style: [opt.value] })}
+                        >
+                            {opt.label}
+                        </Tag>
+                    ))}
+                </div>
+            </Form.Item>
+
+            <Form.Item name="cityCascade" label="所在城市" rules={[{ required: true, message: '请选择演出所在城市' }]}>
+                <Cascader options={cityOptions} placeholder="请选择省份与城市" size="large" expandTrigger="hover" />
             </Form.Item>
 
             <Row gutter={16}>
@@ -475,15 +449,13 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                     <Select
                         mode="multiple"
                         allowClear
-                        showSearch // 🚨 开启搜索框
-                        filterOption={false} // 🚨 关闭前端本地过滤，全权交给后端查
-                        onSearch={handleSearchArtist} // 绑定防抖事件
+                        showSearch
+                        filterOption={false}
+                        onSearch={handleSearchArtist}
                         placeholder="输入音乐人姓名"
                         size="large"
                         options={artistOptions}
                         notFoundContent={fetchingArtists ? <Spin size="small" /> : "请在框内打字以搜索艺人库..."}
-
-                        // 👇 需求一：底部插入“显示更多”按钮
                         dropdownRender={(menu) => (
                             <>
                                 {menu}
@@ -496,15 +468,9 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                                 )}
                             </>
                         )}
-
-                        // 👇 需求二：左侧渲染艺人专属头像
                         optionRender={(option) => (
                             <Space align="center">
-                                <Avatar
-                                    src={option.data.avatarUrl || 'https://via.placeholder.com/24'}
-                                    size="small"
-                                    style={{ border: '1px solid #eee' }}
-                                />
+                                <Avatar src={option.data.avatarUrl || 'https://via.placeholder.com/24'} size="small" style={{ border: '1px solid #eee' }} />
                                 <span>{option.data.label}</span>
                             </Space>
                         )}
@@ -560,6 +526,20 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             <Form.List name="tickets">
                 {(fields, { add, remove }) => (
                     <>
+                        {fields.length === 0 && (
+                            <div style={{
+                                marginBottom: 12,
+                                padding: '10px 12px',
+                                borderRadius: 8,
+                                background: '#fff7e6',
+                                border: '1px solid #ffe7ba',
+                                color: '#8c6d1f',
+                                fontSize: 13
+                            }}>
+                                当前未设置票档。发布后，票务策略位置会显示“暂未设置票档”；用户端价格位置可显示“票档待定”。
+                            </div>
+                        )}
+
                         {fields.map(({ key, name, ...restField }) => (
                             <Space key={key} style={{ display: 'flex', marginBottom: 12 }} align="baseline">
                                 <Form.Item {...restField} name={[name, 'name']} rules={[{ required: true, message: '请规范输入票档标识' }]}>
@@ -574,14 +554,16 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                                     <InputNumber placeholder="总发行库存 (张)" min={1} precision={0} size="large" style={{ width: '140px' }} />
                                 </Form.Item>
 
-                                {fields.length > 1 && (
-                                    <MinusCircleOutlined onClick={() => remove(name)} style={{ color: '#ff4d4f', fontSize: '18px', marginLeft: '12px', cursor: 'pointer' }} />
-                                )}
+                                <MinusCircleOutlined
+                                    onClick={() => remove(name)}
+                                    title="删除该票档"
+                                    style={{ color: '#ff4d4f', fontSize: '18px', marginLeft: '12px', cursor: 'pointer' }}
+                                />
                             </Space>
                         ))}
                         <Form.Item style={{ marginTop: 8 }}>
-                            <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />} size="large" style={{ borderColor: '#FF8899', color: '#FF8899', borderRadius: 8 }}>
-                                追加一档票价
+                            <Button type="dashed" onClick={() => add({ name: '', price: null, stock: null })} block icon={<PlusOutlined />} size="large" style={{ borderColor: '#FF8899', color: '#FF8899', borderRadius: 8 }}>
+                                {fields.length === 0 ? '新增票档' : '追加一档票价'}
                             </Button>
                         </Form.Item>
                     </>
@@ -589,9 +571,16 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             </Form.List>
 
             <div style={{ marginTop: 40, textAlign: 'right' }}>
-                <Button size="large" onClick={() => form.resetFields()} style={{ marginRight: 16, borderRadius: 8 }}>重置清空</Button>
-
-                {/* 🚨 核心 UI 切换：动态按钮文案 */}
+                <Button
+                    size="large"
+                    onClick={() => {
+                        form.resetFields();
+                        form.setFieldsValue({ status: 1, style: [], tickets: [] });
+                        setPosterFileList([]);
+                        setDetailsFileList([]);
+                    }}
+                    style={{ marginRight: 16, borderRadius: 8 }}
+                >重置清空</Button>
                 <Button type="primary" htmlType="submit" size="large" loading={loading} style={{ backgroundColor: '#FF8899', borderColor: '#FF8899', width: 160, borderRadius: 8, fontWeight: 'bold' }}>
                     {editingRecord ? '确 认 修 改' : '确 认 发 布'}
                 </Button>
@@ -611,47 +600,50 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                     </Form.Item>
 
                     <Form.Item name="avatar" label="官方头像" valuePropName="fileList" getValueFromEvent={normFile}>
-                        {/* 👇 核心升级：用 ImgCrop 包裹，并设置汉化和 1:1 比例 */}
-                        {/*<ImgCrop*/}
-                        {/*    rotationSlider*/}
-                        {/*    aspect={1} // 1:1 的正方形遮罩*/}
-                        {/*    modalTitle="裁剪头像"*/}
-                        {/*    modalOk="确认裁剪"*/}
-                        {/*    modalCancel="取消"*/}
-                        {/*>*/}
-                            <Upload
-                                name="file"
-                                action="/api/common/upload"
-                                data={{ type: 'avatar' }}
-                                listType="picture"
-                                maxCount={1}
-                                headers={{ Authorization: `Bearer ${localStorage.getItem('token')}` }}
-                                onChange={(info) => handleUploadChange(info, '艺人头像')}
-                            >
-                                <Button icon={<UploadOutlined />}>上传专属头像</Button>
-                            </Upload>
-                        {/*</ImgCrop>*/}
+                        <Upload
+                            name="file"
+                            action="/api/common/upload"
+                            data={{ type: 'avatar' }}
+                            listType="picture"
+                            maxCount={1}
+                            headers={{ Authorization: `Bearer ${localStorage.getItem('token')}` }}
+                            onChange={(info) => handleUploadChange(info, '艺人头像')}
+                        >
+                            <Button icon={<UploadOutlined />}>上传专属头像</Button>
+                        </Upload>
                     </Form.Item>
 
                     <Form.Item name="region" label="国家或地区" rules={[{ required: true, message: '请选择或输入国家/地区' }]}>
                         <Select
-                            mode="tags" // tags 模式允许用户在下拉框没有预设值时，自己自由打字回车输入
-                            maxCount={1} // 限制只能选/填一个
+                            mode="tags"
+                            maxCount={1}
                             placeholder="请选择或输入所属国家/地区"
                             size="large"
                             options={[
-                                { value: '中国大陆', label: '中国大陆' },
-                                { value: '中国港澳台', label: '中国港澳台' },
-                                { value: '日本', label: '日本' },
-                                { value: '韩国', label: '韩国' },
-                                { value: '欧美', label: '欧美' },
-                                { value: '其他海外地区', label: '其他海外地区' },
+                                { value: '中国大陆', label: '中国大陆' }, { value: '中国港澳台', label: '中国港澳台' },
+                                { value: '日本', label: '日本' }, { value: '韩国', label: '韩国' },
+                                { value: '欧美', label: '欧美' }, { value: '其他海外地区', label: '其他海外地区' },
                             ]}
                         />
                     </Form.Item>
 
-                    <Form.Item name="style" label="音乐风格">
-                        <Input placeholder="如：流行、摇滚、ACG、J-Pop、重金属 等" size="large" />
+                    {/* 🚨 音乐人风格平铺标签区 */}
+                    <Form.Item label="音乐风格" tooltip="点击下方快捷标签一键填入，或在框内手动输入后敲回车添加">
+                        <Form.Item name="style" noStyle>
+                            <Select mode="tags" style={{ width: '100%' }} placeholder="请选择音乐风格" size="large" maxCount={1} allowClear />
+                        </Form.Item>
+                        <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            {styleOptions.map(opt => (
+                                <Tag
+                                    key={opt.value}
+                                    color="#fff0f3"
+                                    style={{ color: '#FF8899', border: '1px solid #FF8899', cursor: 'pointer', padding: '4px 14px', fontSize: 13, margin: 0, borderRadius: 16 }}
+                                    onClick={() => artistForm.setFieldsValue({ style: [opt.value] })}
+                                >
+                                    {opt.label}
+                                </Tag>
+                            ))}
+                        </div>
                     </Form.Item>
 
                     <Form.Item name="description" label="乐队/艺人简介">

@@ -15,6 +15,7 @@ import PaySuccess from './pages/Order/PaySuccess';
 import UserProfile from "./pages/User/UserProfile.jsx";
 import UserOrders from "./pages/User/UserOrders.jsx";
 import BannerManager from "./pages/Admin/BannerManager.jsx";
+import EventPage from "./pages/Public/EventPage.jsx";
 
 axios.interceptors.request.use(
     (config) => {
@@ -54,6 +55,7 @@ function App() {
                 <Route path="/pay/success" element={<PaySuccess />} />
                 <Route path="/user/profile" element={<UserProfile />} />
                 <Route path="/user/orders" element={<UserOrders />} />
+                <Route path="/events" element={<EventPage />} />
 
 
                 <Route path="/admin" element={<AdminLayout />}>

@@ -7,6 +7,8 @@ import com.avemonica.ticket.entity.TicketCategory;
 import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.TicketService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -17,7 +19,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.DayOfWeek;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -189,5 +194,86 @@ public class PublicEventController {
         );
 
         return Result.success(activeBanners);
+    }
+
+    @GetMapping("/page")
+    public Result<IPage<Event>> pageEvents(
+            @RequestParam(defaultValue = "1") int current,
+            @RequestParam(defaultValue = "12") int size,
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) String style,
+            @RequestParam(required = false) Integer timeType, // 1:今天, 2:最近一周, 3:下周, 4:最近一月
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            @RequestParam(required = false) String keyword
+    ) {
+        LambdaQueryWrapper<Event> wrapper = new LambdaQueryWrapper<>();
+        // 🚨 铁律：C 端只能看到已上架（1）的演出
+        wrapper.in(Event::getStatus, 1, 3);
+
+        // 1. 城市筛选
+        if (StringUtils.hasText(city) && !"全部".equals(city) && !"全国".equals(city)) {
+            wrapper.like(Event::getCity, city.replace("市", ""));
+        }
+
+        // 2. 风格筛选
+        if (StringUtils.hasText(style) && !"全部".equals(style)) {
+            wrapper.eq(Event::getStyle, style);
+        }
+
+        // 3. 关键词模糊搜索
+        if (StringUtils.hasText(keyword)) {
+            wrapper.and(w -> w.like(Event::getTitle, keyword).or().like(Event::getVenue, keyword));
+        }
+
+        // 4. 时间范围筛选逻辑
+        LocalDateTime now = LocalDateTime.now();
+        if (timeType != null && timeType != 0) {
+            switch (timeType) {
+                case 1: // 今天
+                    wrapper.ge(Event::getShowTime, now.with(LocalTime.MIN))
+                            .le(Event::getShowTime, now.with(LocalTime.MAX));
+                    break;
+                case 2: // 最近一周内
+                    wrapper.ge(Event::getShowTime, now)
+                            .le(Event::getShowTime, now.plusWeeks(1));
+                    break;
+                case 3: // 下周内
+                    LocalDateTime nextMonday = now.with(TemporalAdjusters.next(DayOfWeek.MONDAY)).with(LocalTime.MIN);
+                    LocalDateTime nextSunday = nextMonday.plusDays(6).with(LocalTime.MAX);
+                    wrapper.ge(Event::getShowTime, nextMonday).le(Event::getShowTime, nextSunday);
+                    break;
+                case 4: // 最近一个月
+                    wrapper.ge(Event::getShowTime, now)
+                            .le(Event::getShowTime, now.plusMonths(1));
+                    break;
+            }
+        } else if (StringUtils.hasText(startDate) && StringUtils.hasText(endDate)) {
+            // 自定义日期选择器
+            wrapper.ge(Event::getShowTime, startDate + " 00:00:00")
+                    .le(Event::getShowTime, endDate + " 23:59:59");
+        } else {
+            // 默认查未来未开始的演出
+            wrapper.ge(Event::getShowTime, now);
+        }
+
+        // 按时间先后排序
+        wrapper.orderByAsc(Event::getShowTime);
+
+        IPage<Event> pageData = eventService.page(new Page<>(current, size), wrapper);
+
+        // 5. 装配票档 (用于前端计算“起步价”)
+        for (Event event : pageData.getRecords()) {
+            List<TicketCategory> tickets = ticketService.list(
+                    new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, event.getId())
+            );
+            event.setTickets(tickets);
+
+            // 顺便装配一下艺人信息 (用于显示)
+            List<java.util.Map<String, Object>> artists = artistMapper.selectArtistMapsByEventId(event.getId());
+            event.setArtists(artists);
+        }
+
+        return Result.success(pageData);
     }
 }

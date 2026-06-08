@@ -100,6 +100,8 @@ public class Event {
     @TableField(exist = false)
     private List<Map<String, Object>> artists;
 
+    private String style;
+
     // ==========================================
     // 💡 状态字典常量定义，拒绝魔法数字
     // ==========================================

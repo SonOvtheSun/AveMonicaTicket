@@ -31,7 +31,7 @@ public class AdminBannerController {
     private BannerOverdateService overdateService;
 
     @GetMapping("/list")
-    @PreAuthorize("hasAuthority('banner:list') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
     public Result<?> getBanners(@RequestParam Integer type) {
         LocalDateTime now = LocalDateTime.now();
 
@@ -54,7 +54,7 @@ public class AdminBannerController {
     }
 
     @PostMapping("/save")
-    @PreAuthorize("hasAuthority('banner:edit') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
     @Transactional(rollbackFor = Exception.class)
     public Result<String> saveBanner(@RequestBody @Validated BannerSaveDTO dto) {
         LocalDateTime now = LocalDateTime.now();
@@ -144,7 +144,7 @@ public class AdminBannerController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('banner:delete') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
     public Result<String> deleteBanner(@PathVariable Long id, @RequestParam Boolean isExpired) {
         if (isExpired) {
             overdateService.removeById(id);

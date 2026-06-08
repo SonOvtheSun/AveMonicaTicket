@@ -11,7 +11,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.avemonica.ticket.entity.Event;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.github.benmanes.caffeine.cache.Cache;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +30,7 @@ import java.util.Map;
 
 import static com.avemonica.ticket.entity.Event.AUDIT_PENDING;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/admin/event")
 public class AdminEventController {
@@ -41,6 +46,29 @@ public class AdminEventController {
 
     @Autowired
     private EventArtistService eventArtistService;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
+    @Autowired
+    @Qualifier("eventLocalCache")
+    private Cache<String, String> localCache;
+
+    private static final String EVENT_CACHE_KEY_PREFIX = "event:detail:";
+
+    private void evictEventDetailCache(Long eventId) {
+        if (eventId == null) {
+            return;
+        }
+        String cacheKey = EVENT_CACHE_KEY_PREFIX + eventId;
+        try {
+            localCache.invalidate(cacheKey);
+            redisTemplate.delete(cacheKey);
+            log.info("已删除演出详情 L1/L2 缓存，cacheKey={}", cacheKey);
+        } catch (Exception e) {
+            log.warn("删除演出详情缓存失败，cacheKey={}", cacheKey, e);
+        }
+    }
 
 
     @GetMapping("/list")
@@ -74,6 +102,18 @@ public class AdminEventController {
             event.setArtists(artists);
         }
 
+        for (Event event : pageData.getRecords()) {
+            // 1. 组装参演艺人
+            List<Map<String, Object>> artists = artistMapper.selectArtistMapsByEventId(event.getId());
+            event.setArtists(artists);
+
+            // 🚨 2. 新增：组装该演出的所有票档，供审核人员查阅
+            List<TicketCategory> tickets = ticketService.list(
+                    new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, event.getId())
+            );
+            event.setTickets(tickets);
+        }
+
         return Result.success(pageData);
     }
 
@@ -96,6 +136,7 @@ public class AdminEventController {
         }
 
         eventService.updateById(event);
+        evictEventDetailCache(id);
         return Result.success(isPass ? "演出项目已审核通过" : "已驳回该演出项目的发布申请");
     }
 
@@ -111,6 +152,7 @@ public class AdminEventController {
         }
         event.setStatus(status);
         eventService.updateById(event);
+        evictEventDetailCache(id);
 
 
         return Result.success("状态更新成功", null);
@@ -120,6 +162,7 @@ public class AdminEventController {
     @PreAuthorize("hasAuthority('event:publish') or principal.username == '1'")
     public Result<String> updateEvent(@PathVariable Long id, @RequestBody @Validated EventAddDTO dto) {
         eventService.updateEventWithTicketsAndArtists(id, dto);
+        evictEventDetailCache(id);
         return Result.success("修改成功");
     }
 
@@ -137,6 +180,7 @@ public class AdminEventController {
         event.setAuditStatus(AUDIT_PENDING); // 0 代表待审核/未审核状态
         event.setStatus(4);      // 4 代表前端已隐藏状态
         eventService.updateById(event);
+        evictEventDetailCache(id);
 
         return Result.success("已成功下架并打回该演出");
     }
@@ -162,6 +206,7 @@ public class AdminEventController {
 
         // 实际工业项目中推荐“逻辑删除”（将 status 设为 0），此处为物理删除演示
         eventService.removeById(id);
+        evictEventDetailCache(id);
         return Result.success("演出已删除", null);
     }
 }

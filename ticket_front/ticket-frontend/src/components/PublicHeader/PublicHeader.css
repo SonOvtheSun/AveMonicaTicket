@@ -67,11 +67,26 @@
 .main-nav span {
     cursor: pointer;
     position: relative;
-    transition: color 0.3s;
+    transition: color 0.25s ease, font-weight 0.25s ease;
 }
 
 .main-nav span:hover {
     color: #FF8899;
+}
+
+/* 导航下划线：默认隐藏，active 时展开 */
+.main-nav span::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    background-color: #FF8899;
+    border-radius: 2px;
+    transform: scaleX(0);
+    transform-origin: center;
+    transition: transform 0.25s ease;
 }
 
 /* 导航高亮状态 */
@@ -80,16 +95,8 @@
     color: #FF8899 !important;
 }
 
-/* 修正后的高亮下划线 */
 .main-nav span.active::after {
-    content: '';
-    position: absolute;
-    bottom: -6px; /* 紧贴文字下方 */
-    left: 0;
-    width: 100%;
-    height: 3px;
-    background-color: #FF8899 !important;
-    border-radius: 2px;
+    transform: scaleX(1);
 }
 
 /* --- 中间搜索框 --- */
