@@ -8,6 +8,7 @@ import com.avemonica.ticket.mapper.ArtistMapper;
 import com.avemonica.ticket.service.ArtistService;
 import com.avemonica.ticket.service.EventService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.avemonica.ticket.entity.Event;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -25,6 +26,8 @@ import com.avemonica.ticket.entity.EventArtist;
 import com.avemonica.ticket.service.EventArtistService;
 import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.time.LocalDateTime;
 import java.util.Objects;
 
 import java.util.List;
@@ -110,20 +113,20 @@ public class AdminEventController {
 
         // 🚨 核心逻辑：使用 Map 来接收并组装
         for (Event event : pageData.getRecords()) {
-            List<Map<String, Object>> artists = artistMapper.selectArtistMapsByEventId(event.getId());
-            event.setArtists(artists);
-        }
-
-        for (Event event : pageData.getRecords()) {
-            // 1. 组装参演艺人
+            // 当前已生效的参演艺人
             List<Map<String, Object>> artists = artistMapper.selectArtistMapsByEventId(event.getId());
             event.setArtists(artists);
 
-            // 🚨 2. 新增：组装该演出的所有票档，供审核人员查阅
+            // 当前已生效的票档
             List<TicketCategory> tickets = ticketService.list(
                     new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, event.getId())
             );
             event.setTickets(tickets);
+
+            // 如果是修改审核，则额外组装“修改后的艺人”
+            if (Objects.equals(event.getEditAuditStatus(), Event.EDIT_AUDIT_PENDING)) {
+                event.setPendingArtists(buildPendingArtists(event.getPendingPayload()));
+            }
         }
 
         return Result.success(pageData);
@@ -146,6 +149,16 @@ public class AdminEventController {
                     Integer finalStatus = dto.getStatus() != null ? dto.getStatus() : event.getStatus();
 
                     eventService.applyEventMainData(id, dto, Event.AUDIT_APPROVED, finalStatus);
+
+                    eventService.update(
+                            new LambdaUpdateWrapper<Event>()
+                                    .eq(Event::getId, id)
+                                    .set(Event::getEditAuditStatus, null)
+                                    .set(Event::getPendingPayload, null)
+                                    .set(Event::getAuditSubmitTime, LocalDateTime.now())
+                    );
+
+
                     evictEventDetailCache(id);
 
                     return Result.success("演出修改审核已通过，客户端信息已同步更新");
@@ -153,9 +166,13 @@ public class AdminEventController {
                     throw new BusinessException("解析演出修改审核快照失败");
                 }
             } else {
-                event.setEditAuditStatus(Event.EDIT_AUDIT_REJECTED);
-                event.setPendingPayload(null);
-                eventService.updateById(event);
+                eventService.update(
+                        new LambdaUpdateWrapper<Event>()
+                                .eq(Event::getId, id)
+                                .set(Event::getEditAuditStatus, 2)
+                                .set(Event::getPendingPayload, null)
+                                .set(Event::getAuditSubmitTime, LocalDateTime.now())
+                );
 
                 return Result.success("已驳回演出修改申请，客户端继续展示原信息");
             }
@@ -199,9 +216,13 @@ public class AdminEventController {
 
         // 撤销修改审核
         if (Objects.equals(event.getEditAuditStatus(), Event.EDIT_AUDIT_PENDING)) {
-            event.setEditAuditStatus(null);
-            event.setPendingPayload(null);
-            eventService.updateById(event);
+            eventService.update(
+                    new LambdaUpdateWrapper<Event>()
+                            .eq(Event::getId, id)
+                            .set(Event::getEditAuditStatus, null)
+                            .set(Event::getPendingPayload, null)
+                            .set(Event::getAuditSubmitTime, LocalDateTime.now())
+            );
             return Result.success("已撤销修改审核申请，客户端信息未受影响");
         }
 
@@ -276,5 +297,72 @@ public class AdminEventController {
         eventService.removeById(id);
         evictEventDetailCache(id);
         return Result.success("演出已删除", null);
+    }
+
+    @PutMapping("/confirm-edit-reject/{id}")
+    @PreAuthorize("hasAuthority('event:publish') or principal.username == '1'")
+    public Result<String> confirmEventEditReject(@PathVariable Long id) {
+        Event event = eventService.getById(id);
+        if (event == null) {
+            throw new BusinessException("演出不存在");
+        }
+
+        if (!Objects.equals(event.getEditAuditStatus(), Event.EDIT_AUDIT_REJECTED)) {
+            throw new BusinessException("当前演出没有待确认的修改驳回状态");
+        }
+
+        eventService.update(
+                new LambdaUpdateWrapper<Event>()
+                        .eq(Event::getId, id)
+                        .set(Event::getEditAuditStatus, null)
+                        .set(Event::getPendingPayload, null)
+                        .set(Event::getAuditSubmitTime, LocalDateTime.now())
+        );
+
+        return Result.success("已确认修改驳回结果");
+    }
+
+    private List<Map<String, Object>> buildPendingArtists(String pendingPayload) {
+        if (pendingPayload == null || pendingPayload.trim().isEmpty()) {
+            return new java.util.ArrayList<>();
+        }
+
+        try {
+            EventAddDTO dto = objectMapper.readValue(pendingPayload, EventAddDTO.class);
+
+            if (dto.getArtistIds() == null || dto.getArtistIds().isEmpty()) {
+                return new java.util.ArrayList<>();
+            }
+
+            List<Artist> artistList = artistMapper.selectBatchIds(dto.getArtistIds());
+
+            Map<Long, Artist> artistMap = artistList.stream()
+                    .collect(java.util.stream.Collectors.toMap(Artist::getId, a -> a));
+
+            return dto.getArtistIds().stream().map(artistId -> {
+                Map<String, Object> map = new java.util.HashMap<>();
+                Artist artist = artistMap.get(artistId);
+
+                map.put("id", artistId);
+
+                if (artist == null) {
+                    map.put("name", "未知艺人");
+                    map.put("notFound", true);
+                    map.put("auditStatus", null);
+                } else {
+                    map.put("name", artist.getName());
+                    map.put("avatarUrl", artist.getAvatarUrl());
+                    map.put("style", artist.getStyle());
+                    map.put("auditStatus", artist.getAuditStatus());
+                    map.put("notFound", false);
+                }
+
+                return map;
+            }).collect(java.util.stream.Collectors.toList());
+
+        } catch (Exception e) {
+            log.warn("解析修改审核中的艺人信息失败，pendingPayload={}", pendingPayload, e);
+            return new java.util.ArrayList<>();
+        }
     }
 }

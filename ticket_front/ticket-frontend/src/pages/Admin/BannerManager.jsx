@@ -13,7 +13,6 @@ const BannerManager = () => {
     const [banners, setBanners] = useState([]);
     const [loading, setLoading] = useState(false);
 
-    // 🚨 新增：搜索框的状态
     const [searchText, setSearchText] = useState('');
 
     const [modalVisible, setModalVisible] = useState(false);
@@ -21,7 +20,17 @@ const BannerManager = () => {
     const [form] = Form.useForm();
     const [fileList, setFileList] = useState([]);
 
-    // 远程调用后端已有的演出列表接口
+    const [userRole, setUserRole] = useState(6);
+    const isSuperAdmin = userRole === 1;
+
+    useEffect(() => {
+        axios.get('/api/user/info').then(res => {
+            if (res.data.code === 200) {
+                setUserRole(res.data.data.role || 6);
+            }
+        });
+    }, []);
+
     const fetchRemoteEvents = async (keyword) => {
         if (!keyword) {
             setEventOptions([]);
@@ -29,12 +38,11 @@ const BannerManager = () => {
         }
         setFetchingEvents(true);
         try {
-            // 复用 AdminEventController 的分页列表接口
             const res = await axios.get('/api/admin/event/list', {
                 params: { current: 1, size: 20, keyword }
             });
             if (res.data.code === 200) {
-                const records = res.data.data.records;
+                const records = res.data.data.records || [];
                 const options = records.map(event => ({
                     label: `[ID: ${event.id}] ${event.title}`,
                     value: event.id
@@ -48,15 +56,13 @@ const BannerManager = () => {
         }
     };
 
-    // 搜索框防抖控制
     const handleSearchEvent = (value) => {
         if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
         searchTimeoutRef.current = setTimeout(() => {
             fetchRemoteEvents(value);
-        }, 500); // 停顿 0.5 秒发请求
+        }, 500);
     };
 
-    // 🚨 1. 修改：拉取横幅列表时带上 keyword 参数
     const fetchBanners = async (type = activeTab, keyword = searchText) => {
         setLoading(true);
         try {
@@ -64,7 +70,7 @@ const BannerManager = () => {
                 params: { type, keyword }
             });
             if (res.data.code === 200) {
-                setBanners(res.data.data);
+                setBanners(res.data.data || []);
             }
         } catch (error) {
             message.error('获取横幅列表失败');
@@ -74,7 +80,7 @@ const BannerManager = () => {
     };
 
     useEffect(() => {
-        fetchBanners();
+        fetchBanners(activeTab, searchText);
     }, [activeTab]);
 
     const handleRevokeAudit = async (id) => {
@@ -91,30 +97,97 @@ const BannerManager = () => {
         }
     };
 
+    const getBannerStatusTag = (record) => {
+        if (record?.editAuditStatus === 0) return <Tag color="processing">修改待审核</Tag>;
+        if (record?.editAuditStatus === 2) return <Tag color="red">修改被驳回</Tag>;
+        if (record?.auditStatus === 0) return <Tag color="orange">新增待审核</Tag>;
+        if (record?.auditStatus === 2) return <Tag color="red">新增被驳回</Tag>;
+        if (record?.auditStatus === 3) return <Tag color="default">已撤销</Tag>;
+
+        if (activeTab === '1') return <Tag color="blue">即将展示</Tag>;
+        if (activeTab === '2') return <Tag color="green">展示中</Tag>;
+        return <Tag color="default">已过期</Tag>;
+    };
+
     const columns = [
-        { title: '横幅海报', dataIndex: 'posterUrl', render: (url) => <Image src={url} width={120} style={{ borderRadius: 8 }} /> },
-        { title: '关联演出ID', dataIndex: 'eventId', render: (id) => id || <span style={{color:'#999'}}>纯展示(无跳转)</span> },
-        { title: '开始展示时间', dataIndex: 'startTime', render: (t) => dayjs(t).format('YYYY-MM-DD HH:mm:ss') },
-        { title: '过期下架时间', dataIndex: 'endTime', render: (t) => dayjs(t).format('YYYY-MM-DD HH:mm:ss') },
+        {
+            title: '横幅海报',
+            dataIndex: 'posterUrl',
+            render: (url) => <Image src={url} width={120} style={{ borderRadius: 8 }} />
+        },
+        {
+            title: '关联演出ID',
+            dataIndex: 'eventId',
+            render: (id) => id || <span style={{ color: '#999' }}>纯展示(无跳转)</span>
+        },
+        {
+            title: '开始展示时间',
+            dataIndex: 'startTime',
+            render: (t) => t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-'
+        },
+        {
+            title: '过期下架时间',
+            dataIndex: 'endTime',
+            render: (t) => t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-'
+        },
         {
             title: '当前状态',
             key: 'status',
-            render: () => {
-                if (activeTab === '1') return <Tag color="blue">即将展示</Tag>;
-                if (activeTab === '2') return <Tag color="green">展示中</Tag>;
-                return <Tag color="default">已过期</Tag>;
-            }
+            render: (_, record) => getBannerStatusTag(record)
         },
         {
             title: '操作',
-            render: (_, record) => (
-                <Space>
-                    <Button type="link" icon={<EditOutlined />} onClick={() => openModal(record)}>编辑</Button>
-                    <Popconfirm title="确定删除吗？" onConfirm={() => handleDelete(record.id)}>
-                        <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
-                    </Popconfirm>
-                </Space>
-            )
+            key: 'action',
+            render: (_, record) => {
+                const isNewPending = record.auditStatus === 0;
+                const isEditPending = record.editAuditStatus === 0;
+                const hasPendingAudit = isNewPending || isEditPending;
+                const canEdit = isSuperAdmin || !hasPendingAudit;
+
+                return (
+                    <Space>
+                        {record.editAuditStatus === 2 && (
+                            <Popconfirm
+                                title="确认修改审核被驳回？"
+                                description="确认后将清除修改驳回状态，页面恢复为当前已生效横幅。"
+                                onConfirm={() => handleConfirmEditReject(record.id)}
+                                okText="确认"
+                                cancelText="取消"
+                            >
+                                <Button type="link" style={{ color: '#52c41a' }}>
+                                    确认
+                                </Button>
+                            </Popconfirm>
+                        )}
+                        <Button
+                            type="link"
+                            icon={<EditOutlined />}
+                            disabled={!canEdit}
+                            onClick={() => openModal(record)}
+                        >
+                            编辑
+                        </Button>
+                        {!isSuperAdmin && hasPendingAudit && (
+                            <Popconfirm
+                                title="确定撤销审核申请？"
+                                description="撤销后可重新编辑并提交审核。"
+                                onConfirm={() => handleRevokeAudit(record.id)}
+                                okText="确定撤销"
+                                cancelText="取消"
+                                okButtonProps={{ danger: true }}
+                            >
+                                <Button type="link" danger>
+                                    撤销审核
+                                </Button>
+                            </Popconfirm>
+                        )}
+
+                        <Popconfirm title="确定删除吗？" onConfirm={() => handleDelete(record.id)}>
+                            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+                        </Popconfirm>
+                    </Space>
+                );
+            }
         }
     ];
 
@@ -123,18 +196,18 @@ const BannerManager = () => {
         if (record) {
             form.setFieldsValue({
                 eventId: record.eventId,
-                timeRange: [dayjs(record.startTime), dayjs(record.endTime)]
+                timeRange: record.startTime && record.endTime ? [dayjs(record.startTime), dayjs(record.endTime)] : []
             });
-            setFileList([{ uid: '-1', name: 'banner.jpg', status: 'done', url: record.posterUrl }]);
+            setFileList(record.posterUrl ? [{ uid: '-1', name: 'banner.jpg', status: 'done', url: record.posterUrl }] : []);
             if (record.eventId) {
                 setEventOptions([{ label: `[ID: ${record.eventId}] 已关联演出`, value: record.eventId }]);
             } else {
                 setEventOptions([]);
             }
-
         } else {
             form.resetFields();
             setFileList([]);
+            setEventOptions([]);
         }
         setModalVisible(true);
     };
@@ -158,11 +231,17 @@ const BannerManager = () => {
 
             const res = await axios.post('/api/admin/banner/save', payload);
             if (res.data.code === 200) {
-                message.success('操作成功');
+                message.success(res.data.message || '操作成功');
                 setModalVisible(false);
                 fetchBanners();
+            } else {
+                message.error(res.data.message || '操作失败');
             }
-        } catch (error) {}
+        } catch (error) {
+            if (error?.message) {
+                message.error(error.message);
+            }
+        }
     };
 
     const handleDelete = async (id) => {
@@ -171,13 +250,30 @@ const BannerManager = () => {
             if (res.data.code === 200) {
                 message.success('删除成功');
                 fetchBanners();
+            } else {
+                message.error(res.data.message || '删除失败');
             }
-        } catch (error) {}
+        } catch (error) {
+            message.error('删除失败');
+        }
+    };
+
+    const handleConfirmEditReject = async (id) => {
+        try {
+            const res = await axios.put(`/api/admin/banner/confirm-edit-reject/${id}`);
+            if (res.data.code === 200) {
+                message.success(res.data.message || '已确认修改驳回结果');
+                fetchBanners();
+            } else {
+                message.error(res.data.message || '确认失败');
+            }
+        } catch (error) {
+            message.error(error.response?.data?.message || '确认修改驳回失败');
+        }
     };
 
     return (
         <Card
-            // 🚨 2. 精简 title，取消 extra 属性
             title={
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 16, fontWeight: 'bold', color: '#333' }}>首页滚动横幅管理</span>
@@ -186,7 +282,6 @@ const BannerManager = () => {
             bordered={false}
             style={{ borderRadius: 12 }}
         >
-            {/* 🚨 3. 新增：模仿演出/艺人管理看板的工具栏 (搜索框 + 新增按钮) */}
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', gap: 10 }}>
                     <Input
@@ -194,11 +289,11 @@ const BannerManager = () => {
                         prefix={<SearchOutlined />}
                         value={searchText}
                         onChange={e => setSearchText(e.target.value)}
-                        onPressEnter={() => fetchBanners()} // 回车触发搜索
+                        onPressEnter={() => fetchBanners(activeTab, searchText)}
                         style={{ width: 300 }}
                         allowClear
                     />
-                    <Button type="primary" onClick={() => fetchBanners()}>搜索</Button>
+                    <Button type="primary" onClick={() => fetchBanners(activeTab, searchText)}>搜索</Button>
                 </div>
 
                 <Button
@@ -216,14 +311,23 @@ const BannerManager = () => {
                 </Button>
             </div>
 
-            <Tabs activeKey={activeTab} onChange={(key) => { setActiveTab(key); }} items={[
+            <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key)} items={[
                 { key: '2', label: '展示中' },
                 { key: '1', label: '即将展示' },
                 { key: '3', label: '展示过期 (已归档)' }
             ]} />
+
             <Table columns={columns} dataSource={banners} rowKey="id" loading={loading} />
 
-            <Modal title={editingId ? '编辑横幅' : '新增横幅'} open={modalVisible} onOk={handleOk} onCancel={() => setModalVisible(false)} width={600}>
+            <Modal
+                title={editingId ? '编辑横幅' : '新增横幅'}
+                open={modalVisible}
+                onOk={handleOk}
+                onCancel={() => setModalVisible(false)}
+                width={600}
+                okText={editingId ? '提交修改' : '提交新增'}
+                cancelText="取消"
+            >
                 <Form form={form} layout="vertical">
                     <Form.Item label="横幅图片 (推荐比例 4:1)" required>
                         <Upload
@@ -237,6 +341,7 @@ const BannerManager = () => {
                             {fileList.length === 0 && <div><UploadOutlined /><div style={{ marginTop: 8 }}>点击上传</div></div>}
                         </Upload>
                     </Form.Item>
+
                     <Form.Item
                         name="eventId"
                         label="关联演出"
@@ -245,13 +350,14 @@ const BannerManager = () => {
                         <Select
                             showSearch
                             allowClear
-                            filterOption={false} // 必须关掉本地过滤，全权交由后端
+                            filterOption={false}
                             onSearch={handleSearchEvent}
                             placeholder="输入演出名称或 ID 进行搜索"
-                            notFoundContent={fetchingEvents ? <Spin size="small" /> : "请输入关键词搜索..."}
+                            notFoundContent={fetchingEvents ? <Spin size="small" /> : '请输入关键词搜索...'}
                             options={eventOptions}
                         />
                     </Form.Item>
+
                     <Form.Item name="timeRange" label="横幅展示期限" rules={[{ required: true, message: '请选择展示时间' }]}>
                         <DatePicker.RangePicker showTime format="YYYY-MM-DD HH:mm:ss" style={{ width: '100%' }} />
                     </Form.Item>

@@ -13,6 +13,7 @@ import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -293,6 +294,13 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         newEvent.setAuditSubmitTime(LocalDateTime.now());
 
         updateById(newEvent);
+
+        this.update(
+                new LambdaUpdateWrapper<Event>()
+                        .eq(Event::getId, id)
+                        .set(Event::getEditAuditStatus, null)
+                        .set(Event::getPendingPayload, null)
+        );
 
         eventArtistService.remove(
                 new LambdaQueryWrapper<EventArtist>().eq(EventArtist::getEventId, id)

@@ -8,6 +8,7 @@ import com.avemonica.ticket.mapper.ArtistMapper;
 import com.avemonica.ticket.service.ArtistService;
 import com.avemonica.ticket.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -246,18 +247,27 @@ public class AdminArtistController {
                     Artist pending = objectMapper.readValue(artist.getPendingPayload(), Artist.class);
                     pending.setId(id);
                     pending.setAuditStatus(1);
-                    pending.setEditAuditStatus(null);
-                    pending.setPendingPayload(null);
                     pending.setAuditSubmitTime(LocalDateTime.now());
                     artistService.updateById(pending);
+                    artistService.update(
+                            new LambdaUpdateWrapper<Artist>()
+                                    .eq(Artist::getId, id)
+                                    .set(Artist::getEditAuditStatus, null)
+                                    .set(Artist::getPendingPayload, null)
+                                    .set(Artist::getAuditSubmitTime, LocalDateTime.now())
+                    );
                     return Result.success("艺人修改审核已通过，客户端信息已同步更新");
                 } catch (Exception e) {
                     throw new BusinessException("解析艺人修改审核快照失败");
                 }
             } else {
-                artist.setEditAuditStatus(2);
-                artist.setPendingPayload(null);
-                artistService.updateById(artist);
+                artistService.update(
+                        new LambdaUpdateWrapper<Artist>()
+                                .eq(Artist::getId, id)
+                                .set(Artist::getEditAuditStatus, 2)
+                                .set(Artist::getPendingPayload, null)
+                                .set(Artist::getAuditSubmitTime, LocalDateTime.now())
+                );
                 return Result.success("已驳回艺人修改申请，客户端继续展示原信息");
             }
         }
@@ -287,14 +297,41 @@ public class AdminArtistController {
         }
 
         if (Objects.equals(artist.getEditAuditStatus(), 0)) {
-            artist.setEditAuditStatus(null);
-            artist.setPendingPayload(null);
-            artistService.updateById(artist);
+            artistService.update(
+                    new LambdaUpdateWrapper<Artist>()
+                            .eq(Artist::getId, id)
+                            .set(Artist::getEditAuditStatus, null)
+                            .set(Artist::getPendingPayload, null)
+                            .set(Artist::getAuditSubmitTime, LocalDateTime.now())
+            );
+
             return Result.success("已撤销艺人修改审核申请，客户端信息未受影响");
         }
 
         throw new BusinessException("当前状态无需撤销审核");
     }
 
+    @PutMapping("/confirm-edit-reject/{id}")
+    @PreAuthorize("hasAuthority('audit:manage') or principal.username == '1'")
+    public Result<String> confirmArtistEditReject(@PathVariable Long id) {
+        Artist artist = artistService.getById(id);
+        if (artist == null) {
+            throw new BusinessException("艺人不存在");
+        }
+
+        if (!Objects.equals(artist.getEditAuditStatus(), 2)) {
+            throw new BusinessException("当前艺人没有待确认的修改驳回状态");
+        }
+
+        artistService.update(
+                new LambdaUpdateWrapper<Artist>()
+                        .eq(Artist::getId, id)
+                        .set(Artist::getEditAuditStatus, null)
+                        .set(Artist::getPendingPayload, null)
+                        .set(Artist::getAuditSubmitTime, LocalDateTime.now())
+        );
+
+        return Result.success("已确认修改驳回结果");
+    }
 
 }

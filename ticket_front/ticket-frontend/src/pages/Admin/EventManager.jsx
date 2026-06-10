@@ -122,6 +122,20 @@ const EventManager = () => {
         });
     };
 
+    const handleConfirmEditReject = async (id) => {
+        try {
+            const res = await axios.put(`/api/admin/event/confirm-edit-reject/${id}`);
+            if (res.data.code === 200) {
+                message.success(res.data.message || '已确认修改驳回结果');
+                fetchEvents(pagination.current, pagination.pageSize);
+            } else {
+                message.error(res.data.message || '确认失败');
+            }
+        } catch (error) {
+            message.error(error.response?.data?.message || '确认修改驳回失败');
+        }
+    };
+
     const handleTakeDown = async (id) => {
         try {
             const res = await axios.put(`/api/admin/event/takedown/${id}`);
@@ -151,6 +165,18 @@ const EventManager = () => {
     // ==========================================
     const columns = [
         {
+            title: '演出ID',
+            dataIndex: 'id',
+            key: 'id',
+            width: 90,
+            render: (id) => (
+                <div style={{ margin: 0 }}>
+                    {id}
+                </div>
+            )
+        },
+        {
+
             title: '海报',
             dataIndex: 'posterUrl',
             key: 'poster',
@@ -230,6 +256,19 @@ const EventManager = () => {
             )
         },
         {
+            title: '演出城市',
+            dataIndex: 'city',
+            key: 'city',
+            width: 100,
+            render: (city) => city ? (
+                <Tag color="cyan" style={{ margin: 0 }}>
+                    {city}
+                </Tag>
+            ) : (
+                <span style={{ color: '#999', fontSize: 12 }}>未设置</span>
+            )
+        },
+        {
             title: '场馆与地址',
             key: 'location',
             // 需求 2 & 6：组合场馆与详细地址，竖向排布，不限高度
@@ -238,6 +277,19 @@ const EventManager = () => {
                     <div style={{ color: '#333' }}>{record.venue}</div>
                     <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{record.address}</div>
                 </div>
+            )
+        },
+        {
+            title: '开票时间',
+            dataIndex: 'saleTime',
+            key: 'saleTime',
+            width: 150,
+            render: (saleTime) => saleTime ? (
+                <span style={{ color: '#666', fontSize: 13 }}>
+            {String(saleTime).replace('T', ' ').slice(0, 16)}
+        </span>
+            ) : (
+                <span style={{ color: '#999', fontSize: 12 }}>未设置</span>
             )
         },
         {
@@ -309,6 +361,19 @@ const EventManager = () => {
                     {/* 场景 A：拥有发布/编辑权限的人 (超管、演出管理方) */}
                     {hasPublishPerm && (
                         <>
+                            {record.editAuditStatus === 2 && (
+                                <Popconfirm
+                                    title="确认修改审核被驳回？"
+                                    description="确认后将清除修改驳回状态，页面恢复为当前已生效信息。"
+                                    onConfirm={() => handleConfirmEditReject(record.id)}
+                                    okText="确认"
+                                    cancelText="取消"
+                                >
+                                    <Button type="text" style={{ color: '#52c41a', padding: 0 }}>
+                                        确认
+                                    </Button>
+                                </Popconfirm>
+                            )}
                             <Button
                                 type="text"
                                 icon={<Edit size={14} />}
@@ -318,6 +383,7 @@ const EventManager = () => {
                             >
                                 编辑
                             </Button>
+
                             {!isSuperAdmin && hasPendingAudit && (
                                 <Popconfirm
                                     title="确定撤销审核申请？"

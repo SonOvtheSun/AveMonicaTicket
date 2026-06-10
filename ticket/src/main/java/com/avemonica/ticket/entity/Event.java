@@ -100,6 +100,9 @@ public class Event {
     @TableField(exist = false)
     private List<Map<String, Object>> artists;
 
+    @TableField(exist = false)
+    private List<Map<String, Object>> pendingArtists;
+
     private String style;
 
     private Integer runningTime;
@@ -109,6 +112,7 @@ public class Event {
     private String pendingPayload;
 
     private LocalDateTime auditSubmitTime;
+
 
     // ==========================================
     // 💡 状态字典常量定义，拒绝魔法数字

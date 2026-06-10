@@ -21,6 +21,10 @@ const AuditManager = () => {
     const [detailRecord, setDetailRecord] = useState(null);
     const [detailType, setDetailType] = useState('event'); // 'event' 或 'artist'
 
+    const [diffVisible, setDiffVisible] = useState(false);
+    const [diffRows, setDiffRows] = useState([]);
+    const [diffTitle, setDiffTitle] = useState('');
+
     const [banners, setBanners] = useState([]);
     const [loadingBanners, setLoadingBanners] = useState(false);
 
@@ -36,6 +40,174 @@ const AuditManager = () => {
         } finally {
             setLoadingBanners(false);
         }
+    };
+
+    const safeParseJson = (jsonText) => {
+        if (!jsonText) return null;
+        try {
+            return typeof jsonText === 'string' ? JSON.parse(jsonText) : jsonText;
+        } catch (e) {
+            message.error('修改内容解析失败');
+            return null;
+        }
+    };
+
+    const formatTickets = (tickets = []) => {
+        if (!tickets || tickets.length === 0) return '暂未设置票档';
+
+        return tickets.map(t => {
+            const name = t.name || '未命名票档';
+            const price = t.price ?? '未设置价格';
+            const stock = t.stock ?? t.totalStock ?? '未设置库存';
+            return `${name} / ¥${price} / 库存${stock}`;
+        }).join('\n');
+    };
+
+    const formatArtists = (artists = []) => {
+        if (!artists || artists.length === 0) return '暂无艺人';
+
+        return artists.map(a => {
+            if (typeof a === 'object') {
+                return a.name ? `${a.name}${a.id ? `（ID:${a.id}）` : ''}` : `艺人ID：${a.id}`;
+            }
+            return `艺人ID：${a}`;
+        }).join(' / ');
+    };
+
+    const formatArtistIds = (artistIds = []) => {
+        if (!artistIds || artistIds.length === 0) return '暂无艺人';
+        return artistIds.map(id => `艺人ID：${id}`).join(' / ');
+    };
+
+    const buildEventExtraDiffRows = (record, pending) => {
+        const rows = [];
+
+        const oldTickets = formatTickets(record.tickets || []);
+        const newTickets = formatTickets(pending.tickets || []);
+
+        if (oldTickets !== newTickets) {
+            rows.push({
+                label: '票务档位',
+                oldText: oldTickets,
+                newText: newTickets,
+                changed: true
+            });
+        }
+
+        const oldArtistList = record.artists || [];
+        const newArtistList = record.pendingArtists && record.pendingArtists.length > 0
+            ? record.pendingArtists
+            : (pending.artistIds || []);
+
+        const oldArtistIds = oldArtistList
+            .map(a => Number(a.id))
+            .filter(id => Number.isFinite(id))
+            .sort((a, b) => a - b);
+
+        const newArtistIds = newArtistList
+            .map(a => Number(typeof a === 'object' ? a.id : a))
+            .filter(id => Number.isFinite(id))
+            .sort((a, b) => a - b);
+
+        const isSameArtists =
+            oldArtistIds.length === newArtistIds.length &&
+            oldArtistIds.every((id, index) => id === newArtistIds[index]);
+
+        if (!isSameArtists) {
+            rows.push({
+                label: '参演艺人',
+                oldText: formatArtists(oldArtistList),
+                newText: formatArtists(newArtistList),
+                changed: true
+            });
+        }
+
+        return rows;
+    };
+
+    const normalizeValue = (value) => {
+        if (value === null || value === undefined || value === '') return '未设置';
+        if (Array.isArray(value)) return value.join(' / ');
+        if (typeof value === 'object') return JSON.stringify(value);
+        return String(value).replace('T', ' ');
+    };
+
+    const buildDiffRows = (record, pending, fieldMap) => {
+        return fieldMap
+            .map(item => {
+                const oldValue = record?.[item.key];
+                const newValue = pending?.[item.key];
+
+                const oldText = normalizeValue(oldValue);
+                const newText = normalizeValue(newValue);
+
+                return {
+                    label: item.label,
+                    oldText,
+                    newText,
+                    changed: oldText !== newText
+                };
+            })
+            .filter(item => item.changed);
+    };
+
+    const showModifyDiff = (record, type) => {
+        const pending = safeParseJson(record.pendingPayload);
+
+        if (!pending) {
+            message.warning('暂无可查看的修改内容');
+            return;
+        }
+
+        let fieldMap = [];
+        let title = '';
+
+        if (type === 'event') {
+            title = '演出修改内容';
+            fieldMap = [
+                { key: 'title', label: '演出标题' },
+                { key: 'city', label: '演出城市' },
+                { key: 'venue', label: '演出场馆' },
+                { key: 'address', label: '详细地址' },
+                { key: 'showTime', label: '演出时间' },
+                { key: 'saleTime', label: '开票时间' },
+                { key: 'style', label: '演出风格' },
+                { key: 'posterUrl', label: '主海报' },
+                { key: 'detailsUrl', label: '详情长图' },
+                { key: 'status', label: '演出状态' },
+                { key: 'runningTime', label: '演出时长' }
+            ];
+        } else if (type === 'artist') {
+            title = '艺人修改内容';
+            fieldMap = [
+                { key: 'name', label: '艺人名称' },
+                { key: 'region', label: '国家/地区' },
+                { key: 'style', label: '音乐风格' },
+                { key: 'description', label: '艺人简介' },
+                { key: 'avatarUrl', label: '头像' }
+            ];
+        } else if (type === 'banner') {
+            title = 'Banner 修改内容';
+            fieldMap = [
+                { key: 'posterUrl', label: '横幅图片' },
+                { key: 'eventId', label: '关联演出ID' },
+                { key: 'startTime', label: '开始展示时间' },
+                { key: 'endTime', label: '结束展示时间' }
+            ];
+        }
+
+        let rows = buildDiffRows(record, pending, fieldMap);
+
+        if (type === 'event') {
+            rows = [
+                ...rows,
+                ...buildEventExtraDiffRows(record, pending)
+            ];
+        }
+
+        setDiffTitle(title);
+        setDiffRows(rows);
+        setDiffVisible(true);
     };
 
     // === 数据获取 ===
@@ -93,31 +265,108 @@ const AuditManager = () => {
 
     // === 审核操作 ===
     const handleAudit = async (id, type, isPass) => {
+        if (!id) {
+            message.error('审核对象ID为空');
+            return;
+        }
+
+        let endpoint = '';
+
+        if (type === 'event') {
+            endpoint = `/api/admin/event/audit/${id}?isPass=${isPass}`;
+        } else if (type === 'artist') {
+            endpoint = `/api/admin/artist/audit/${id}?isPass=${isPass}`;
+        } else if (type === 'banner') {
+            endpoint = `/api/admin/banner/audit/${id}?isPass=${isPass}`;
+        } else {
+            message.error('未知审核类型');
+            return;
+        }
+
         try {
-            // 💡 接口示例：/api/admin/event/audit/2?status=1 (1为通过，2为驳回)
-            let endpoint = '';
-
-            if (type === 'event') {
-                endpoint = `/api/admin/event/audit/${id}?isPass=${isPass}`;
-            } else if (type === 'artist') {
-                endpoint = `/api/admin/artist/audit/${id}?isPass=${isPass}`;
-            } else if (type === 'banner') {
-                endpoint = `/api/admin/banner/audit/${id}?isPass=${isPass}`;
-            }
-
             const res = await axios.put(endpoint);
+
             if (res.data.code === 200) {
-                message.success(`已${isPass ? '通过' : '驳回'}该申请`);
-                if (type === 'event') fetchPendingEvents(eventPagination.current, eventPagination.pageSize);
-                else if (type === 'artist') fetchPendingArtists(artistPagination.current, artistPagination.pageSize);
-                else fetchPendingBanners();
-                setDetailVisible(false); // 如果是在弹窗里点的，顺便关掉弹窗
+                message.success(res.data.message || `已${isPass ? '通过' : '驳回'}该申请`);
+
+                if (type === 'event') {
+                    fetchPendingEvents(eventPagination.current, eventPagination.pageSize);
+                } else if (type === 'artist') {
+                    fetchPendingArtists(artistPagination.current, artistPagination.pageSize);
+                } else if (type === 'banner') {
+                    fetchPendingBanners();
+                }
+
+                setDetailVisible(false);
             } else {
-                message.error(res.data.message);
+                message.error(res.data.message || '审核失败');
             }
         } catch (error) {
-            message.error('审核操作失败');
+            console.error('审核接口异常:', error);
+            console.error('后端返回:', error.response?.data);
+
+            message.error(
+                error.response?.data?.message ||
+                error.response?.data?.msg ||
+                error.response?.data?.error ||
+                '审核操作失败'
+            );
         }
+    };
+
+    const getAuditDisplayRecord = (record, type) => {
+        if (!record) return null;
+
+        // 非修改审核，直接展示当前记录
+        if (record.editAuditStatus !== 0 || !record.pendingPayload) {
+            return record;
+        }
+
+        const pending = safeParseJson(record.pendingPayload);
+        if (!pending) return record;
+
+        if (type === 'event') {
+            return {
+                ...record,
+                ...pending,
+
+                // EventAddDTO 里票档字段一般是 tickets
+                tickets: pending.tickets || record.tickets || [],
+
+                // EventAddDTO 里艺人通常是 artistIds，不是 artists
+                artists: record.pendingArtists && record.pendingArtists.length > 0
+                    ? record.pendingArtists
+                    : (
+                        pending.artistIds
+                            ? pending.artistIds.map(id => ({
+                                id,
+                                name: `艺人ID：${id}`,
+                                auditStatus: 1
+                            }))
+                            : (record.artists || [])
+                    ),
+
+                __isPendingPreview: true
+            };
+        }
+
+        if (type === 'artist') {
+            return {
+                ...record,
+                ...pending,
+                __isPendingPreview: true
+            };
+        }
+
+        if (type === 'banner') {
+            return {
+                ...record,
+                ...pending,
+                __isPendingPreview: true
+            };
+        }
+
+        return record;
     };
 
     // === 打开详情弹窗 ===
@@ -159,11 +408,21 @@ const AuditManager = () => {
                 </Button>
             )
         },
+
         {
             title: '审核操作',
             key: 'action',
             render: (_, record) => (
                 <Space>
+                    {record.editAuditStatus === 0 && (
+                        <Button
+                            type="link"
+                            size="small"
+                            onClick={() => showModifyDiff(record, 'event')}
+                        >
+                            查看修改内容
+                        </Button>
+                    )}
                     <Popconfirm
                         title="确定通过审核？"
                         description="通过后，该演出将转为预售状态。"
@@ -224,6 +483,15 @@ const AuditManager = () => {
             key: 'action',
             render: (_, record) => (
                 <Space>
+                    {record.editAuditStatus === 0 && (
+                        <Button
+                            type="link"
+                            size="small"
+                            onClick={() => showModifyDiff(record, 'artist')}
+                        >
+                            查看修改内容
+                        </Button>
+                    )}
                     <Button type="primary" size="small" style={{ backgroundColor: '#52c41a' }} icon={<CheckCircle size={14} />} onClick={() => handleAudit(record.id, 'artist', true)}>通过</Button>
                     <Button type="primary" danger size="small" icon={<XCircle size={14} />} onClick={() => handleAudit(record.id, 'artist', false)}>驳回</Button>
                 </Space>
@@ -265,9 +533,15 @@ const AuditManager = () => {
             key: 'action',
             render: (_, record) => (
                 <Space>
-                    <Button type="link" icon={<FileSearch size={14} />} onClick={() => showDetails(record, 'banner')}>
-                        查看详情
-                    </Button>
+                    {record.editAuditStatus === 0 && (
+                        <Button
+                            type="link"
+                            size="small"
+                            onClick={() => showModifyDiff(record, 'banner')}
+                        >
+                            查看修改内容
+                        </Button>
+                    )}
                     <Button type="primary" size="small" style={{ backgroundColor: '#52c41a' }} icon={<CheckCircle size={14} />} onClick={() => handleAudit(record.id, 'banner', true)}>
                         通过
                     </Button>
@@ -278,6 +552,7 @@ const AuditManager = () => {
             )
         }
     ];
+    const displayRecord = getAuditDisplayRecord(detailRecord, detailType);
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -314,7 +589,7 @@ const AuditManager = () => {
                 />
             </Card>
 
-            <Card title={<span style={{ fontWeight: 'bold' }}>待审核首页横幅</span>} bordered={false} style={{ borderRadius: 12 }}>
+            <Card title={<div style = {{display:'flex'}}><span style={{ fontWeight: 'bold' }}>待审核首页横幅</span></div>} bordered={false} style={{ borderRadius: 12 }}>
                 <Table
                     columns={bannerColumns}
                     dataSource={banners}
@@ -335,14 +610,15 @@ const AuditManager = () => {
                     <Button key="pass" type="primary" style={{ backgroundColor: '#52c41a' }} onClick={() => handleAudit(detailRecord?.id, detailType, true)}>通过审核</Button>
                 ]}
             >
-                {detailRecord && detailType === 'event' && (
+                {displayRecord && detailType === 'event' && (
                     <Descriptions column={2} bordered size="small">
-                        <Descriptions.Item label="演出标题" span={2}>{detailRecord.title}</Descriptions.Item>
+
+                        <Descriptions.Item label="演出标题" span={2}>{displayRecord.title}</Descriptions.Item>
 
                         {/* 🚨 新增：演出音乐风格 */}
                         <Descriptions.Item label="演出风格" span={2}>
-                            {detailRecord.style ? (
-                                <Tag color="purple">{detailRecord.style}</Tag>
+                            {displayRecord.style ? (
+                                <Tag color="purple">{displayRecord.style}</Tag>
                             ) : (
                                 <span style={{ color: '#999' }}>暂无风格</span>
                             )}
@@ -350,31 +626,31 @@ const AuditManager = () => {
 
                         {/* 🚨 新增：演出城市与场馆对齐显示 */}
                         <Descriptions.Item label="演出城市">
-                            <Tag color="blue">{detailRecord.city || '未指定'}</Tag>
+                            <Tag color="blue">{displayRecord.city || '未指定'}</Tag>
                         </Descriptions.Item>
-                        <Descriptions.Item label="场馆">{detailRecord.venue}</Descriptions.Item>
+                        <Descriptions.Item label="场馆">{displayRecord.venue}</Descriptions.Item>
 
                         {/* 🚨 新增：将演出时间和开票时间放在同一行对比显示 */}
                         <Descriptions.Item label="演出时间">
-                            {detailRecord.showTime ? dayjs(detailRecord.showTime).format('YYYY-MM-DD HH:mm:ss') : '待定'}
+                            {displayRecord.showTime ? dayjs(displayRecord.showTime).format('YYYY-MM-DD HH:mm:ss') : '待定'}
                         </Descriptions.Item>
                         <Descriptions.Item label="预开票时间">
-                            {detailRecord.saleTime ? (
+                            {displayRecord.saleTime ? (
                                 <span style={{ color: '#e60026', fontWeight: 'bold' }}>
-                                    {dayjs(detailRecord.saleTime).format('YYYY-MM-DD HH:mm:ss')}
+                                    {dayjs(displayRecord.saleTime).format('YYYY-MM-DD HH:mm:ss')}
                                 </span>
                             ) : (
                                 <span style={{ color: '#999' }}>待定</span>
                             )}
                         </Descriptions.Item>
 
-                        <Descriptions.Item label="详细地址" span={2}>{detailRecord.address}</Descriptions.Item>
+                        <Descriptions.Item label="详细地址" span={2}>{displayRecord.address}</Descriptions.Item>
 
                         {/* 👇 保持不变的参演音乐人显示逻辑 */}
                         <Descriptions.Item label="参演音乐人" span={2}>
-                            {detailRecord.artists && detailRecord.artists.length > 0 ? (
+                            {displayRecord.artists && displayRecord.artists.length > 0 ? (
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                    {detailRecord.artists.map((artist, idx) => {
+                                    {displayRecord.artists.map((artist, idx) => {
                                         let tagColor = 'cyan';
                                         let displayText = artist.name;
 
@@ -400,9 +676,9 @@ const AuditManager = () => {
 
                         {/* 🚨 新增：票务档位策略查看 */}
                         <Descriptions.Item label="票务档位" span={2}>
-                            {detailRecord.tickets && detailRecord.tickets.length > 0 ? (
+                            {displayRecord.tickets && displayRecord.tickets.length > 0 ? (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    {detailRecord.tickets.map((ticket, idx) => (
+                                    {displayRecord.tickets.map((ticket, idx) => (
                                         <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#fff0f3', padding: '6px 12px', borderRadius: '6px', border: '1px solid #ffe6e8' }}>
                                             <Tag color="#FF8899" style={{ margin: 0 }}>{ticket.name}</Tag>
                                             <span style={{ color: '#e60026', fontWeight: 'bold', width: '80px' }}>¥ {ticket.price}</span>
@@ -418,24 +694,78 @@ const AuditManager = () => {
                         </Descriptions.Item>
 
                         <Descriptions.Item label="主海报" span={2}>
-                            <Image src={detailRecord.posterUrl} width={100} style={{ borderRadius: 4 }} />
+                            <Image src={displayRecord.posterUrl} width={100} style={{ borderRadius: 4 }} />
                         </Descriptions.Item>
                         <Descriptions.Item label="详情长图" span={2}>
-                            {detailRecord.detailsUrl ? <Image src={detailRecord.detailsUrl} width={100} style={{ borderRadius: 4 }} /> : '无'}
+                            {displayRecord.detailsUrl ? <Image src={displayRecord.detailsUrl} width={100} style={{ borderRadius: 4 }} /> : '无'}
                         </Descriptions.Item>
                     </Descriptions>
                 )}
 
-                {detailRecord && detailType === 'artist' && (
+                {displayRecord && detailType === 'artist' && (
                     <Descriptions column={1} bordered size="small">
-                        <Descriptions.Item label="艺人名称">{detailRecord.name}</Descriptions.Item>
-                        <Descriptions.Item label="地区">{detailRecord.region || '该艺人暂无地区'}</Descriptions.Item>
-                        <Descriptions.Item label="风格">{detailRecord.style || '该艺人暂无风格'}</Descriptions.Item>
-                        <Descriptions.Item label="简介描述">{detailRecord.description || '该艺人暂无简介'}</Descriptions.Item>
+                        <Descriptions.Item label="艺人名称">{displayRecord.name}</Descriptions.Item>
+                        <Descriptions.Item label="地区">{displayRecord.region || '该艺人暂无地区'}</Descriptions.Item>
+                        <Descriptions.Item label="风格">{displayRecord.style || '该艺人暂无风格'}</Descriptions.Item>
+                        <Descriptions.Item label="简介描述">{displayRecord.description || '该艺人暂无简介'}</Descriptions.Item>
                         <Descriptions.Item label="官方头像">
-                            <Image src={detailRecord.avatarUrl || 'https://via.placeholder.com/100'} width={100} style={{ borderRadius: 8 }} />
+                            <Image src={displayRecord.avatarUrl || 'https://via.placeholder.com/100'} width={100} style={{ borderRadius: 8 }} />
                         </Descriptions.Item>
                     </Descriptions>
+                )}
+            </Modal>
+            <Modal
+                title={diffTitle}
+                open={diffVisible}
+                onCancel={() => setDiffVisible(false)}
+                footer={[
+                    <Button key="close" onClick={() => setDiffVisible(false)}>
+                        关闭
+                    </Button>
+                ]}
+                width={820}
+            >
+                {diffRows.length > 0 ? (
+                    <Descriptions column={1} bordered size="small">
+                        {diffRows.map(row => (
+                            <Descriptions.Item key={row.label} label={row.label}>
+                                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ color: '#999', fontSize: 12, marginBottom: 4 }}>修改前</div>
+                                        <div style={{
+                                            padding: '8px 10px',
+                                            borderRadius: 6,
+                                            background: '#fafafa',
+                                            color: '#666',
+                                            wordBreak: 'break-all',
+                                            whiteSpace: 'pre-wrap'
+                                        }}>
+                                            {row.oldText}
+                                        </div>
+                                    </div>
+
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ color: '#FF8899', fontSize: 12, marginBottom: 4 }}>修改后</div>
+                                        <div style={{
+                                            padding: '8px 10px',
+                                            borderRadius: 6,
+                                            background: '#fff0f3',
+                                            color: '#e60026',
+                                            wordBreak: 'break-all',
+                                            whiteSpace: 'pre-wrap',
+                                            fontWeight: 600
+                                        }}>
+                                            {row.newText}
+                                        </div>
+                                    </div>
+                                </div>
+                            </Descriptions.Item>
+                        ))}
+                    </Descriptions>
+                ) : (
+                    <div style={{ color: '#999', textAlign: 'center', padding: '30px 0' }}>
+                        未检测到字段变化
+                    </div>
                 )}
             </Modal>
         </div>

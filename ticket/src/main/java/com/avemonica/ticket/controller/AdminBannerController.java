@@ -8,6 +8,7 @@ import com.avemonica.ticket.exception.BusinessException;
 import com.avemonica.ticket.service.BannerOverdateService;
 import com.avemonica.ticket.service.BannerService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -237,14 +238,27 @@ public class AdminBannerController {
                     LocalDateTime now = LocalDateTime.now();
                     boolean isNowExpired = dto.getEndTime().isBefore(now);
                     saveBannerDirectly(dto, now, isNowExpired);
+
+                    bannerService.update(
+                            new LambdaUpdateWrapper<Banner>()
+                                    .eq(Banner::getId, id)
+                                    .set(Banner::getEditAuditStatus, null)
+                                    .set(Banner::getPendingPayload, null)
+                                    .set(Banner::getAuditSubmitTime, LocalDateTime.now())
+                    );
+
                     return Result.success("横幅修改审核已通过，客户端信息已同步更新");
                 } catch (Exception e) {
                     throw new BusinessException("解析横幅修改审核快照失败");
                 }
             } else {
-                banner.setEditAuditStatus(2);
-                banner.setPendingPayload(null);
-                bannerService.updateById(banner);
+                bannerService.update(
+                        new LambdaUpdateWrapper<Banner>()
+                                .eq(Banner::getId, id)
+                                .set(Banner::getEditAuditStatus, 2)
+                                .set(Banner::getPendingPayload, null)
+                                .set(Banner::getAuditSubmitTime, LocalDateTime.now())
+                );
                 return Result.success("已驳回横幅修改申请，客户端继续展示原横幅");
             }
         }
@@ -278,9 +292,13 @@ public class AdminBannerController {
         }
 
         if (Objects.equals(banner.getEditAuditStatus(), 0)) {
-            banner.setEditAuditStatus(null);
-            banner.setPendingPayload(null);
-            bannerService.updateById(banner);
+            bannerService.update(
+                    new LambdaUpdateWrapper<Banner>()
+                            .eq(Banner::getId, id)
+                            .set(Banner::getEditAuditStatus, null)
+                            .set(Banner::getPendingPayload, null)
+                            .set(Banner::getAuditSubmitTime, LocalDateTime.now())
+            );
             return Result.success("已撤销横幅修改审核申请，客户端信息未受影响");
         }
 
@@ -324,5 +342,28 @@ public class AdminBannerController {
                 }
             }
         }
+    }
+
+    @PutMapping("/confirm-edit-reject/{id}")
+    @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
+    public Result<String> confirmBannerEditReject(@PathVariable Long id) {
+        Banner banner = bannerService.getById(id);
+        if (banner == null) {
+            throw new BusinessException("横幅不存在");
+        }
+
+        if (!Objects.equals(banner.getEditAuditStatus(), 2)) {
+            throw new BusinessException("当前横幅没有待确认的修改驳回状态");
+        }
+
+        bannerService.update(
+                new LambdaUpdateWrapper<Banner>()
+                        .eq(Banner::getId, id)
+                        .set(Banner::getEditAuditStatus, null)
+                        .set(Banner::getPendingPayload, null)
+                        .set(Banner::getAuditSubmitTime, LocalDateTime.now())
+        );
+
+        return Result.success("已确认修改驳回结果");
     }
 }

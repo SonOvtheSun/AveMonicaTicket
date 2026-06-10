@@ -72,6 +72,20 @@ const ArtistLibrary = () => {
 
     const isSuperAdmin = userRole === 1;
 
+    const handleConfirmEditReject = async (id) => {
+        try {
+            const res = await axios.put(`/api/admin/artist/confirm-edit-reject/${id}`);
+            if (res.data.code === 200) {
+                message.success(res.data.message || '已确认修改驳回结果');
+                fetchData();
+            } else {
+                message.error(res.data.message || '确认失败');
+            }
+        } catch (error) {
+            message.error(error.response?.data?.message || '确认修改驳回失败');
+        }
+    };
+
     const handleRevokeAudit = async (id) => {
         try {
             const res = await axios.put(`/api/admin/artist/revoke/${id}`);
@@ -291,6 +305,19 @@ const ArtistLibrary = () => {
 
             return (
                 <Space>
+                    {record.editAuditStatus === 2 && (
+                        <Popconfirm
+                            title="确认修改审核被驳回？"
+                            description="确认后将清除修改驳回状态，页面恢复为当前已生效信息。"
+                            onConfirm={() => handleConfirmEditReject(record.id)}
+                            okText="确认"
+                            cancelText="取消"
+                        >
+                            <Button size="small" style={{ color: '#52c41a', borderColor: '#52c41a' }}>
+                                确认
+                            </Button>
+                        </Popconfirm>
+                    )}
                     <Button
                         type="primary"
                         size="small"
