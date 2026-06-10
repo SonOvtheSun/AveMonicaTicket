@@ -35,22 +35,26 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
     const [hasMoreArtists, setHasMoreArtists] = useState(false);
 
     // 风格预设选项
-    const styleOptions = [
-        { value: '古典', label: '古典' }, { value: '流行', label: '流行' }, { value: '世界音乐', label: '世界音乐' },
-        { value: '独立', label: '独立' }, { value: '摇滚', label: '摇滚' }, { value: '爵士', label: '爵士' },
-        { value: 'HipHop', label: 'HipHop' }, { value: '轻音乐', label: '轻音乐' }, { value: '民谣', label: '民谣' },
-        { value: '动漫', label: '动漫' }, { value: '朋克', label: '朋克' }, { value: '电子', label: '电子' },
-        { value: '金属', label: '金属' }, { value: '雷鬼', label: '雷鬼' }, { value: '极端金属', label: '极端金属' },
-        { value: '核', label: '核' },
-    ];
+    const MUSIC_STYLE_OPTIONS = [
+        '古典',
+        '流行',
+        '世界音乐',
+        '独立',
+        '摇滚',
+        '爵士',
+        'HipHop',
+        '轻音乐',
+        '民谣',
+        '动漫',
+        '朋克',
+        '电子',
+        '金属',
+        '雷鬼',
+        '核'
+    ].map(style => ({ value: style, label: style }));
 
-    const eventStyleOptions = [
-        { value: '古典', label: '古典' }, { value: '流行', label: '流行' }, { value: '世界音乐', label: '世界音乐' },
-        { value: '独立', label: '独立' }, { value: '摇滚', label: '摇滚' }, { value: '爵士', label: '爵士' },
-        { value: 'HipHop', label: 'HipHop' }, { value: '轻音乐', label: '轻音乐' }, { value: '民谣', label: '民谣' },
-        { value: '动漫', label: '动漫' }, { value: '朋克', label: '朋克' }, { value: '电子', label: '电子' },
-        { value: '金属', label: '金属' }, { value: '雷鬼', label: '雷鬼' }, { value: '核', label: '核' }
-    ];
+    const styleOptions = MUSIC_STYLE_OPTIONS;
+    const eventStyleOptions = MUSIC_STYLE_OPTIONS;
 
     const searchTimeoutRef = useRef(null);
 
@@ -263,7 +267,9 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         try {
             const avatarUrl = parseUploadedUrl(avatarFileList);
             const regionStr = (values.region && values.region.length > 0) ? values.region[0] : '';
-            const styleStr = Array.isArray(values.style) ? values.style[0] : values.style;
+            const styleStr = Array.isArray(values.style)
+                ? values.style.join('/')
+                : (values.style || '');
             const res = await axios.post('/api/admin/artist/add', {
                 name: values.name,
                 description: values.description,
@@ -285,6 +291,32 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             setSubmittingArtist(false);
         }
     };
+
+    const handleArtistStyleTagClick = (style) => {
+        const currentValue = artistForm.getFieldValue('style');
+        const currentStyles = Array.isArray(currentValue)
+            ? currentValue
+            : currentValue
+                ? [currentValue]
+                : [];
+
+        if (currentStyles.includes(style)) {
+            artistForm.setFieldsValue({
+                style: currentStyles.filter(item => item !== style)
+            });
+            return;
+        }
+
+        if (currentStyles.length >= 2) {
+            message.warning('音乐风格最多选择两项');
+            return;
+        }
+
+        artistForm.setFieldsValue({
+            style: [...currentStyles, style]
+        });
+    };
+
 
     const onFinish = async (values) => {
         if (posterFileList.length > 0 && posterFileList[0].status === 'uploading') {
@@ -330,6 +362,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 tickets: finalTickets,
                 posterUrl: finalPosterUrl,
                 style: styleStr,
+                runningTime: values.runningTime,
                 detailsUrl: finalDetailsUrl || 'https://via.placeholder.com/800x1200?text=Default+Details'
             };
 
@@ -366,6 +399,12 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 <Col span={12}>
                     <Form.Item name="showTime" label="定档演出时间" rules={[{ required: true, message: '请选择确切的演出执行时间' }]}>
                         <DatePicker placeholder="选择时间" showTime format="YYYY-MM-DD HH:mm" size="large" style={{ width: '100%' }} />
+                    </Form.Item>
+                </Col>
+                <Col span={8}>
+                    {/* 🚨 新增：演出时长输入框 */}
+                    <Form.Item name="runningTime" label="演出时长 (分钟)" rules={[{ required: true, message: '请输入演出时长' }]}>
+                        <InputNumber min={1} placeholder="如：120" size="large" style={{ width: '100%' }} />
                     </Form.Item>
                 </Col>
                 <Col span={12}>
@@ -479,7 +518,16 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
 
                 <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '12px', color: '#888' }}>如未找到艺人，请先新增并提交审核</span>
-                    <Button type="link" size="small" onClick={() => setArtistModalVisible(true)} style={{ padding: 0, color: '#FF8899', fontWeight: 500 }}>
+                    <Button
+                        type="link"
+                        size="small"
+                        onClick={() => {
+                            artistForm.resetFields();
+                            setAvatarFileList([]);
+                            setArtistModalVisible(true);
+                        }}
+                        style={{ padding: 0, color: '#FF8899', fontWeight: 500 }}
+                    >
                         + 新增音乐人
                     </Button>
                 </div>
@@ -536,7 +584,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                                 color: '#8c6d1f',
                                 fontSize: 13
                             }}>
-                                当前未设置票档。发布后，票务策略位置会显示“暂未设置票档”；用户端价格位置可显示“票档待定”。
+                                当前未设置票档
                             </div>
                         )}
 
@@ -607,7 +655,11 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                             listType="picture"
                             maxCount={1}
                             headers={{ Authorization: `Bearer ${localStorage.getItem('token')}` }}
-                            onChange={(info) => handleUploadChange(info, '艺人头像')}
+                            fileList={avatarFileList}
+                            onChange={(info) => {
+                                setAvatarFileList(info.fileList);
+                                handleUploadChange(info, '艺人头像');
+                            }}
                         >
                             <Button icon={<UploadOutlined />}>上传专属头像</Button>
                         </Upload>
@@ -627,10 +679,18 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                         />
                     </Form.Item>
 
-                    {/* 🚨 音乐人风格平铺标签区 */}
-                    <Form.Item label="音乐风格" tooltip="点击下方快捷标签一键填入，或在框内手动输入后敲回车添加">
+                    {/* 🚨 音乐人风格平铺标签区：固定选项，多选，最多两项 */}
+                    <Form.Item label="音乐风格" tooltip="从固定风格中选择，最多选择两项；提交后会用“/”合并">
                         <Form.Item name="style" noStyle>
-                            <Select mode="tags" style={{ width: '100%' }} placeholder="请选择音乐风格" size="large" maxCount={1} allowClear />
+                            <Select
+                                mode="multiple"
+                                style={{ width: '100%' }}
+                                placeholder="请选择音乐风格，最多两项"
+                                size="large"
+                                maxCount={2}
+                                allowClear
+                                options={styleOptions}
+                            />
                         </Form.Item>
                         <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                             {styleOptions.map(opt => (
@@ -638,7 +698,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                                     key={opt.value}
                                     color="#fff0f3"
                                     style={{ color: '#FF8899', border: '1px solid #FF8899', cursor: 'pointer', padding: '4px 14px', fontSize: 13, margin: 0, borderRadius: 16 }}
-                                    onClick={() => artistForm.setFieldsValue({ style: [opt.value] })}
+                                    onClick={() => handleArtistStyleTagClick(opt.value)}
                                 >
                                     {opt.label}
                                 </Tag>

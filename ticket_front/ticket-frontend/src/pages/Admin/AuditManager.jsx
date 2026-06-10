@@ -21,6 +21,23 @@ const AuditManager = () => {
     const [detailRecord, setDetailRecord] = useState(null);
     const [detailType, setDetailType] = useState('event'); // 'event' 或 'artist'
 
+    const [banners, setBanners] = useState([]);
+    const [loadingBanners, setLoadingBanners] = useState(false);
+
+    const fetchPendingBanners = async () => {
+        setLoadingBanners(true);
+        try {
+            const res = await axios.get('/api/admin/banner/audit-list');
+            if (res.data.code === 200) {
+                setBanners(res.data.data || []);
+            }
+        } catch (error) {
+            message.error('获取待审核横幅失败');
+        } finally {
+            setLoadingBanners(false);
+        }
+    };
+
     // === 数据获取 ===
     // 1. 获取待审核演出
     const fetchPendingEvents = async (page = 1, size = 5) => {
@@ -71,21 +88,29 @@ const AuditManager = () => {
     useEffect(() => {
         fetchPendingEvents();
         fetchPendingArtists();
+        fetchPendingBanners();
     }, []);
 
     // === 审核操作 ===
     const handleAudit = async (id, type, isPass) => {
         try {
             // 💡 接口示例：/api/admin/event/audit/2?status=1 (1为通过，2为驳回)
-            const endpoint = type === 'event'
-                ? `/api/admin/event/audit/${id}?isPass=${isPass}`
-                : `/api/admin/artist/audit/${id}?isPass=${isPass}`;
+            let endpoint = '';
+
+            if (type === 'event') {
+                endpoint = `/api/admin/event/audit/${id}?isPass=${isPass}`;
+            } else if (type === 'artist') {
+                endpoint = `/api/admin/artist/audit/${id}?isPass=${isPass}`;
+            } else if (type === 'banner') {
+                endpoint = `/api/admin/banner/audit/${id}?isPass=${isPass}`;
+            }
 
             const res = await axios.put(endpoint);
             if (res.data.code === 200) {
                 message.success(`已${isPass ? '通过' : '驳回'}该申请`);
                 if (type === 'event') fetchPendingEvents(eventPagination.current, eventPagination.pageSize);
-                else fetchPendingArtists(artistPagination.current, artistPagination.pageSize);
+                else if (type === 'artist') fetchPendingArtists(artistPagination.current, artistPagination.pageSize);
+                else fetchPendingBanners();
                 setDetailVisible(false); // 如果是在弹窗里点的，顺便关掉弹窗
             } else {
                 message.error(res.data.message);
@@ -206,6 +231,54 @@ const AuditManager = () => {
         }
     ];
 
+    const bannerColumns = [
+        {
+            title: '横幅',
+            dataIndex: 'posterUrl',
+            key: 'posterUrl',
+            render: (url) => <Image src={url} width={120} style={{ borderRadius: 6 }} />
+        },
+        {
+            title: '关联演出ID',
+            dataIndex: 'eventId',
+            key: 'eventId',
+            render: id => id || <span style={{ color: '#999' }}>无跳转</span>
+        },
+        {
+            title: '审核类型',
+            key: 'auditType',
+            render: (_, record) => record.editAuditStatus === 0
+                ? <Tag color="processing">修改审核</Tag>
+                : <Tag color="orange">新增审核</Tag>
+        },
+        {
+            title: '展示时间',
+            key: 'time',
+            render: (_, record) => (
+                <span>
+                {dayjs(record.startTime).format('YYYY-MM-DD HH:mm')} ~ {dayjs(record.endTime).format('YYYY-MM-DD HH:mm')}
+            </span>
+            )
+        },
+        {
+            title: '操作',
+            key: 'action',
+            render: (_, record) => (
+                <Space>
+                    <Button type="link" icon={<FileSearch size={14} />} onClick={() => showDetails(record, 'banner')}>
+                        查看详情
+                    </Button>
+                    <Button type="primary" size="small" style={{ backgroundColor: '#52c41a' }} icon={<CheckCircle size={14} />} onClick={() => handleAudit(record.id, 'banner', true)}>
+                        通过
+                    </Button>
+                    <Button type="primary" danger size="small" icon={<XCircle size={14} />} onClick={() => handleAudit(record.id, 'banner', false)}>
+                        驳回
+                    </Button>
+                </Space>
+            )
+        }
+    ];
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {/* 卡片 1：待审核演出 */}
@@ -238,6 +311,16 @@ const AuditManager = () => {
                     loading={loadingArtists}
                     pagination={artistPagination}
                     onChange={(newPagination) => fetchPendingArtists(newPagination.current, newPagination.pageSize)}
+                />
+            </Card>
+
+            <Card title={<span style={{ fontWeight: 'bold' }}>待审核首页横幅</span>} bordered={false} style={{ borderRadius: 12 }}>
+                <Table
+                    columns={bannerColumns}
+                    dataSource={banners}
+                    rowKey="id"
+                    loading={loadingBanners}
+                    pagination={false}
                 />
             </Card>
 

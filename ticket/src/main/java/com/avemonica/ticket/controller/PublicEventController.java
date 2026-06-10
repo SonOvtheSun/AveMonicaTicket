@@ -24,6 +24,8 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -89,7 +91,7 @@ public class PublicEventController {
     /**
      * 获取演出详情：多级缓存核心战区 (Caffeine -> Redis -> MySQL)
      */
-    @GetMapping("/{id}")
+    @GetMapping("/detail/{id}")
     public Result<Event> getEventDetail(@PathVariable Long id) {
         String cacheKey = EVENT_CACHE_KEY_PREFIX + id;
         Event event = null;
@@ -188,6 +190,7 @@ public class PublicEventController {
         // 查询条件：开始时间 <= 当前时间，且结束时间 >= 当前时间
         List<Banner> activeBanners = bannerService.list(
                 new LambdaQueryWrapper<Banner>()
+                        .eq(Banner::getAuditStatus, 1)
                         .le(Banner::getStartTime, now)
                         .ge(Banner::getEndTime, now)
                         .orderByDesc(Banner::getCreateTime)
@@ -197,7 +200,7 @@ public class PublicEventController {
     }
 
     @GetMapping("/page")
-    public Result<IPage<Event>> pageEvents(
+    public Result<Map<String, Object>> pageEvents(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "12") int size,
             @RequestParam(required = false) String city,
@@ -205,11 +208,17 @@ public class PublicEventController {
             @RequestParam(required = false) Integer timeType, // 1:今天, 2:最近一周, 3:下周, 4:最近一月
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
-            @RequestParam(required = false) String keyword
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long artistId
     ) {
         LambdaQueryWrapper<Event> wrapper = new LambdaQueryWrapper<>();
-        // 🚨 铁律：C 端只能看到已上架（1）的演出
-        wrapper.in(Event::getStatus, 1, 3);
+        // C 端不展示隐藏状态；音乐人主页需要包含已结束演出，因此不能只查未来演出。
+        wrapper.ne(Event::getStatus, 4);
+
+        if (artistId != null) {
+            // 跨表查询：找出 tb_event_artist 表中包含该 artistId 的演出
+            wrapper.inSql(Event::getId, "SELECT event_id FROM tb_event_artist WHERE artist_id = " + artistId);
+        }
 
         // 1. 城市筛选
         if (StringUtils.hasText(city) && !"全部".equals(city) && !"全国".equals(city)) {
@@ -221,9 +230,21 @@ public class PublicEventController {
             wrapper.eq(Event::getStyle, style);
         }
 
-        // 3. 关键词模糊搜索
+        // 3. 关键词模糊搜索：支持按演出名称、艺人名称搜索演出
         if (StringUtils.hasText(keyword)) {
-            wrapper.and(w -> w.like(Event::getTitle, keyword).or().like(Event::getVenue, keyword));
+            wrapper.and(w -> w
+                    .like(Event::getTitle, keyword)
+                    .or()
+                    .apply(
+                            "EXISTS (" +
+                                    "SELECT 1 FROM tb_event_artist ea " +
+                                    "INNER JOIN tb_artist a ON ea.artist_id = a.id " +
+                                    "WHERE ea.event_id = tb_event.id " +
+                                    "AND a.name LIKE CONCAT('%', {0}, '%')" +
+                                    ")",
+                            keyword
+                    )
+            );
         }
 
         // 4. 时间范围筛选逻辑
@@ -252,13 +273,12 @@ public class PublicEventController {
             // 自定义日期选择器
             wrapper.ge(Event::getShowTime, startDate + " 00:00:00")
                     .le(Event::getShowTime, endDate + " 23:59:59");
-        } else {
-            // 默认查未来未开始的演出
-            wrapper.ge(Event::getShowTime, now);
         }
 
-        // 按时间先后排序
-        wrapper.orderByAsc(Event::getShowTime);
+        // 默认“全部”不再过滤已结束演出：C 端演出页和音乐人主页都展示全部非隐藏演出。
+        // 排序规则：未开始演出优先；同组内按与当前时间的接近程度排序。
+        // 即：最近即将开始的演出在最前，其次才是最近刚结束的演出。
+        wrapper.last("ORDER BY CASE WHEN show_time >= NOW() THEN 0 ELSE 1 END, ABS(TIMESTAMPDIFF(SECOND, show_time, NOW())) ASC");
 
         IPage<Event> pageData = eventService.page(new Page<>(current, size), wrapper);
 
@@ -274,6 +294,14 @@ public class PublicEventController {
             event.setArtists(artists);
         }
 
-        return Result.success(pageData);
+        Map<String, Object> result = new HashMap<>();
+        result.put("records", pageData.getRecords());
+        result.put("total", pageData.getTotal());
+        result.put("current", pageData.getCurrent());
+        result.put("size", pageData.getSize());
+        result.put("pages", pageData.getPages());
+
+        return Result.success(result);
     }
+
 }

@@ -1,48 +1,50 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Carousel, Input, Dropdown, Avatar, Row, Col, Button, Spin, Empty, message } from 'antd';
-import { Search, MapPin, ChevronDown, User, FileText, Heart, LogOut, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
+import { Layout, Carousel, Button, Spin, Empty, message } from 'antd';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
+import dayjs from 'dayjs';
 import axios from 'axios';
 import './Home.css';
 
-const { Header, Content } = Layout;
+const { Content } = Layout;
 
 const Home = () => {
     const navigate = useNavigate();
 
-    // 演出数据状态
     const [upcomingEvents, setUpcomingEvents] = useState([]);
     const [loadingEvents, setLoadingEvents] = useState(true);
-
     const [banners, setBanners] = useState([]);
-
-    // 🚨 1. 独立维护当前城市状态，默认从 localStorage 拿
     const [currentCity, setCurrentCity] = useState(localStorage.getItem('currentCity') || '全国');
 
-    // 🚨 2. 全局监听顶部 Header 派发的城市变化事件
     useEffect(() => {
-        document.title = "Ave Monica - 与同好们同聚";
+        document.title = 'Ave Monica - 与同好们同聚';
 
         const handleCityChange = (e) => {
-            setCurrentCity(e.detail);
+            setCurrentCity(e.detail || '全国');
         };
 
+        // PublicHeader 切换地区后会广播 headerCityChange，监听它即可立即刷新首页数据
+        window.addEventListener('headerCityChange', handleCityChange);
+
+        // 兼容旧的广播名，防止其他组件仍然派发 cityChanged
         window.addEventListener('cityChanged', handleCityChange);
-        return () => window.removeEventListener('cityChanged', handleCityChange);
+
+        return () => {
+            window.removeEventListener('headerCityChange', handleCityChange);
+            window.removeEventListener('cityChanged', handleCityChange);
+        };
     }, []);
 
-    // 初始化：获取用户信息 & 获取即将上演的演出
     useEffect(() => {
-        // 2. 获取首页演出数据 (调用我们刚才写的公开接口)
         const fetchEvents = async () => {
+            setLoadingEvents(true);
             try {
-                console.log("当前请求的城市参数:", currentCity);
-                const res = await axios.get('/api/event/upcoming',{
-                    params: {city:currentCity}
+                const res = await axios.get('/api/event/upcoming', {
+                    params: { city: currentCity }
                 });
                 if (res.data.code === 200) {
-                    setUpcomingEvents(res.data.data);
+                    setUpcomingEvents(res.data.data || []);
                 } else {
                     message.error('获取演出数据失败');
                 }
@@ -55,10 +57,9 @@ const Home = () => {
 
         const fetchBanners = async () => {
             try {
-                // 公开接口，后端只需返回 tb_banner 中 startTime <= now() 且 endTime >= now() 的数据
                 const res = await axios.get('/api/event/banner/active');
                 if (res.data.code === 200) {
-                    setBanners(res.data.data);
+                    setBanners(res.data.data || []);
                 }
             } catch (error) {
                 console.error('拉取横幅失败', error);
@@ -69,109 +70,155 @@ const Home = () => {
         fetchBanners();
     }, [currentCity]);
 
-    // 轮播图自定义箭头
-    const CustomPrevArrow = (props) => {
-        const { className, style, onClick } = props;
-        return (
-            <div className={className} style={style} onClick={onClick}>
-                <ChevronLeft size={24} />
-            </div>
-        );
-    };
+    const CustomPrevArrow = ({ className, style, onClick }) => (
+        <div className={className} style={style} onClick={onClick}>
+            <ChevronLeft size={24} />
+        </div>
+    );
 
-    const CustomNextArrow = (props) => {
-        const { className, style, onClick } = props;
-        return (
-            <div className={className} style={style} onClick={onClick}>
-                <ChevronRight size={24} />
-            </div>
-        );
-    };
+    const CustomNextArrow = ({ className, style, onClick }) => (
+        <div className={className} style={style} onClick={onClick}>
+            <ChevronRight size={24} />
+        </div>
+    );
 
-    // 辅助函数：计算演出最低票价
     const getMinPrice = (tickets) => {
-        if (!tickets || tickets.length === 0) return '--';
-        const prices = tickets.map(t => t.price);
-        return Math.min(...prices);
+        if (!tickets || tickets.length === 0) return '票档待定';
+        const prices = tickets
+            .map(t => Number(t.price))
+            .filter(price => Number.isFinite(price));
+        if (prices.length === 0) return '票档待定';
+        return `¥${Math.min(...prices)}起`;
+    };
+
+    const getPriceText = (event) => {
+        if (Number(event.status) === 3) {
+            const showTime = event.showTime ? new Date(event.showTime).getTime() : NaN;
+            return Number.isFinite(showTime) && showTime > Date.now() ? '敬请期待' : '已结束';
+        }
+        return getMinPrice(event.tickets);
+    };
+
+    const getStyleTags = (styleText) => {
+        if (!styleText) return [];
+        return String(styleText)
+            .split('/')
+            .map(item => item.trim())
+            .filter(Boolean)
+            .slice(0, 2);
     };
 
     return (
         <Layout className="home-layout">
             <PublicHeader />
             <Content className="home-content">
-                {/* --- 顶部 Banner --- */}
-                <div className="banner-section">
-                    <Carousel autoplay effect="fade" arrows={true} prevArrow={<CustomPrevArrow />} nextArrow={<CustomNextArrow />}>
-                        {Array.from({ length: 10 }).map((_, index) => {
-                            // 尝试获取当前索引的后端 banner 数据
+                <section className="home-banner-section">
+                    <Carousel autoplay effect="fade" arrows prevArrow={<CustomPrevArrow />} nextArrow={<CustomNextArrow />}>
+                        {Array.from({ length: Math.max(banners.length, 1) }).map((_, index) => {
                             const banner = banners[index];
-
                             return (
-                                <div key={banner?.id || `placeholder-${index}`} className="banner-slide">
+                                <div key={banner?.id || `placeholder-${index}`} className="home-banner-slide">
                                     <div
-                                        className="banner-img"
+                                        className="home-banner-img"
                                         style={{
-                                            // 如果有后端海报则用海报，否则使用指定的默认占位图
                                             backgroundImage: `url(${banner?.posterUrl || '/uploads/poster/defalut.png'})`,
                                             cursor: banner?.eventId ? 'pointer' : 'default'
                                         }}
                                         onClick={() => banner?.eventId && navigate(`/event/${banner.eventId}`)}
-                                    />
+                                    >
+                                    </div>
                                 </div>
                             );
                         })}
                     </Carousel>
-                </div>
+                </section>
 
-                {/* --- 演出列表区域 --- */}
-                <div className="event-section">
-                    <h2 className="section-title">
-                        <span className="title-icon">🤘</span> 即将上演
-                    </h2>
+                <section className="home-event-section">
+                    <div className="home-section-header">
+                        <div>
+                            <h2 className="home-section-title">即将上演</h2>
+                            <p className="home-section-subtitle">
+                                {currentCity === '全国' ? '全国' : currentCity} · 精选演出日程
+                            </p>
+                        </div>
+                        <Button className="home-section-more" onClick={() => navigate('/events')}>
+                            查看更多
+                        </Button>
+                    </div>
 
                     {loadingEvents ? (
-                        <div className="loading-container">
+                        <div className="home-loading-container">
                             <Spin size="large" tip="正在为您拉取最新演出..." />
                         </div>
                     ) : upcomingEvents.length > 0 ? (
-                        // 👇 核心替换：抛弃 Row 和 Col，使用原生 Grid
-                        <div className="event-grid">
-                            {upcomingEvents.map((event, index) => (
-                                <div
-                                    key={event.id}
-                                    className="event-card animate-fade-in"
-                                    style={{ animationDelay: `${index * 0.08}s` }}
-                                    onClick={() => navigate(`/event/${event.id}`)}
-                                >
-                                    <div className="event-cover-wrapper">
-                                        <img
-                                            src={event.posterUrl || 'https://via.placeholder.com/300x400?text=No+Poster'}
-                                            alt={event.title}
-                                            className="event-cover"
-                                        />
-                                        <div className="event-price">
-                                            <span className="price-symbol">¥</span>
-                                            <span className="price-num">{getMinPrice(event.tickets)}</span>
-                                            <span className="price-suffix">起</span>
+                        <div className="home-event-grid">
+                            {upcomingEvents.map((event, index) => {
+                                const styleTags = getStyleTags(event.style);
+                                const priceText = getPriceText(event);
+                                const isStatusText = priceText === '敬请期待' || priceText === '已结束' || priceText === '票档待定';
+                                const isPresale = Number(event.status) === 1 && event.saleTime && dayjs().isBefore(dayjs(event.saleTime));
+                                return (
+                                    <div
+                                        key={event.id}
+                                        className="home-event-card"
+                                        style={{ '--card-index': index }}
+                                        onClick={() => navigate(`/event/${event.id}`)}
+                                    >
+                                        <div className="home-event-cover-wrapper">
+                                            <img
+                                                src={event.posterUrl || 'https://via.placeholder.com/300x424?text=No+Poster'}
+                                                alt={event.title}
+                                                className="home-event-cover"
+                                            />
+                                            <div className="home-event-image-mask" />
+                                            <div className="home-event-style-tags">
+                                                {styleTags.length > 0 ? styleTags.map(tag => (
+                                                    <span key={tag} className="home-event-style-tag">{tag}</span>
+                                                )) : (
+                                                    <span className="home-event-style-tag">现场</span>
+                                                )}
+                                            </div>
+                                            <div className={`home-event-price-on-cover ${isStatusText ? 'is-status' : ''} ${priceText === '敬请期待' ? 'is-coming-soon' : ''} ${priceText === '已结束' ? 'is-ended' : ''}`}>
+                                                {priceText}
+                                            </div>
+                                            {/* 🚨 新增：与演出大厅完全一致的右下角“预售中”标签 */}
+                                            {isPresale && (
+                                                <div style={{
+                                                    position: 'absolute',
+                                                    bottom: 14,
+                                                    right: 14,
+                                                    padding: '2px 8px',
+                                                    color: '#FF8899',
+                                                    fontSize: '12px',
+                                                    fontWeight: 'bold',
+                                                    backgroundColor: '#fff0f3',
+                                                    zIndex: 3,
+                                                    border: '1px solid rgba(255, 136, 153, 0.3)',
+                                                    borderRadius: '4px',
+                                                    lineHeight: '1.2'
+                                                }}>
+                                                    预售中
+                                                </div>
+                                            )}
                                         </div>
-                                    </div>
-                                    <div className="event-info">
-                                        <h3 className="event-title">{event.title}</h3>
 
-                                        {/* 👇 使用刚刚新定义的 class，让文字缩小一行显示 */}
-                                        <div className="event-info-sub">
-                                            {event.showTime ? event.showTime.substring(0, 10) : '时间待定'}
-                                            &nbsp;|&nbsp;
-                                            {event.venue || '场馆待定'}
+                                        <div className="home-event-info">
+                                            <h3 className="home-event-title" title={event.title}>{event.title}</h3>
+                                            <div className="home-event-meta">
+                                                {event.showTime ? event.showTime.substring(0, 16) : '时间待定'}
+                                            </div>
+                                            <div className="home-event-meta">
+                                                [{event.city || currentCity || '全国'}] {event.venue || '场馆待定'}
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     ) : (
                         <Empty description="最近暂无即将上演的演出哦~" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                     )}
-                </div>
+                </section>
             </Content>
         </Layout>
     );

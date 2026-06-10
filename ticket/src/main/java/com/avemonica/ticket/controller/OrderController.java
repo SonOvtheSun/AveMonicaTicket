@@ -23,6 +23,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -30,6 +31,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
 @RestController
@@ -68,6 +70,18 @@ public class OrderController {
     private static final String KEY_SPEC_LOCK = "event:spectator:lock:";
     private static final String KEY_ORDER_RESULT = "order:result:";
     private static final String KEY_EVENT_STATUS = "event:status:";
+
+    // 黄牛风控 Key
+    private static final String KEY_SCALPER_BLOCK = "risk:scalper:block:";
+    private static final String KEY_RISK_SCORE = "risk:scalper:score:";
+    private static final String KEY_RISK_USER_ACTION = "risk:user:action:";
+    private static final String KEY_RISK_IP_EVENT_ACTION = "risk:ip:event:action:";
+    private static final String KEY_RISK_IP_EVENT_USERS = "risk:ip:event:users:";
+    private static final String KEY_RISK_UA_EVENT_USERS = "risk:ua:event:users:";
+    private static final String KEY_RISK_DEVICE_EVENT_USERS = "risk:device:event:users:";
+
+    private static final int RISK_NEED_CAPTCHA_SCORE = 70;
+    private static final int RISK_BLOCK_SCORE = 120;
 
     private DefaultRedisScript<Long> tokenBucketScript;
     private DefaultRedisScript<Long> spectatorLockScript;
@@ -117,6 +131,15 @@ public class OrderController {
             return Result.error("该演出尚未正式开售，请等待倒计时结束！");
         }
 
+        // 0. 黄牛风险预检：同 IP / 同设备 / 同 UA / 同账号异常请求会被要求验证码或临时拦截
+        ScalperRiskResult riskResult = checkScalperRisk(userId, eventId, request, "preCheck", 1, null);
+        if (riskResult.blocked) {
+            return Result.error(2002, riskResult.message);
+        }
+        if (riskResult.needCaptcha) {
+            return Result.error(2001, riskResult.message);
+        }
+
         // 1. 同一账户防刷防连点
         String userIdCountKey = KEY_USER_LOCK + userId;
         Long clickCount = redisTemplate.opsForValue().increment(userIdCountKey);
@@ -144,7 +167,7 @@ public class OrderController {
     }
 
     @PostMapping("/create")
-    public Result<String> createOrder(@RequestBody Map<String, Object> params) {
+    public Result<String> createOrder(@RequestBody Map<String, Object> params, HttpServletRequest request) {
         Long userId = getCurrentUserId();
         if (userId == null) return Result.error(502, "登录已过期，请重新登录");
 
@@ -158,15 +181,15 @@ public class OrderController {
         // 🚨 核心校验：基于新的 Integer 状态码进行全面拦截
         // 状态码：1-预售中；2-在售；3-停售；4-隐藏；-1-不存在
         // ==========================================
-        Integer eventStatus = getEventStatusWithFallback(eventId);
-        if (eventStatus == -1) {
-            return Result.error("该演出信息不存在！");
+        Event event = eventMapper.selectById(eventId);
+        if (event == null || event.getStatus() == 4) {
+            return Result.error("该演出信息不存在或已下架！");
         }
-        if (eventStatus == 1) {
-            return Result.error("该演出正处于预售阶段，暂未开放购票！");
+        if (event.getStatus() != 1) {
+            return Result.error("该演出已停售，无法购票！");
         }
-        if (eventStatus == 3 || eventStatus == 4) {
-            return Result.error("该演出已停售或下架，无法购票！");
+        if (event.getSaleTime() != null && LocalDateTime.now().isBefore(event.getSaleTime())) {
+            return Result.error("该演出正处于预售/预约阶段，暂未开放正式购票！");
         }
 
         // 1. 防越权 API 绕过校验
@@ -175,7 +198,6 @@ public class OrderController {
         if (serverToken == null || !serverToken.equals(clientToken)) {
             return Result.error("非法请求或页面已过期，请重新从详情页进入！");
         }
-        redisTemplate.delete(redisTokenKey);
 
         // 2. 观演人参数校验
         Object rawSpectators = params.get("spectatorIds");
@@ -186,6 +208,18 @@ public class OrderController {
                 .toList();
 
         if (spectatorIds.size() != quantity) return Result.error("非法请求：实名观演人数量与购票数量不符！");
+
+        // 2.1 黄牛风险复检：下单阶段结合购票数量和观演人去重再次评估
+        ScalperRiskResult riskResult = checkScalperRisk(userId, eventId, request, "create", quantity, spectatorIds);
+        if (riskResult.blocked) {
+            return Result.error(2002, riskResult.message);
+        }
+        if (riskResult.needCaptcha) {
+            return Result.error(2001, riskResult.message);
+        }
+
+        // Token 通过且风控通过后再删除，避免验证码/风险提示导致用户白白丢失令牌
+        redisTemplate.delete(redisTokenKey);
 
         // 3. 内存极速预检：历史已购永久名单
         String purchasedSetKey = KEY_PURCHASED_SPEC + eventId;
@@ -368,6 +402,193 @@ public class OrderController {
 
         // 4. 如果数据库也完全没有这条记录，返回 -1
         return -1;
+    }
+
+
+    /**
+     * 黄牛风险检测：不直接替代实名/库存/令牌校验，而是在这些校验之前增加风险评分。
+     * 设计目标：
+     * 1. 正常用户偶发刷新不受影响；
+     * 2. 同账号、同 IP、同设备、同 UA 在短时间内高频请求时触发验证码；
+     * 3. 极端异常流量临时封禁，保护后端队列和库存服务。
+     */
+    private ScalperRiskResult checkScalperRisk(
+            Long userId,
+            Long eventId,
+            HttpServletRequest request,
+            String stage,
+            Integer quantity,
+            List<Long> spectatorIds
+    ) {
+        String ip = getClientIp(request);
+        String ua = normalizeHeader(request.getHeader("User-Agent"));
+        String deviceId = normalizeHeader(request.getHeader("X-Device-Id"));
+        if (!StringUtils.hasText(deviceId)) {
+            deviceId = normalizeHeader(request.getHeader("X-Fingerprint"));
+        }
+
+        String blockKey = KEY_SCALPER_BLOCK + eventId + ":" + userId;
+        if (Boolean.TRUE.equals(redisTemplate.hasKey(blockKey))) {
+            return ScalperRiskResult.block("操作过于频繁，已触发临时风控，请稍后再试");
+        }
+
+        int risk = 0;
+        List<String> reasons = new ArrayList<>();
+
+        // 1. 单账号短时间高频动作：同一用户 10 秒内连续 preCheck/create
+        Long userActionCount = incrWithExpire(KEY_RISK_USER_ACTION + eventId + ":" + userId + ":" + stage, 10);
+        if (userActionCount != null && userActionCount > 5) {
+            risk += 45;
+            reasons.add("账号请求过于频繁");
+        } else if (userActionCount != null && userActionCount > 3) {
+            risk += 25;
+            reasons.add("账号短时间多次请求");
+        }
+
+        // 2. 同一 IP 对同一演出的请求洪峰
+        Long ipActionCount = incrWithExpire(KEY_RISK_IP_EVENT_ACTION + eventId + ":" + ip + ":" + stage, 60);
+        if (ipActionCount != null && ipActionCount > 80) {
+            risk += 70;
+            reasons.add("同一网络请求异常密集");
+        } else if (ipActionCount != null && ipActionCount > 30) {
+            risk += 40;
+            reasons.add("同一网络多人高频请求");
+        }
+
+        // 3. 同 IP 短时间内出现大量不同账号：典型工作室/脚本池特征
+        String ipUsersKey = KEY_RISK_IP_EVENT_USERS + eventId + ":" + ip;
+        redisTemplate.opsForSet().add(ipUsersKey, String.valueOf(userId));
+        redisTemplate.expire(ipUsersKey, 10, TimeUnit.MINUTES);
+        Long ipUserCount = redisTemplate.opsForSet().size(ipUsersKey);
+        if (ipUserCount != null && ipUserCount > 8) {
+            risk += 50;
+            reasons.add("同一网络下账号数量异常");
+        } else if (ipUserCount != null && ipUserCount > 4) {
+            risk += 25;
+            reasons.add("同一网络下多账号请求");
+        }
+
+        // 4. 同一设备指纹绑定多个账号
+        if (StringUtils.hasText(deviceId)) {
+            String deviceUsersKey = KEY_RISK_DEVICE_EVENT_USERS + eventId + ":" + deviceId;
+            redisTemplate.opsForSet().add(deviceUsersKey, String.valueOf(userId));
+            redisTemplate.expire(deviceUsersKey, 30, TimeUnit.MINUTES);
+            Long deviceUserCount = redisTemplate.opsForSet().size(deviceUsersKey);
+            if (deviceUserCount != null && deviceUserCount > 3) {
+                risk += 60;
+                reasons.add("同一设备切换多个账号");
+            } else if (deviceUserCount != null && deviceUserCount > 1) {
+                risk += 25;
+                reasons.add("同一设备存在多账号行为");
+            }
+        }
+
+        // 5. 同一 UA 对同一演出聚集过多账号，作为弱信号，只加少量分
+        if (StringUtils.hasText(ua)) {
+            String uaUsersKey = KEY_RISK_UA_EVENT_USERS + eventId + ":" + Math.abs(ua.hashCode());
+            redisTemplate.opsForSet().add(uaUsersKey, String.valueOf(userId));
+            redisTemplate.expire(uaUsersKey, 10, TimeUnit.MINUTES);
+            Long uaUserCount = redisTemplate.opsForSet().size(uaUsersKey);
+            if (uaUserCount != null && uaUserCount > 20) {
+                risk += 15;
+                reasons.add("浏览器特征聚集异常");
+            }
+        }
+
+        // 6. 下单数量和观演人参数异常
+        if (quantity != null) {
+            if (quantity >= 5) {
+                risk += 30;
+                reasons.add("单次购票数量偏高");
+            } else if (quantity >= 3) {
+                risk += 12;
+                reasons.add("单次购票数量较高");
+            }
+        }
+
+        if (spectatorIds != null && !spectatorIds.isEmpty()) {
+            long distinctCount = spectatorIds.stream().distinct().count();
+            if (distinctCount != spectatorIds.size()) {
+                return ScalperRiskResult.block("观演人信息重复，请检查后重新提交");
+            }
+        }
+
+        // 7. 累计风险分：避免脚本分散到多个阶段规避检测
+        String scoreKey = KEY_RISK_SCORE + eventId + ":" + userId;
+        Long totalRisk = redisTemplate.opsForValue().increment(scoreKey, risk);
+        redisTemplate.expire(scoreKey, 30, TimeUnit.MINUTES);
+
+        int finalRisk = totalRisk == null ? risk : totalRisk.intValue();
+
+        if (finalRisk >= RISK_BLOCK_SCORE) {
+            redisTemplate.opsForValue().set(blockKey, "1", 10, TimeUnit.MINUTES);
+            return ScalperRiskResult.block("检测到异常抢票行为，已触发临时风控，请稍后再试");
+        }
+
+        if (finalRisk >= RISK_NEED_CAPTCHA_SCORE) {
+            String reasonText = reasons.isEmpty() ? "请求行为异常" : String.join("、", reasons);
+            return ScalperRiskResult.captcha("检测到" + reasonText + "，请完成验证码验证后再继续");
+        }
+
+        return ScalperRiskResult.pass();
+    }
+
+    private Long incrWithExpire(String key, long seconds) {
+        Long count = redisTemplate.opsForValue().increment(key);
+        if (count != null && count == 1L) {
+            redisTemplate.expire(key, seconds, TimeUnit.SECONDS);
+        }
+        return count;
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        String[] headers = {
+                "X-Forwarded-For",
+                "X-Real-IP",
+                "Proxy-Client-IP",
+                "WL-Proxy-Client-IP"
+        };
+
+        for (String header : headers) {
+            String value = request.getHeader(header);
+            if (StringUtils.hasText(value) && !"unknown".equalsIgnoreCase(value)) {
+                return value.split(",")[0].trim();
+            }
+        }
+
+        return request.getRemoteAddr();
+    }
+
+    private String normalizeHeader(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        value = value.trim();
+        return value.length() > 180 ? value.substring(0, 180) : value;
+    }
+
+    private static class ScalperRiskResult {
+        private final boolean blocked;
+        private final boolean needCaptcha;
+        private final String message;
+
+        private ScalperRiskResult(boolean blocked, boolean needCaptcha, String message) {
+            this.blocked = blocked;
+            this.needCaptcha = needCaptcha;
+            this.message = message;
+        }
+
+        private static ScalperRiskResult pass() {
+            return new ScalperRiskResult(false, false, "");
+        }
+
+        private static ScalperRiskResult captcha(String message) {
+            return new ScalperRiskResult(false, true, message);
+        }
+
+        private static ScalperRiskResult block(String message) {
+            return new ScalperRiskResult(true, false, message);
+        }
     }
 
     /**

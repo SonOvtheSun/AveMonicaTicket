@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 // 👈 重点：引入 Image (用于点击预览图片) 和 Popover (用于悬浮查看票档)
-import { Table, Button, Space, Card, Tag, Modal, Drawer, message, Image, Popover, Input } from 'antd';
+import {Table, Button, Space, Card, Tag, Modal, Drawer, message, Image, Popover, Input, Popconfirm} from 'antd';
 import { Plus, Edit, Trash2, EyeOff, Eye, ShieldOff } from 'lucide-react';
 import axios from 'axios';
 import AddEventForm from './AddEventForm';
@@ -71,6 +71,20 @@ const EventManager = () => {
             }
         } catch (error) {
             message.error('快捷隐藏请求失败');
+        }
+    };
+
+    const handleRevokeAudit = async (id) => {
+        try {
+            const res = await axios.put(`/api/admin/event/revoke/${id}`);
+            if (res.data.code === 200) {
+                message.success(res.data.message || '已撤销审核');
+                fetchEvents(pagination.current, pagination.pageSize);
+            } else {
+                message.error(res.data.message || '撤销失败');
+            }
+        } catch (error) {
+            message.error('撤销审核失败');
         }
     };
 
@@ -269,8 +283,14 @@ const EventManager = () => {
             dataIndex: 'status',
             key: 'status',
             width: 90,
-            render: (status) => {
-                const config = statusConfig[status] || { color: 'default', text: '未知' };
+            render: (_, record) => {
+                if (record.editAuditStatus === 0) return <Tag color="processing">修改待审核</Tag>;
+                if (record.editAuditStatus === 2) return <Tag color="red">修改被驳回</Tag>;
+                if (record.auditStatus === 0) return <Tag color="orange">新增待审核</Tag>;
+                if (record.auditStatus === 2) return <Tag color="red">新增被驳回</Tag>;
+                if (record.auditStatus === 3) return <Tag color="default">已撤销</Tag>;
+
+                const config = statusConfig[record.status] || { color: 'default', text: '未知' };
                 return <Tag color={config.color}>{config.text}</Tag>;
             }
         },
@@ -278,12 +298,40 @@ const EventManager = () => {
             title: '管理操作',
             key: 'action',
             width: 160,
-            render: (_, record) => (
+            render: (_, record) => {
+                const isNewPending = record.auditStatus === 0;
+                const isEditPending = record.editAuditStatus === 0;
+                const hasPendingAudit = isNewPending || isEditPending;
+                const canEdit = isSuperAdmin || !hasPendingAudit;
+
+                return(
                 <Space size="middle">
                     {/* 场景 A：拥有发布/编辑权限的人 (超管、演出管理方) */}
                     {hasPublishPerm && (
                         <>
-                            <Button type="text" icon={<Edit size={14} />} style={{ color: '#1890ff', padding: 0 }} onClick={() => handleEditClick(record)}>编辑</Button>
+                            <Button
+                                type="text"
+                                icon={<Edit size={14} />}
+                                disabled={!canEdit}
+                                style={{ color: canEdit ? '#1890ff' : '#999', padding: 0 }}
+                                onClick={() => handleEditClick(record)}
+                            >
+                                编辑
+                            </Button>
+                            {!isSuperAdmin && hasPendingAudit && (
+                                <Popconfirm
+                                    title="确定撤销审核申请？"
+                                    description="撤销后可重新编辑并提交审核。"
+                                    onConfirm={() => handleRevokeAudit(record.id)}
+                                    okText="确定撤销"
+                                    cancelText="取消"
+                                    okButtonProps={{ danger: true }}
+                                >
+                                    <Button type="text" danger style={{ padding: 0 }}>
+                                        撤销审核
+                                    </Button>
+                                </Popconfirm>
+                            )}
                             {record.status !== 4 ? (
                                 <Button type="text" icon={<EyeOff size={14} />} onClick={() => handleQuickHide(record.id)} style={{ color: '#faad14', padding: 0 }}>隐藏</Button>
                             ) : (
@@ -306,7 +354,7 @@ const EventManager = () => {
                     }
 
                 </Space>
-            )
+            )}
         },
     ];
 

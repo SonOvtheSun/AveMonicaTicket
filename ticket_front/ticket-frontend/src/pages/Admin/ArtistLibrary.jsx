@@ -5,6 +5,29 @@ import { SearchOutlined, EditOutlined, StopOutlined, CheckCircleOutlined, Upload
 import axios from 'axios';
 import ImgCrop from "antd-img-crop";
 
+const MUSIC_STYLE_OPTIONS = [
+    '古典',
+    '流行',
+    '世界音乐',
+    '独立',
+    '摇滚',
+    '爵士',
+    'HipHop',
+    '轻音乐',
+    '民谣',
+    '动漫',
+    '朋克',
+    '电子',
+    '金属',
+    '雷鬼',
+    '核'
+].map(style => ({ value: style, label: style }));
+
+const splitStyleText = (style) => {
+    if (!style) return [];
+    return String(style).split('/').map(item => item.trim()).filter(Boolean);
+};
+
 const ArtistLibrary = () => {
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -17,6 +40,7 @@ const ArtistLibrary = () => {
     const [editingArtist, setEditingArtist] = useState(null);
     const [form] = Form.useForm();
     const [submitting, setSubmitting] = useState(false);
+    const [userRole, setUserRole] = useState(6);
 
     const [avatarFileList, setAvatarFileList] = useState([]);
 
@@ -39,7 +63,28 @@ const ArtistLibrary = () => {
 
     useEffect(() => {
         fetchData();
+        axios.get('/api/user/info').then(res => {
+            if (res.data.code === 200) {
+                setUserRole(res.data.data.role || 6);
+            }
+        });
     }, []);
+
+    const isSuperAdmin = userRole === 1;
+
+    const handleRevokeAudit = async (id) => {
+        try {
+            const res = await axios.put(`/api/admin/artist/revoke/${id}`);
+            if (res.data.code === 200) {
+                message.success(res.data.message || '已撤销审核');
+                fetchData();
+            } else {
+                message.error(res.data.message || '撤销失败');
+            }
+        } catch (error) {
+            message.error('撤销审核失败');
+        }
+    };
 
     // 状态切换 (下架/恢复)
     const handleStatusChange = async (id, newStatus) => {
@@ -148,6 +193,7 @@ const ArtistLibrary = () => {
             ...record,
             // 逆向转换：字符串转为数组回显
             region: record.region ? [record.region] : [],
+            style: splitStyleText(record.style),
             // avatar: avatarFileList
         });
         setModalVisible(true);
@@ -164,10 +210,14 @@ const ArtistLibrary = () => {
                 ? values.region[0]
                 : '';
 
+            const styleStr = Array.isArray(values.style)
+                ? values.style.join('/')
+                : (values.style || '');
+
             const payload = {
                 name: values.name,
                 region: regionStr,
-                style: values.style,
+                style: styleStr,
                 description: values.description,
                 avatarUrl: finalAvatarUrl
             };
@@ -205,26 +255,61 @@ const ArtistLibrary = () => {
         },
         { title: '名称', dataIndex: 'name', key: 'name', fontWeight: 'bold' },
         { title: '国家/地区', dataIndex: 'region', key: 'region', render: text => text || '-' },
-        { title: '风格', dataIndex: 'style', key: 'style', render: text => text ? <Tag color="blue">{text}</Tag> : '-' },
+        {
+            title: '风格',
+            dataIndex: 'style',
+            key: 'style',
+            render: text => {
+                const styles = splitStyleText(text);
+                return styles.length > 0
+                    ? styles.map(style => <Tag color="blue" key={style}>{style}</Tag>)
+                    : '-';
+            }
+        },
         {
             title: '状态',
             dataIndex: 'auditStatus',
             key: 'auditStatus',
-            render: (status) => {
-                if (status === 0) return <Tag color="orange">待审核</Tag>;
-                if (status === 1) return <Tag color="green">正常在库</Tag>;
-                if (status === 2) return <Tag color="default">已下架</Tag>; // 下架改成灰色更符合视觉直觉
-                return <Tag>{status}</Tag>;
+            render: (_, record) => {
+                if (record.editAuditStatus === 0) return <Tag color="processing">修改待审核</Tag>;
+                if (record.editAuditStatus === 2) return <Tag color="red">修改被驳回</Tag>;
+                if (record.auditStatus === 0) return <Tag color="orange">新增待审核</Tag>;
+                if (record.auditStatus === 1) return <Tag color="green">正常在库</Tag>;
+                if (record.auditStatus === 2) return <Tag color="red">新增被驳回</Tag>;
+                if (record.auditStatus === 3) return <Tag color="default">已撤销</Tag>;
+                return <Tag>{record.auditStatus}</Tag>;
             }
         },
         {
             title: '操作',
             key: 'action',
-            render: (_, record) => (
+            render: (_, record) => {
+                const isNewPending = record.auditStatus === 0;
+                const isEditPending = record.editAuditStatus === 0;
+                const hasPendingAudit = isNewPending || isEditPending;
+                const canEdit = isSuperAdmin || !hasPendingAudit;
+
+            return (
                 <Space>
-                    <Button type="primary" size="small" icon={<EditOutlined />} onClick={() => openEditModal(record)}>
+                    <Button
+                        type="primary"
+                        size="small"
+                        icon={<EditOutlined />}
+                        disabled={!canEdit}
+                        onClick={() => openEditModal(record)}
+                    >
                         编辑
                     </Button>
+                    {!isSuperAdmin && hasPendingAudit && (
+                        <Popconfirm
+                            title="确定撤销审核申请？"
+                            description="撤销后可重新编辑并提交审核。"
+                            onConfirm={() => handleRevokeAudit(record.id)}
+                            okButtonProps={{ danger: true }}
+                        >
+                            <Button danger size="small">撤销审核</Button>
+                        </Popconfirm>
+                    )}
 
                     {record.auditStatus === 1 ? (
                         <Popconfirm title="确定要下架该艺人吗？" onConfirm={() => handleStatusChange(record.id, 2)} okButtonProps={{ danger: true }}>
@@ -246,7 +331,7 @@ const ArtistLibrary = () => {
                         <Button type="primary" danger size="small" icon={<DeleteOutlined />}>删除</Button>
                     </Popconfirm>
                 </Space>
-            )
+            )}
         }
     ];
 
@@ -260,7 +345,7 @@ const ArtistLibrary = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 16, fontWeight: 'bold', color: '#333' }}>演出项目管理看板</span>
             </div>
-            }
+        }
         >
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', gap: 10 }}>
@@ -317,8 +402,28 @@ const ArtistLibrary = () => {
                         ]} />
                     </Form.Item>
 
-                    <Form.Item name="style" label="音乐风格">
-                        <Input placeholder="如：ACG、摇滚、流行" />
+                    <Form.Item
+                        name="style"
+                        label="音乐风格"
+                        rules={[
+                            {
+                                validator: (_, value) => {
+                                    if (!value || value.length <= 2) {
+                                        return Promise.resolve();
+                                    }
+                                    return Promise.reject(new Error('音乐风格最多选择两项'));
+                                }
+                            }
+                        ]}
+                    >
+                        <Select
+                            mode="multiple"
+                            maxCount={2}
+                            placeholder="请选择音乐风格，最多两项"
+                            options={MUSIC_STYLE_OPTIONS}
+                            optionFilterProp="label"
+                            allowClear
+                        />
                     </Form.Item>
 
                     <Form.Item label="官方头像" required>

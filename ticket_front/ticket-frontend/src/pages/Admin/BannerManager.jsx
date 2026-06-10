@@ -77,6 +77,20 @@ const BannerManager = () => {
         fetchBanners();
     }, [activeTab]);
 
+    const handleRevokeAudit = async (id) => {
+        try {
+            const res = await axios.put(`/api/admin/banner/revoke/${id}`);
+            if (res.data.code === 200) {
+                message.success(res.data.message || '已撤销审核');
+                fetchBanners();
+            } else {
+                message.error(res.data.message || '撤销失败');
+            }
+        } catch (error) {
+            message.error('撤销审核失败');
+        }
+    };
+
     const columns = [
         { title: '横幅海报', dataIndex: 'posterUrl', render: (url) => <Image src={url} width={120} style={{ borderRadius: 8 }} /> },
         { title: '关联演出ID', dataIndex: 'eventId', render: (id) => id || <span style={{color:'#999'}}>纯展示(无跳转)</span> },

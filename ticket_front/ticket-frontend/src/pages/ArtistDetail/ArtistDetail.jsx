@@ -1,0 +1,269 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Tabs, Spin, Empty, message, ConfigProvider, Button } from 'antd';
+import axios from 'axios';
+import dayjs from 'dayjs';
+import locale from 'antd/locale/zh_CN';
+import PublicHeader from '../../components/PublicHeader/PublicHeader';
+import './ArtistDetail.css';
+
+const EVENT_PAGE_SIZE = 10;
+
+const ArtistDetail = () => {
+    const { id } = useParams();
+    const navigate = useNavigate();
+
+    const [artist, setArtist] = useState(null);
+    const [events, setEvents] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [eventsLoadingMore, setEventsLoadingMore] = useState(false);
+    const [eventPage, setEventPage] = useState(1);
+    const [hasMoreEvents, setHasMoreEvents] = useState(false);
+
+    const fetchArtistEvents = async (page = 1, append = false) => {
+        if (append) {
+            setEventsLoadingMore(true);
+        }
+
+        try {
+            const eventRes = await axios.get('/api/event/page', {
+                params: {
+                    artistId: id,
+                    current: page,
+                    size: EVENT_PAGE_SIZE
+                }
+            });
+
+            if (eventRes.data.code === 200) {
+                const pageData = eventRes.data.data || {};
+                const records = pageData.records || [];
+                const current = Number(pageData.current || page);
+                const size = Number(pageData.size || EVENT_PAGE_SIZE);
+                const total = Number(pageData.total || 0);
+
+                setEvents(prev => append ? [...prev, ...records] : records);
+                setEventPage(current);
+                setHasMoreEvents(current * size < total);
+            } else {
+                message.error(eventRes.data.message || '获取音乐人演出失败');
+            }
+        } catch (error) {
+            console.error('加载音乐人演出失败', error);
+            message.error('加载音乐人演出失败');
+        } finally {
+            if (append) {
+                setEventsLoadingMore(false);
+            }
+        }
+    };
+
+    const handleLoadMoreEvents = () => {
+        if (eventsLoadingMore || !hasMoreEvents) return;
+        fetchArtistEvents(eventPage + 1, true);
+    };
+
+    useEffect(() => {
+        const fetchDetailAndEvents = async () => {
+            setLoading(true);
+            try {
+                // 1. 获取音乐人详情
+                const artistRes = await axios.get(`/api/artist/${id}`);
+                if (artistRes.data.code === 200) {
+                    setArtist(artistRes.data.data);
+                    document.title = `${artistRes.data.data.name} - Ave Monica`;
+                } else {
+                    message.error(artistRes.data.message);
+                    navigate('/artists');
+                    return;
+                }
+
+                // 2. 默认只拉取前 10 场，后续通过“加载更多”分页追加
+                await fetchArtistEvents(1, false);
+            } catch (error) {
+                console.error("加载音乐人主页失败", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchDetailAndEvents();
+        window.scrollTo(0, 0);
+    }, [id, navigate]);
+
+    // 票价计算方法 (与首页保持一致)
+    const getMinPrice = (tickets) => {
+        if (!tickets || tickets.length === 0) return '票档待定';
+        const prices = tickets.map(t => Number(t.price)).filter(p => Number.isFinite(p));
+        return prices.length === 0 ? '票档待定' : `¥${Math.min(...prices)}起`;
+    };
+
+    const getPriceText = (event) => {
+        if (Number(event.status) === 3) {
+            const showTime = event.showTime ? new Date(event.showTime).getTime() : NaN;
+            return Number.isFinite(showTime) && showTime > Date.now() ? '敬请期待' : '已结束';
+        }
+        return getMinPrice(event.tickets);
+    };
+
+    if (loading) {
+        return <div className="ad-loading"><Spin size="large" tip="加载音乐人档案中..." /></div>;
+    }
+
+    if (!artist) return null;
+
+    // Tabs 配置
+    const tabItems = [
+        {
+            key: 'events',
+            label: '全部演出',
+            children: (
+                <div className="ad-events-section">
+                    {events.length > 0 ? (
+                        <>
+                            <div className="ad-event-grid">
+                                {events.map((event, index) => {
+                                    const priceText = getPriceText(event);
+                                    const isStatusText = priceText === '敬请期待' || priceText === '已结束' || priceText === '票档待定';
+                                    const isPresale = Number(event.status) === 1 && event.saleTime && dayjs().isBefore(dayjs(event.saleTime));
+                                    return (
+                                        <div
+                                            key={event.id}
+                                            className="ad-event-card"
+                                            style={{ '--card-index': index }}
+                                            onClick={() => navigate(`/event/${event.id}`)}
+                                        >
+                                            <div className="ad-event-cover-wrapper">
+                                                <img src={event.posterUrl} alt={event.title} className="ad-event-cover" />
+                                                <div className="ad-event-image-mask" />
+                                                {event.style && (
+                                                    <div className="ad-event-style-tags">
+                                                        <span className="ad-event-style-tag">{event.style.split('/')[0]}</span>
+                                                    </div>
+                                                )}
+                                                {/* 🚨 新增：与演出大厅完全一致的右下角“预售中”标签 */}
+                                                {isPresale && (
+                                                    <div style={{
+                                                        position: 'absolute',
+                                                        bottom: 14,
+                                                        right: 14,
+                                                        padding: '2px 8px',
+                                                        color: '#FF8899',
+                                                        fontSize: '12px',
+                                                        fontWeight: 'bold',
+                                                        backgroundColor: '#fff0f3',
+                                                        zIndex: 3,
+                                                        border: '1px solid rgba(255, 136, 153, 0.3)',
+                                                        borderRadius: '4px',
+                                                        lineHeight: '1.2'
+                                                    }}>
+                                                        预售中
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="ad-event-info">
+                                                <h3 className="ad-event-title" title={event.title}>{event.title}</h3>
+                                                <div className="ad-event-artist">艺人：{artist.name}</div>
+                                                <div className={`ad-event-price ${isStatusText ? 'is-status' : ''} ${priceText === '敬请期待' ? 'is-coming-soon' : ''}`}>
+                                                    {priceText}
+                                                </div>
+                                                <div className="ad-event-meta">
+                                                    {event.showTime ? event.showTime.substring(0, 16) : '时间待定'}
+                                                </div>
+                                                <div className="ad-event-meta">
+                                                    <i className="lucide-map-pin" style={{fontSize: 12, marginRight: 4}}></i>
+                                                    [{event.city}] {event.venue}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {hasMoreEvents && (
+                                <div className="ad-load-more-wrapper" style={{ textAlign: 'center', marginTop: 32 }}>
+                                    <Button
+                                        className="ad-load-more-btn"
+                                        loading={eventsLoadingMore}
+                                        onClick={handleLoadMoreEvents}
+                                        style={{
+                                            minWidth: 160,
+                                            height: 40,
+                                            borderRadius: 999,
+                                            color: '#FF6B80',
+                                            borderColor: '#FFB3C0',
+                                            fontWeight: 700,
+                                            background: '#fff6f8'
+                                        }}
+                                    >
+                                        加载更多
+                                    </Button>
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <Empty description={`${artist.name} 最近暂无演出排期哦~`} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    )}
+                </div>
+            )
+        },
+        {
+            key: 'intro',
+            label: '简介',
+            children: (
+                <div className="ad-intro-section">
+                    {artist.description ? (
+                        <p className="ad-intro-text">{artist.description}</p>
+                    ) : (
+                        <Empty description="该音乐人很神秘，暂时没有留下简介~" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    )}
+                </div>
+            )
+        }
+    ];
+
+    return (
+        <ConfigProvider locale={locale}>
+            <div className="ad-page-bg">
+                <PublicHeader />
+
+                <div className="ad-container">
+                    {/* 1. 秀动经典的左暗右亮拼接 Banner */}
+                    <div className="ad-banner">
+                        <div className="ad-banner-left">
+                            <div className="ad-avatar-glow">
+                                <img src={artist.avatarUrl || 'https://via.placeholder.com/200'} alt={artist.name} className="ad-avatar" />
+                            </div>
+                        </div>
+                        <div className="ad-banner-right">
+                            <h1 className="ad-artist-name">{artist.name}</h1>
+                            <div className="ad-artist-meta-list">
+                                <div className="ad-meta-item">
+                                    <span className="ad-meta-label">地区：</span>
+                                    <span className="ad-meta-value">{artist.region || '未知'}</span>
+                                </div>
+                                <div className="ad-meta-item">
+                                    <span className="ad-meta-label">风格：</span>
+                                    <span className="ad-meta-value">{artist.style || '未定'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 2. 详情内容区 (包含演出列表) */}
+                    <div className="ad-content">
+                        <Tabs
+                            defaultActiveKey="events"
+                            items={tabItems}
+                            className="ad-custom-tabs"
+                            size="large"
+                            tabBarGutter={40}
+                        />
+                    </div>
+                </div>
+            </div>
+        </ConfigProvider>
+    );
+};
+
+export default ArtistDetail;

@@ -59,6 +59,15 @@ const UserManager = () => {
         { value: 6, label: '5. 普通游客', color: 'default' },
     ];
 
+    const roleOptionsR = [
+        { value: 1, label: '0. 超级管理员', color: 'volcano' },
+        { value: 2, label: '1. 演出审核员', color: 'volcano' },
+        { value: 3, label: '2. 评论审核员', color: 'purple' },
+        { value: 4, label: '3. 订单管理员', color: 'cyan' },
+        { value: 5, label: '4. 演出管理方', color: 'blue' },
+        { value: 6, label: '5. 普通游客', color: 'default' },
+    ];
+
     const columns = [
         {
             title: '用户信息',
@@ -84,7 +93,7 @@ const UserManager = () => {
             key: 'currentRole',
             render: (_, record) => {
                 // 如果数据库没设默认值或者为空，默认显示为 6(普通游客)
-                const currentRoleConfig = roleOptions.find(r => r.value === (record.role || 6)) || roleOptions[4];
+                const currentRoleConfig = roleOptionsR.find(r => r.value === (record.role || 6)) || roleOptions[4];
                 return <Tag color={currentRoleConfig.color}>{currentRoleConfig.label}</Tag>;
             }
         },

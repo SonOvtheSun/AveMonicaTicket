@@ -1,216 +1,474 @@
 .events-page-bg {
-    background-color: #f5f5f5;
     min-height: 100vh;
-    padding-bottom: 60px;
+    padding-bottom: 64px;
+    background:
+            radial-gradient(circle at 8% 8%, rgba(255, 136, 153, 0.08), transparent 28%),
+            linear-gradient(180deg, #fff9fb 0%, #ffffff 42%, #ffffff 100%);
 }
 
 .events-container {
     width: 1200px;
-    margin: 24px auto 0;
+    margin: 30px auto 0;
 }
 
-/* ================== 筛选面板 ================== */
-.filter-panel {
+.events-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: left;
+    padding: 22px 24px;
+    margin-bottom: 22px;
+    border: 1px solid rgba(255, 136, 153, 0.12);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.86);
+    box-shadow: 0 14px 38px rgba(255, 136, 153, 0.08);
+    backdrop-filter: blur(10px);
+}
+
+.page-title {
+    font-size: 26px;
+    font-weight: 800;
+    color: #222;
+    letter-spacing: 0.02em;
+}
+
+.page-subtitle {
+    margin-top: 6px;
+    font-size: 13px;
+    color: #999;
+}
+
+.events-total-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 36px;
+    padding: 0 16px;
+    color: #888;
+    font-size: 13px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 136, 153, 0.18);
+    background: #fff6f8;
+}
+
+.events-total-pill span {
+    margin: 0 4px;
+    color: #FF6B80;
+    font-weight: 800;
+}
+
+/* ================== 筛选面板：和音乐人页统一的胶囊风格 ================== */
+.event-filter-panel {
+    margin-bottom: 30px;
+    padding: 8px 18px;
+    border-radius: 18px;
     background: #fff;
-    padding: 10px 24px;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-    margin-bottom: 24px;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.035);
 }
 
-.filter-row {
+.event-filter-row {
     display: flex;
     align-items: flex-start;
-    padding: 16px 0;
-    border-bottom: 1px dashed #eee;
+    padding: 14px 0;
+    border-bottom: 1px dashed rgba(255, 136, 153, 0.18);
 }
 
-.filter-row.no-border {
+.event-filter-row.no-border {
     border-bottom: none;
 }
 
-.filter-label {
-    width: 80px;
-    font-size: 14px;
-    color: #999;
-    font-weight: bold;
+.event-filter-label {
+    width: 84px;
     flex-shrink: 0;
-    line-height: 28px;
+    color: #999;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 30px;
 }
 
-.filter-options {
+.event-filter-options {
     flex: 1;
     display: flex;
     flex-wrap: wrap;
-    gap: 8px 24px;
+    gap: 10px 12px;
     align-items: center;
 }
 
-.filter-item {
-    font-size: 14px;
-    color: #333;
+.event-filter-options-with-picker {
+    row-gap: 12px;
+}
+
+.event-filter-item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 54px;
+    height: 30px;
+    padding: 0 16px;
+    font-size: 13px;
+    color: #666;
     cursor: pointer;
-    line-height: 28px;
-    padding: 0 8px;
-    border-radius: 4px;
-    transition: all 0.2s;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: transparent;
+    user-select: none;
+    transition: transform 0.22s ease, color 0.22s ease, background 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
 }
 
-.filter-item:hover {
-    color: #e60026;
+.event-filter-item:hover {
+    color: #FF8899;
+    background: #fff6f8;
+    transform: translateY(-2px);
 }
 
-/* 选中状态：大麦/秀动经典的红底白字或纯红字 */
-.filter-item.active {
-    color: #e60026;
-    font-weight: bold;
+.event-filter-item.active {
+    color: #FF6B80;
+    font-weight: 700;
+    border-color: rgba(255, 136, 153, 0.55);
+    background: #fff0f3;
+    box-shadow: 0 8px 18px rgba(255, 136, 153, 0.20);
 }
 
-.filter-datepicker {
-    margin-left: 20px;
+.event-filter-datepicker {
+    margin-left: 8px;
 }
 
-/* ================== 演出卡片网格 ================== */
-.event-grid {
+.event-filter-datepicker .ant-picker {
+    border-radius: 999px;
+    border-color: #ffd6de;
+    transition: all 0.22s ease;
+}
+
+.event-filter-datepicker .ant-picker:hover,
+.event-filter-datepicker .ant-picker-focused {
+    border-color: #FF8899;
+    box-shadow: 0 6px 16px rgba(255, 136, 153, 0.14);
+}
+
+/* ================== 演出卡片：使用 event-list-* 命名，避免全局冲突 ================== */
+.event-list-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr); /* 一排 4 个 */
-    gap: 20px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 28px 22px;
 }
 
-.event-card {
-    background: #fff;
-    border-radius: 8px;
+.event-list-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
     overflow: hidden;
     cursor: pointer;
-    transition: all 0.3s ease;
-    border: 1px solid #f0f0f0;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(255, 136, 153, 0.14);
+    box-shadow: 0 12px 30px rgba(36, 18, 24, 0.07);
+    transform: translateY(0);
+    transition:
+            transform 0.35s cubic-bezier(.2,.8,.2,1),
+            box-shadow 0.35s cubic-bezier(.2,.8,.2,1),
+            border-color 0.35s ease;
+    animation: eventCardIn 0.52s ease both;
+    animation-delay: calc(var(--card-index) * 45ms);
 }
 
-.event-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+.event-list-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.50) 42%, transparent 60%);
+    transform: translateX(-140%);
+    transition: transform 0.65s ease;
 }
 
-.card-poster-wrapper {
-    width: 100%;
-    aspect-ratio: 3 / 4;
-    overflow: hidden;
+/*.event-list-card:hover {*/
+/*    transform: translateY(-10px) scale(1.012);*/
+/*    border-color: rgba(255, 136, 153, 0.46);*/
+/*    box-shadow: 0 22px 48px rgba(255, 136, 153, 0.18), 0 10px 18px rgba(0, 0, 0, 0.06);*/
+/*}*/
+
+/*.event-list-card:hover::before {*/
+/*    transform: translateX(140%);*/
+/*}*/
+
+.event-list-poster-wrapper {
     position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1.414;
+    flex: 0 0 auto;
+    overflow: hidden;
+    background: #fff;
 }
 
-.card-poster {
+.event-list-poster {
+    display: block;
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.3s ease;
+    object-position: center;
+    transition: transform 0.6s cubic-bezier(.2,.8,.2,1), filter 0.45s ease;
 }
 
-.event-card:hover .card-poster {
-    transform: scale(1.05);
-}
-
-.card-style-tag {
+.event-list-image-mask {
     position: absolute;
-    top: 8px;
-    right: 8px;
-    background: rgba(0,0,0,0.6);
-    color: #fff;
-    padding: 2px 8px;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(180deg, rgba(0,0,0,0.02) 30%, rgba(0,0,0,0.42) 100%);
+    opacity: 0.66;
+    transition: opacity 0.32s ease;
+}
+
+.event-list-card-glow {
+    position: absolute;
+    z-index: 2;
+    width: 120px;
+    height: 120px;
+    right: -38px;
+    bottom: -38px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255, 136, 153, 0.50), transparent 68%);
+    transform: scale(0.72);
+    opacity: 0;
+    transition: transform 0.42s ease, opacity 0.42s ease;
+}
+
+.event-list-hover-action {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 3;
+    padding: 5px 12px;
     font-size: 12px;
-    border-radius: 4px;
-    backdrop-filter: blur(4px);
+    color: #fff;
+    border-radius: 999px;
+    background: rgba(255, 136, 153, 0.92);
+    box-shadow: 0 10px 20px rgba(255, 136, 153, 0.28);
+    transform: translateY(12px);
+    opacity: 0;
+    transition: transform 0.28s ease, opacity 0.28s ease;
 }
 
-.card-info {
-    padding: 16px;
+.event-list-card:hover .event-list-poster {
+    transform: scale(1.02);
+    filter: saturate(1.08) contrast(1.03);
 }
 
-.card-title {
+.event-list-card:hover .event-list-image-mask {
+    opacity: 0.42;
+}
+
+.event-list-card:hover .event-list-card-glow {
+    transform: scale(1.08);
+    opacity: 1;
+}
+
+.event-list-card:hover .event-list-hover-action {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+.event-list-style-tags-on-image {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    z-index: 3;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: calc(100% - 24px);
+}
+
+.event-list-style-tag-on-image {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 23px;
+    padding: 0 9px;
+    color: #fff;
+    font-size: 12px;
+    line-height: 23px;
+    border-radius: 999px;
+    background: rgba(255, 136, 153, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+    backdrop-filter: blur(6px);
+    white-space: nowrap;
+}
+
+.event-list-info {
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    padding: 15px 14px 16px;
+}
+
+.event-list-title {
+    width: 100%;
+    min-height: 44px;
+    color: #222;
     font-size: 16px;
-    font-weight: bold;
-    color: #333;
-    margin-bottom: 8px;
-    /* 超过两行省略号 */
+    font-weight: 800;
+    line-height: 1.38;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    line-height: 1.4;
-    height: 44px;
+    transition: color 0.25s ease;
 }
 
-.card-artist {
+.event-list-card:hover .event-list-title {
+    color: #FF6B80;
+}
+
+.event-list-artist {
+    width: 100%;
+    margin-top: 8px;
+    color: #777;
     font-size: 13px;
-    color: #666;
-    margin-bottom: 8px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.card-price {
+.event-list-price-on-poster {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-width: calc(100% - 114px);
+    min-height: 30px;
+    padding: 0 12px;
+    color: #FF6B80;
     font-size: 18px;
-    color: #e60026;
-    font-weight: bold;
-    margin-bottom: 8px;
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(8px);
+    transition: transform 0.25s ease, background 0.25s ease;
 }
 
-.card-time, .card-venue {
-    font-size: 12px;
+.event-list-card:hover .event-list-price-on-poster {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.98);
+}
+
+.event-list-price-on-poster.event-list-price-status {
+    height: 28px;
+    min-height: 28px;
+    padding: 0 11px;
+    color: #888;
+    font-size: 13px;
+    font-weight: 800;
+    background: rgba(255, 255, 255, 0.92);
+}
+
+.event-list-price-on-poster.event-list-price-status.is-coming-soon {
+    color: #FF6B80;
+    background: rgba(255, 240, 243, 0.94);
+    border: 1px solid rgba(255, 136, 153, 0.34);
+}
+
+.event-list-price-on-poster.event-list-price-status.is-ended {
+    color: #888;
+    background: rgba(245, 245, 245, 0.94);
+}
+
+.event-list-meta-line {
+    width: 100%;
+    margin-top: 7px;
     color: #999;
-    margin-bottom: 4px;
+    font-size: 12px;
+    line-height: 1.3;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-/* ================== 分页居中 ================== */
 .pagination-wrapper {
-    margin-top: 40px;
+    margin-top: 54px;
     text-align: center;
 }
 
-.event-card {
-    height: auto;
-    min-height: unset;
-    overflow: hidden;
+.pagination-wrapper .ant-pagination-item {
+    border-radius: 10px;
+    transition: transform 0.2s ease, border-color 0.2s ease;
 }
 
-.card-poster-wrapper {
-    height: 400px;
+.pagination-wrapper .ant-pagination-item:hover {
+    transform: translateY(-2px);
+    border-color: #FF8899;
 }
 
-.card-poster {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+.pagination-wrapper .ant-pagination-item-active {
+    border-color: #FF8899;
 }
 
-.card-info {
-    padding: 10px 12px 12px;
+.pagination-wrapper .ant-pagination-item-active a {
+    color: #FF8899;
 }
 
-.card-title {
-    font-size: 16px;
-    line-height: 1.25;
-    margin-bottom: 4px;
+@keyframes eventCardIn {
+    from {
+        opacity: 0;
+        transform: translateY(18px) scale(0.985);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
-.card-artist,
-.card-time,
-.card-venue {
-    font-size: 13px;
-    line-height: 1.35;
-    margin-top: 3px;
+@media (max-width: 1280px) {
+    .events-container {
+        width: calc(100% - 48px);
+    }
 }
 
-.card-price {
-    font-size: 18px;
-    line-height: 1.2;
-    margin: 5px 0 3px;
+@media (max-width: 1024px) {
+    .event-list-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
 }
 
-.card-price-status {
-    font-weight: 700;
-    color: #999;
+@media (max-width: 768px) {
+    .events-page-header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .event-filter-row {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .event-filter-label {
+        width: auto;
+    }
+
+    .event-filter-datepicker {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .event-filter-datepicker .ant-picker {
+        width: 100%;
+    }
+
+    .event-list-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px 14px;
+    }
 }

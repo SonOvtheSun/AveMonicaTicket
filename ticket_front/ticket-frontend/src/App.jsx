@@ -16,6 +16,9 @@ import UserProfile from "./pages/User/UserProfile.jsx";
 import UserOrders from "./pages/User/UserOrders.jsx";
 import BannerManager from "./pages/Admin/BannerManager.jsx";
 import EventPage from "./pages/Public/EventPage.jsx";
+import ArtistsPage from "./pages/Public/ArtistsPage.jsx";
+import ArtistDetail from "./pages/ArtistDetail/ArtistDetail.jsx";
+import SearchResultPage from "./pages/Search/SearchResultPage.jsx";
 
 axios.interceptors.request.use(
     (config) => {
@@ -56,6 +59,9 @@ function App() {
                 <Route path="/user/profile" element={<UserProfile />} />
                 <Route path="/user/orders" element={<UserOrders />} />
                 <Route path="/events" element={<EventPage />} />
+                <Route path="/artists" element={<ArtistsPage />} />
+                <Route path="/artist/:id" element={<ArtistDetail />} />
+                <Route path="/search" element={<SearchResultPage />} />
 
 
                 <Route path="/admin" element={<AdminLayout />}>

@@ -5,6 +5,7 @@ import axios from 'axios';
 import PublicHeader from '../../components/PublicHeader/PublicHeader'; // 替换为你的实际路径
 import { useNavigate } from 'react-router-dom';
 import './UserOrders.css';
+import dayjs from "dayjs";
 
 const UserOrders = () => {
     const navigate = useNavigate(); // 🚨 新增：用于路由跳转
@@ -15,6 +16,38 @@ const UserOrders = () => {
     // 详情弹窗状态
     const [detailVisible, setDetailVisible] = useState(false);
     const [currentOrder, setCurrentOrder] = useState(null);
+
+    // 兼容不同后端字段名：观演人姓名
+    const getViewerName = (ticket, index) => {
+        return ticket.viewerName
+            || ticket.audienceName
+            || ticket.attendeeName
+            || ticket.holderName
+            || ticket.realName
+            || ticket.passengerName
+            || `观演人 ${index + 1}`;
+    };
+
+    // 兼容不同后端字段名：身份证号脱敏，只显示前四位和后两位
+    const getMaskedIdCard = (ticket) => {
+        const rawIdCard = ticket.idCard
+            || ticket.idCardNo
+            || ticket.identityNo
+            || ticket.certNo
+            || ticket.certificateNo
+            || ticket.audienceIdCard
+            || ticket.viewerIdCard
+            || '';
+
+        const idCard = String(rawIdCard).trim();
+        if (!idCard) return '身份证号：未填写';
+
+        if (idCard.length <= 6) {
+            return `身份证号：${idCard}`;
+        }
+
+        return `身份证号：${idCard.slice(0, 4)}************${idCard.slice(-2)}`;
+    };
 
     useEffect(() => {
         fetchOrders();
@@ -30,14 +63,13 @@ const UserOrders = () => {
                 return;
             }
 
-            // 🚨 真实对接后端获取订单列表接口
-            const res = await axios.get(`/api/order/list?status=${activeTab}`, {
+            // 订单分类由前端根据票的实时检票状态动态计算，避免“待检票”被后端订单状态误分到“已完成”
+            const res = await axios.get('/api/order/list?status=all', {
                 headers: { Authorization: `Bearer ${token}` }
             });
 
             if (res.data.code === 200) {
-                // 注意：这里强依赖你的后端返回的数据结构与之前 Mock 的结构一致
-                setOrders(res.data.data);
+                setOrders(res.data.data || []);
             } else {
                 message.error(res.data.message || '获取订单列表失败');
             }
@@ -54,16 +86,33 @@ const UserOrders = () => {
     };
 
     // 渲染状态标签及颜色
-    const getStatusConfig = (status) => {
-        switch (status) {
-            case 1: return { color: 'warning', text: '待支付' };
-            case 2: return { color: 'default', text: '已取消' };
-            case 3: return { color: 'success', text: '已完成' };
-            case 4: return { color: 'processing', text: '退款中' };
-            case 5: return { color: 'error', text: '异常订单' };
-            case 6: return { color: 'processing', text: '待检票' };
-            default: return { color: 'default', text: '未知状态' };
+    const getDynamicOrderStatus = (order) => {
+        // 如果是待支付(1)或已取消(2)，直接按原逻辑显示，不走检票/过期计算
+        if (order.status === 1) return { color: 'warning', text: '待支付' };
+        if (order.status === 2) return { color: 'default', text: '已取消' };
+        if (order.status === 4) return { color: 'processing', text: '退款中' };
+
+        if (!order.tickets || order.tickets.length === 0) return { color: 'default', text: '未知状态' };
+
+        // 1. 判断是否全部已检票 (约定 checkStatus === 1 为已检票)
+        const allChecked = order.tickets.every(t => t.checkStatus === 1);
+        if (allChecked) {
+            return { color: 'success', text: '已完成' }; // 所有票都检了 -> 已完成
         }
+
+        // 2. 判断是否过期 (当前时间 > 演出开始时间 + runningTime)
+        const eventTime = dayjs(order.event.time);
+        const runningTime = order.event.runningTime || 120; // 兜底 120 分钟
+        const isOver = dayjs().isAfter(eventTime.add(runningTime, 'minute'));
+
+        // 如果演出了结束了，且还有票没检 (checkStatus !== 1)，说明有票过期了
+        const hasExpired = order.tickets.some(t => t.checkStatus !== 1 && isOver);
+        if (hasExpired) {
+            return { color: 'default', text: '已结束' }; // 有过期票 -> 已结束
+        }
+
+        // 3. 正常状态 (已支付/待检票)
+        return { color: 'processing', text: '待检票' };
     };
 
     // 操作：删除订单
@@ -124,6 +173,19 @@ const UserOrders = () => {
         setDetailVisible(true);
     };
 
+    // 前端动态分类：不要只看 order.status，因为 order.status=3 可能只是“已支付”，不代表“已完成”
+    const getOrderCategoryKey = (order) => {
+        const statusCfg = getDynamicOrderStatus(order);
+        if (statusCfg.text === '待支付') return '1';
+        if (statusCfg.text === '待检票') return '6';
+        if (statusCfg.text === '已完成') return '3';
+        return 'other';
+    };
+
+    const displayOrders = activeTab === 'all'
+        ? orders
+        : orders.filter(order => getOrderCategoryKey(order) === activeTab);
+
     const tabItems = [
         { key: 'all', label: '全部订单' },
         { key: '1', label: '待支付' },
@@ -140,12 +202,12 @@ const UserOrders = () => {
                 <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} className="orders-tabs" />
 
                 <Spin spinning={loading}>
-                    {orders.length === 0 ? (
+                    {displayOrders.length === 0 ? (
                         <Empty description="暂无订单数据" style={{ marginTop: 60 }} />
                     ) : (
                         <div className="order-list">
-                            {orders.map(order => {
-                                const statusCfg = getStatusConfig(order.status);
+                            {displayOrders.map(order => {
+                                const statusCfg = getDynamicOrderStatus(order);
                                 return (
                                     <div className="order-card" key={order.id} onClick={() => openDetail(order)}>
                                         {/* 卡片头部：订单号与状态 */}
@@ -158,7 +220,7 @@ const UserOrders = () => {
 
                                                 <Popconfirm
                                                     title="确定要删除该订单吗？"
-                                                    onConfirm={(e) => handleDeleteOrder(order.id, e)}
+                                                    onConfirm={(e) => handleDeleteOrder(order, e)}
                                                     onCancel={(e) => e.stopPropagation()}
                                                 >
                                                     <Button type="text" danger icon={<DeleteOutlined />} size="small" onClick={e => e.stopPropagation()} />
@@ -186,7 +248,7 @@ const UserOrders = () => {
                                         {/* 卡片底部：操作按钮 */}
                                         <div className="order-card-footer" onClick={e => e.stopPropagation()}>
                                             {order.status === 1 && (
-                                                <Button type="primary" className="btn-pink" onClick={(e) => handlePay(order.id, e)}>立即支付</Button>
+                                                <Button type="primary" className="btn-pink" onClick={(e) => handlePay(order, e)}>立即支付</Button>
                                             )}
                                             {/* 需求10: 状态6显示联系客服按钮 */}
                                             {order.status === 6 && (
@@ -315,7 +377,8 @@ const UserOrders = () => {
                                 {currentOrder.tickets.map((ticket, index) => (
                                     <div className="wallet-ticket-card" key={ticket.id}>
                                         <div className="wt-info">
-                                            <div className="wt-name">观演人 {index + 1}</div>
+                                            <div className="wt-name">{getViewerName(ticket, index)}</div>
+                                            <div className="wt-id-card">{getMaskedIdCard(ticket)}</div>
                                             {ticket.seatInfo ? (
                                                 <div className="wt-seat">{ticket.seatInfo}</div>
                                             ) : (
@@ -326,7 +389,24 @@ const UserOrders = () => {
                                             {ticket.checkStatus === 4 ? (
                                                 <div className="wt-unissued">后台配座中<br/>(未出票)</div>
                                             ) : (
-                                                <QRCode value={ticket.qrCode} size={70} errorLevel="H" bordered={false} />
+                                                <div style={{ position: 'relative', display: 'inline-block' }}>
+                                                    {/* 正常二维码 */}
+                                                    <QRCode value={ticket.qrCode} size={70} errorLevel="H" bordered={false} />
+
+                                                    {/* 🚨 核心 UI：模糊滤镜盖章层 */}
+                                                    {(ticket.checkStatus === 1 || dayjs().isAfter(dayjs(currentOrder.event.time).add(currentOrder.event.runningTime || 120, 'minute'))) && (
+                                                        <div style={{
+                                                            position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+                                                            backgroundColor: 'rgba(255,255,255,0.75)', // 半透明白底
+                                                            backdropFilter: 'blur(3px)', // 毛玻璃模糊滤镜
+                                                            display: 'flex', justifyContent: 'center', alignItems: 'center',
+                                                            color: ticket.checkStatus === 1 ? '#52c41a' : '#999', // 检票为绿，过期为灰
+                                                            fontWeight: '900', fontSize: '18px',
+                                                        }}>
+                                                            {ticket.checkStatus === 1 ? '已检票' : '已过期'}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
                                     </div>

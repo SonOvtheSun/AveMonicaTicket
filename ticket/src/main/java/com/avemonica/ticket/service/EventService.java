@@ -19,4 +19,6 @@ public interface EventService extends IService<Event> {
     IPage<Event> listAdminEvents(int current, int size, String keyword);
 
     void updateEventWithTicketsAndArtists(Long id, EventAddDTO dto);
+
+    void applyEventMainData(Long id, EventAddDTO dto, Integer auditStatus, Integer status);
 }

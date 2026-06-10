@@ -10,17 +10,23 @@ import com.avemonica.ticket.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/admin/artist")
 public class AdminArtistController {
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Autowired
     private ArtistService artistService;
@@ -95,11 +101,60 @@ public class AdminArtistController {
         if (artist.getId() == null) {
             return Result.error("艺人ID不能为空");
         }
-        if(!StringUtils.hasText(artist.getAvatarUrl())) {
+
+        User currentUser = getCurrentUser();
+        boolean isSuperAdmin = currentUser.getId() == 1L;
+
+        Artist oldArtist = artistService.getById(artist.getId());
+        if (oldArtist == null) {
+            throw new BusinessException("艺人不存在");
+        }
+
+        if (!StringUtils.hasText(artist.getAvatarUrl())) {
             throw new BusinessException("头像不能为空！");
         }
+
+        // 超管：直接生效
+        if (isSuperAdmin) {
+            artist.setAuditStatus(1);
+            artist.setEditAuditStatus(null);
+            artist.setPendingPayload(null);
+            artist.setAuditSubmitTime(LocalDateTime.now());
+            artistService.updateById(artist);
+            return Result.success("修改成功");
+        }
+
+        // 普通管理员：新增待审核不能直接改
+        if (Objects.equals(oldArtist.getAuditStatus(), 0)) {
+            throw new BusinessException("该艺人正在审核中，如需修改，请先撤销审核申请");
+        }
+
+        // 普通管理员：修改待审核不能再次改
+        if (Objects.equals(oldArtist.getEditAuditStatus(), 0)) {
+            throw new BusinessException("该艺人修改正在审核中，如需再次修改，请先撤销审核申请");
+        }
+
+        // 普通管理员编辑已通过：只存快照
+        if (Objects.equals(oldArtist.getAuditStatus(), 1)) {
+            try {
+                oldArtist.setPendingPayload(objectMapper.writeValueAsString(artist));
+                oldArtist.setEditAuditStatus(0);
+                oldArtist.setAuditSubmitTime(LocalDateTime.now());
+                artistService.updateById(oldArtist);
+                return Result.success("艺人修改已提交审核，审核通过前客户端仍展示原信息");
+            } catch (Exception e) {
+                throw new BusinessException("保存艺人修改审核快照失败");
+            }
+        }
+
+        // 驳回/撤销后重新提交
+        artist.setAuditStatus(0);
+        artist.setEditAuditStatus(null);
+        artist.setPendingPayload(null);
+        artist.setAuditSubmitTime(LocalDateTime.now());
         artistService.updateById(artist);
-        return Result.success("修改成功");
+
+        return Result.success("艺人已重新提交审核");
     }
 
     // 修改艺人状态 (例如：下架、恢复)
@@ -162,9 +217,12 @@ public class AdminArtistController {
 
         LambdaQueryWrapper<Artist> wrapper = new LambdaQueryWrapper<>();
         // 🚨 0 代表待审核状态，你可以根据你的数据库实际约定进行调整
-        wrapper.eq(Artist::getAuditStatus, 0);
-        // 按照创建时间倒序排，最新申请的在最上面
-        wrapper.orderByDesc(Artist::getCreateTime);
+        wrapper.and(w -> w
+                .eq(Artist::getAuditStatus, 0)
+                .or()
+                .eq(Artist::getEditAuditStatus, 0)
+        );
+        wrapper.orderByDesc(Artist::getAuditSubmitTime);
 
         IPage<Artist> pageData = artistService.page(new Page<>(current, size), wrapper);
         return Result.success(pageData);
@@ -181,11 +239,61 @@ public class AdminArtistController {
             return Result.error("该艺人记录不存在");
         }
 
-        // 🚨 状态约定：1为审核通过，2为审核驳回
-        artist.setAuditStatus(isPass ? 1 : 2);
-        artistService.updateById(artist);
+        // 修改审核
+        if (Objects.equals(artist.getEditAuditStatus(), 0)) {
+            if (isPass) {
+                try {
+                    Artist pending = objectMapper.readValue(artist.getPendingPayload(), Artist.class);
+                    pending.setId(id);
+                    pending.setAuditStatus(1);
+                    pending.setEditAuditStatus(null);
+                    pending.setPendingPayload(null);
+                    pending.setAuditSubmitTime(LocalDateTime.now());
+                    artistService.updateById(pending);
+                    return Result.success("艺人修改审核已通过，客户端信息已同步更新");
+                } catch (Exception e) {
+                    throw new BusinessException("解析艺人修改审核快照失败");
+                }
+            } else {
+                artist.setEditAuditStatus(2);
+                artist.setPendingPayload(null);
+                artistService.updateById(artist);
+                return Result.success("已驳回艺人修改申请，客户端继续展示原信息");
+            }
+        }
 
-        return Result.success(isPass ? "艺人已通过审核" : "已驳回该艺人的入驻申请");
+        // 新增审核
+        if (Objects.equals(artist.getAuditStatus(), 0)) {
+            artist.setAuditStatus(isPass ? 1 : 2);
+            artistService.updateById(artist);
+            return Result.success(isPass ? "艺人已通过审核" : "已驳回该艺人的入驻申请");
+        }
+
+        throw new BusinessException("当前艺人没有待审核申请");
+    }
+
+    @PutMapping("/revoke/{id}")
+    @PreAuthorize("hasAuthority('audit:manage') or principal.username == 'admin'")
+    public Result<String> revokeArtistAudit(@PathVariable Long id) {
+        Artist artist = artistService.getById(id);
+        if (artist == null) {
+            throw new BusinessException("艺人不存在");
+        }
+
+        if (Objects.equals(artist.getAuditStatus(), 0)) {
+            artist.setAuditStatus(3);
+            artistService.updateById(artist);
+            return Result.success("已撤销艺人新增审核申请，可重新编辑后提交");
+        }
+
+        if (Objects.equals(artist.getEditAuditStatus(), 0)) {
+            artist.setEditAuditStatus(null);
+            artist.setPendingPayload(null);
+            artistService.updateById(artist);
+            return Result.success("已撤销艺人修改审核申请，客户端信息未受影响");
+        }
+
+        throw new BusinessException("当前状态无需撤销审核");
     }
 
 

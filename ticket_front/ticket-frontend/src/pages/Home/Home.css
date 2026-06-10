@@ -1,300 +1,233 @@
 /* 路径：src/pages/Home/Home.css */
 
 .home-layout {
-    background-color: #ffffff;
     min-height: 100vh;
-    /* 加上这行保险：允许垂直滚动，隐藏水平滚动防止意外白边 */
     overflow-y: auto !important;
     overflow-x: hidden !important;
+    background:
+            radial-gradient(circle at 8% 8%, rgba(255, 136, 153, 0.10), transparent 28%),
+            linear-gradient(180deg, #fff9fb 0%, #ffffff 42%, #ffffff 100%);
 }
 
-/* --- 内容区域 --- */
 .home-content {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 30px 20px;
+    width: 1200px;
+    max-width: calc(100% - 48px);
+    margin: 30px auto 0;
+    padding: 0 0 64px;
 }
 
-/* --- Banner 轮播图 --- */
-.banner-section {
-    margin-bottom: 40px;
-    border-radius: 8px;
-    overflow: hidden;
+/* ================= 首页标题卡片：与演出/音乐人页统一 ================= */
+.home-hero-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 22px;
+    text-align: left;
+    padding: 24px 26px;
+    margin-bottom: 24px;
+    border: 1px solid rgba(255, 136, 153, 0.12);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.86);
+    box-shadow: 0 14px 38px rgba(255, 136, 153, 0.08);
+    backdrop-filter: blur(10px);
+}
+
+.home-eyebrow {
+    margin-bottom: 8px;
+    color: #FF6B80;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+}
+
+.home-hero-title {
+    margin: 0;
+    color: #222;
+    font-size: 30px;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+}
+
+.home-hero-subtitle {
+    margin: 8px 0 0;
+    color: #999;
+    font-size: 14px;
+}
+
+.home-hero-action,
+.home-section-more {
+    height: 38px;
+    padding: 0 18px;
+    color: #FF6B80 !important;
+    font-weight: 800;
+    border-radius: 999px !important;
+    border: 1px solid rgba(255, 136, 153, 0.42) !important;
+    background: #fff6f8 !important;
+    transition: transform 0.22s ease, box-shadow 0.22s ease, background 0.22s ease !important;
+}
+
+.home-hero-action:hover,
+.home-section-more:hover {
+    transform: translateY(-2px);
+    background: #fff0f3 !important;
+    box-shadow: 0 10px 22px rgba(255, 136, 153, 0.18);
+}
+
+/* ================= Banner 轮播 ================= */
+.home-banner-section {
     position: relative;
+    margin-bottom: 34px;
+    overflow: hidden;
+    border-radius: 24px;
+    aspect-ratio: 4 / 1;
+    border: 1px solid rgba(255, 136, 153, 0.12);
+    background: #fff;
+    box-shadow: 0 18px 42px rgba(36, 18, 24, 0.08);
 }
 
-.banner-img {
-    height: 300px;
-    background-size: cover;
+.home-banner-section .ant-carousel,
+.home-banner-section .slick-slider,
+.home-banner-section .slick-list,
+.home-banner-section .slick-track,
+.home-banner-section .slick-slide,
+.home-banner-section .slick-slide > div,
+.home-banner-slide {
+    height: 100%;
+}
+
+.home-banner-img {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-size: contain;
     background-position: center;
+    background-repeat: no-repeat;
+    background-color: #fff;
 }
 
-/* ==================================================
-   🔥 轮播图箭头：终极清场版
-   ================================================== */
+.home-banner-img::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+            linear-gradient(90deg, rgba(0,0,0,0.36), rgba(0,0,0,0.02) 52%, rgba(255, 136, 153, 0.10)),
+            radial-gradient(circle at 82% 12%, rgba(255,255,255,0.18), transparent 22%);
+    pointer-events: none;
+}
 
-/* 1. 容器样式设置：完美居中，并杀掉任何默认文字 */
+.home-banner-glass {
+    position: absolute;
+    left: 28px;
+    bottom: 24px;
+    z-index: 1;
+    display: inline-flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 360px;
+    padding: 12px 16px;
+    border-radius: 18px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.34);
+    border: 1px solid rgba(255, 255, 255, 0.20);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(10px);
+}
+
+.home-banner-glass span {
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    opacity: 0.82;
+}
+
+.home-banner-glass strong {
+    font-size: 18px;
+    letter-spacing: 0.02em;
+}
+
 .ant-carousel .slick-prev,
 .ant-carousel .slick-next {
     width: 44px !important;
     height: 44px !important;
-    background-color: transparent !important;
     border-radius: 50%;
     z-index: 2;
-    transition: all 0.3s;
-
-    /* 完美的 Flex 居中 */
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-
-    /* ⚡ 绝杀 1：清除容器本身的一切文字特征，防止乱码/默认箭头文字出现 */
     font-size: 0 !important;
     color: transparent !important;
     line-height: 0 !important;
+    border: none !important;
+    background: rgba(255, 255, 255, 0.20) !important;
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.12) !important;
+    backdrop-filter: blur(8px);
+    transition: background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease !important;
 }
 
-/* 调整左右位置 */
-.ant-carousel .slick-prev { left: 20px !important; }
-.ant-carousel .slick-next { right: 20px !important; }
+.ant-carousel .slick-prev { left: 22px !important; }
+.ant-carousel .slick-next { right: 22px !important; }
 
-/* 悬停时的粉色圆圈底色 */
 .ant-carousel .slick-prev:hover,
 .ant-carousel .slick-next:hover {
-    background-color: #FF8899 !important;
-    box-shadow: 0 0 10px rgba(255, 136, 153, 0.4) !important;
+    background: #FF8899 !important;
+    box-shadow: 0 12px 26px rgba(255, 136, 153, 0.28) !important;
 }
 
-/* ⚡ 绝杀 2：彻底摧毁原生的幽灵伪元素箭头 */
 .ant-carousel .slick-prev::before,
 .ant-carousel .slick-next::before,
 .ant-carousel .slick-prev::after,
 .ant-carousel .slick-next::after {
-    content: none !important;    /* 直接清空内容 */
-    display: none !important;    /* 彻底不渲染 */
-    opacity: 0 !important;
-    visibility: hidden !important;
+    content: none !important;
+    display: none !important;
 }
 
-/* 2. 保护我们自己引入的 SVG 图标（只让它显示） */
 .ant-carousel .slick-prev svg,
 .ant-carousel .slick-next svg {
-    /* 强制设定真实图标的大小和颜色 */
     width: 24px !important;
     height: 24px !important;
-    font-size: 24px !important;
-    color: rgba(255, 255, 255, 0.8) !important;
+    color: rgba(255, 255, 255, 0.95) !important;
     display: block !important;
-    margin: 0 !important; /* 拔除任何外边距 */
-    transition: color 0.3s;
 }
 
-/* 悬停时 SVG 变纯白 */
-.ant-carousel .slick-prev:hover svg,
-.ant-carousel .slick-next:hover svg {
-    color: #ffffff !important;
+.ant-carousel .slick-dots li button {
+    height: 4px !important;
+    border-radius: 999px !important;
+    background: rgba(255, 255, 255, 0.72) !important;
 }
 
-/* 清除按钮自带底边框 */
-.ant-carousel .slick-arrow {
-    border: none !important;
-    box-shadow: none !important;
-}
-
-/* --- 演出列表 --- */
-.section-title {
-    font-size: 20px;
-    font-weight: bold;
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.title-icon {
-    color: #FF8899; /* 同步主题色 */
-}
-
-/* 演出卡片 */
-.event-card {
-    cursor: pointer;
-}
-
-.event-cover-wrapper {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 3 / 4;
-    border-radius: 4px;
-    overflow: hidden;
-    margin-bottom: 12px;
-}
-
-.event-cover {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transition: transform 0.3s;
-}
-
-.event-card:hover .event-cover {
-    transform: scale(1.05);
-}
-
-.event-price {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    color: #FF8899; /* 价格文字同步为粉色 */
-    font-size: 18px;
-    font-weight: bold;
-    padding: 2px 8px;
-    background: linear-gradient(transparent, rgba(255,255,255,0.9) 30%, #fff);
-    width: 100%;
-}
-
-.event-price span {
-    font-size: 12px;
-    margin-right: 2px;
-}
-
-.event-info {
-    padding-right: 10px;
-}
-
-.event-title {
-    font-size: 14px;
-    color: #333;
-    line-height: 1.5;
-    height: 42px;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    margin: 0;
-    transition: color 0.3s;
-}
-
-.event-card:hover .event-title {
-    color: #FF8899; /* 卡片悬停时标题变为粉色 */
-}
-
-.admin-dashboard-btn {
-    margin-right: 20px; /* 和头像保持一点距离 */
-    border-radius: 20px !important;
-    color: #FF8899 !important;
-    border-color: #FF8899 !important;
-    background: transparent !important;
-    display: flex !important;
-    align-items: center;
-    gap: 6px;
-    font-weight: bold;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-
-.admin-dashboard-btn:hover {
+.ant-carousel .slick-dots li.slick-active button {
     background: #FF8899 !important;
-    color: #ffffff !important; /* 悬停时反色，变成粉底白字 */
-    box-shadow: 0 4px 12px rgba(255, 136, 153, 0.3);
-    transform: translateY(-1px);
 }
 
-/* ==================================================
-   🔥 新增 C 端高级动效
-   ================================================== */
-
-/* 1. 卡片级联入场动画 */
-@keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(30px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+/* ================= 演出区标题 ================= */
+.home-event-section {
+    margin-top: 4px;
 }
 
-.animate-fade-in {
-    opacity: 0; /* 初始隐藏，等待动画执行 */
-    animation: fadeInUp 0.6s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
-}
-
-/* 2. 增强演出卡片的悬停质感 */
-.event-card {
-    cursor: pointer;
-    border-radius: 8px;
-    transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
-    background: #fff;
-    padding-bottom: 8px; /* 给底部留点呼吸空间 */
-}
-
-.event-card:hover {
-    transform: translateY(-6px);
-    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
-}
-
-.event-cover {
-    object-fit: contain;
-}
-
-/* 3. 增强图片遮罩效果 */
-.event-cover-wrapper::after {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0);
-    transition: background 0.3s ease;
-    z-index: 1;
-    pointer-events: none;
-}
-
-.event-card:hover .event-cover-wrapper::after {
-    background: rgba(0, 0, 0, 0.05); /* 悬停时压暗一点点，突出文字 */
-}
-
-/* 确保价格标签层级在遮罩之上 */
-/* 修改后的价格标签：取消底部大面积白色虚化渐变，改为精致的小浮窗 */
-.event-price {
-    position: absolute;
-    bottom: 10px;
-    left: 10px;
-    color: #FF8899;
-    padding: 4px 10px;
-    background: rgba(0, 0, 0, 0.65);
-    border-radius: 6px;
-    backdrop-filter: blur(4px);
-    z-index: 2;
-    width: auto;
-
-    /* 👇 核心排版魔法：让大小不一的文字底部完美平齐 */
+.home-section-header {
     display: flex;
-    align-items: baseline;
-    gap: 2px; /* 三个元素之间的间距 */
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 22px;
 }
 
-/* 人民币符号 */
-.event-price .price-symbol {
+.home-section-title {
+    margin: 0;
+    color: #222;
+    font-size: 26px;
+    font-weight: 900;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+}
+
+.home-section-subtitle {
+    margin: 6px 0 0;
+    color: #999;
     font-size: 13px;
-    color: #ffffff;
 }
 
-/* 核心数字：调大字号，加粗 */
-.event-price .price-num {
-    font-size: 22px;
-    font-weight: bold;
-}
-
-/* 结尾的“起”字：调小字号，取消加粗 */
-.event-price .price-suffix {
-    font-size: 13px;
-    font-weight: normal;
-}
-
-.price-suffix {
-    color:#ffffff;
-}
-/* 4. 加载状态容器居中 */
-.loading-container {
+.home-loading-container {
     display: flex;
     justify-content: center;
     align-items: center;
@@ -302,69 +235,257 @@
     width: 100%;
 }
 
-/* ==================================================
-   🔥 5列网格布局 (专为演出卡片定制)
-   ================================================== */
-.event-grid {
+/* ================= 首页演出卡片：与 EventPage / ArtistsPage 统一 ================= */
+.home-event-grid {
     display: grid;
-    /* 核心魔法：强制 5 列，每列等宽 */
-    grid-template-columns: repeat(5, 1fr);
-    gap: 30px 16px; /* 行间距 30px，列间距 16px */
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 28px 18px;
     width: 100%;
 }
 
-/* 响应式降级：屏幕变小后逐渐减少列数，防止卡片被挤扁 */
-@media (max-width: 1100px) { .event-grid { grid-template-columns: repeat(4, 1fr); } }
-@media (max-width: 850px)  { .event-grid { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 600px)  { .event-grid { grid-template-columns: repeat(2, 1fr); } }
-
-/* ==================================================
-   🔥 卡片微调：适应缩小的体积
-   ================================================== */
-/* 缩小标题字号，防止在窄卡片里一行只能塞下几个字 */
-.event-grid .event-title {
-    font-size: 13px !important;
-    line-height: 1.4 !important;
-    height: 36px !important; /* 严格限制两行高度 (13 * 1.4 * 2) */
-    margin-bottom: 6px !important;
+.home-event-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+    cursor: pointer;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(255, 136, 153, 0.14);
+    box-shadow: 0 12px 30px rgba(36, 18, 24, 0.07);
+    transform: translateY(0);
+    transition:
+            transform 0.35s cubic-bezier(.2,.8,.2,1),
+            box-shadow 0.35s cubic-bezier(.2,.8,.2,1),
+            border-color 0.35s ease;
+    animation: homeCardIn 0.52s ease both;
+    animation-delay: calc(var(--card-index) * 45ms);
 }
 
-/* 缩小底部时间地点的信息字号 */
-.event-grid .event-info-sub {
-    font-size: 11px;
+.home-event-card:hover {
+    transform: translateY(-10px) scale(1.012);
+    border-color: rgba(255, 136, 153, 0.46);
+    box-shadow: 0 22px 48px rgba(255, 136, 153, 0.18), 0 10px 18px rgba(0, 0, 0, 0.06);
+}
+
+.home-event-cover-wrapper {
+    position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1.414;
+    flex: 0 0 auto;
+    overflow: hidden;
+    background: #fff;
+}
+
+.home-event-cover {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    transition: transform 0.6s cubic-bezier(.2,.8,.2,1), filter 0.45s ease;
+}
+
+.home-event-card:hover .home-event-cover {
+    transform: scale(1.04);
+    filter: saturate(1.06) contrast(1.02);
+}
+
+.home-event-image-mask {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(180deg, rgba(0,0,0,0.02) 35%, rgba(0,0,0,0.38) 100%);
+    opacity: 0.64;
+    transition: opacity 0.32s ease;
+}
+
+.home-event-card:hover .home-event-image-mask {
+    opacity: 0.42;
+}
+
+.home-event-style-tags {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: calc(100% - 24px);
+}
+
+.home-event-style-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 23px;
+    padding: 0 9px;
+    color: #fff;
+    font-size: 12px;
+    line-height: 23px;
+    border-radius: 999px;
+    background: rgba(255, 136, 153, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+    backdrop-filter: blur(6px);
+    white-space: nowrap;
+}
+
+.home-event-hover-action {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 2;
+    padding: 5px 12px;
+    color: #fff;
+    font-size: 12px;
+    border-radius: 999px;
+    background: rgba(255, 136, 153, 0.92);
+    box-shadow: 0 10px 20px rgba(255, 136, 153, 0.28);
+    transform: translateY(12px);
+    opacity: 0;
+    transition: transform 0.28s ease, opacity 0.28s ease;
+}
+
+.home-event-card:hover .home-event-hover-action {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+
+.home-event-price-on-cover {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-width: calc(100% - 112px);
+    min-height: 30px;
+    padding: 0 12px;
+    color: #FF6B80;
+    font-size: 18px;
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.70);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(8px);
+    transition: transform 0.25s ease, background 0.25s ease;
+}
+
+.home-event-card:hover .home-event-price-on-cover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.98);
+}
+
+.home-event-price-on-cover.is-status {
+    height: 28px;
+    min-height: 28px;
+    padding: 0 11px;
+    color: #888;
+    font-size: 13px;
+    font-weight: 800;
+    background: rgba(255, 255, 255, 0.92);
+}
+
+.home-event-price-on-cover.is-coming-soon {
+    color: #FF6B80;
+    background: rgba(255, 240, 243, 0.94);
+    border: 1px solid rgba(255, 136, 153, 0.34);
+}
+
+.home-event-price-on-cover.is-ended {
+    color: #888;
+    background: rgba(245, 245, 245, 0.94);
+}
+
+.home-event-info {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    padding: 15px 14px 16px;
+}
+
+.home-event-title {
+    width: 100%;
+    min-height: 43px;
+    margin: 0;
+    color: #222;
+    font-size: 15px;
+    font-weight: 900;
+    line-height: 1.42;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    transition: color 0.25s ease;
+}
+
+.home-event-card:hover .home-event-title {
+    color: #FF6B80;
+}
+
+
+.home-event-meta {
+    width: 100%;
+    margin-top: 7px;
     color: #999;
-    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.3;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-/* 稍微调小价格浮窗里的数字，防止遮挡过多的海报画面 */
-.event-price .price-num {
-    font-size: 18px !important;
+@keyframes homeCardIn {
+    from {
+        opacity: 0;
+        transform: translateY(18px) scale(0.985);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
-@media screen and (max-width: 1200px) {
-    /* 1. 限制顶部轮播图的高度 */
-    /* 请确认你轮播图的类名是不是 .carousel-img，如果不是请替换 */
-    .carousel-img {
-        height: 220px !important; /* 在手机上强制矮一点，保留呼吸感 */
-        object-fit: cover !important; /* 核心：保持比例裁剪，填满区域但不变形 */
+@media (max-width: 1100px) {
+    .home-event-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 850px) {
+    .home-content {
+        max-width: calc(100% - 32px);
+        margin-top: 20px;
     }
 
-    /* 2. 限制“即将上演”等卡片里竖版海报的高度 */
-    /* 请确认你卡片图片的类名是不是 .event-poster 或类似的名字 */
-    .event-poster,
-    .event-card img {
-        max-height: 280px !important; /* 锁死最大高度，防止竖版海报霸屏 */
-        width: 100% !important;
-        object-fit: cover !important;
-        object-position: top !important; /* 如果被裁剪，优先保留海报上半部分（通常是人脸和标题） */
+    .home-hero-card,
+    .home-section-header {
+        align-items: flex-start;
+        flex-direction: column;
     }
 
-    /* 3. 如果窄屏幕下卡片变得太大，可以给卡片容器加点内边距或限制宽度 */
-    .event-card {
-        margin: 0 auto;
-        max-width: 400px; /* 防止在平板或横屏手机上拉得过宽 */
+    .home-event-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .home-hero-title {
+        font-size: 24px;
+    }
+
+    .home-event-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px 14px;
     }
 }

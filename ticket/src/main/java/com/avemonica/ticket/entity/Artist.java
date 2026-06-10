@@ -55,4 +55,11 @@ public class Artist {
      * 音乐风格
      */
     private String style;
+
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private Integer recentEventCount;
+
+    private Integer editAuditStatus;
+    private String pendingPayload;
+    private LocalDateTime auditSubmitTime;
 }

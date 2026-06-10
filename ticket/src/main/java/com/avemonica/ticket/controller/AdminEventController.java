@@ -24,6 +24,8 @@ import com.avemonica.ticket.service.TicketService;
 import com.avemonica.ticket.entity.EventArtist;
 import com.avemonica.ticket.service.EventArtistService;
 import org.springframework.transaction.annotation.Transactional;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Objects;
 
 import java.util.List;
 import java.util.Map;
@@ -34,6 +36,9 @@ import static com.avemonica.ticket.entity.Event.AUDIT_PENDING;
 @RestController
 @RequestMapping("/api/admin/event")
 public class AdminEventController {
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Autowired
     private EventService eventService;
@@ -91,7 +96,14 @@ public class AdminEventController {
             @RequestParam(defaultValue = "5") Integer size) {
 
         LambdaQueryWrapper<Event> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Event::getAuditStatus, 0);
+
+        wrapper.and(w -> w
+                .eq(Event::getAuditStatus, Event.AUDIT_PENDING)
+                .or()
+                .eq(Event::getEditAuditStatus, Event.EDIT_AUDIT_PENDING)
+        );
+        wrapper.orderByDesc(Event::getAuditSubmitTime);
+
         wrapper.orderByDesc(Event::getCreateTime);
 
         IPage<Event> pageData = eventService.page(new Page<>(current, size), wrapper);
@@ -118,26 +130,82 @@ public class AdminEventController {
     }
 
     @PutMapping("/audit/{id}")
-    @PreAuthorize("hasAuthority('event:audit') or principal.username == '1'") // 假设你超管账号叫admin
+    @PreAuthorize("hasAuthority('event:audit') or principal.username == '1'")
+    @Transactional(rollbackFor = Exception.class)
     public Result<String> auditEvent(@PathVariable Long id, @RequestParam Boolean isPass) {
         Event event = eventService.getById(id);
         if (event == null) {
             return Result.error("该演出记录不存在");
         }
 
-        if (isPass) {
-            // 场景 A：审核通过
-            event.setAuditStatus(1); // 1: 审核通过
-            event.setStatus(3);      // 顺便将显示状态初始化为 3: 停售
-        } else {
-            // 场景 B：审核驳回
-            event.setAuditStatus(2); // 2: 已驳回
-            event.setStatus(4);      // 强制设为 4: 已隐藏状态
+        // 1. 修改审核：审核通过后才覆盖主表
+        if (Objects.equals(event.getEditAuditStatus(), Event.EDIT_AUDIT_PENDING)) {
+            if (isPass) {
+                try {
+                    EventAddDTO dto = objectMapper.readValue(event.getPendingPayload(), EventAddDTO.class);
+                    Integer finalStatus = dto.getStatus() != null ? dto.getStatus() : event.getStatus();
+
+                    eventService.applyEventMainData(id, dto, Event.AUDIT_APPROVED, finalStatus);
+                    evictEventDetailCache(id);
+
+                    return Result.success("演出修改审核已通过，客户端信息已同步更新");
+                } catch (Exception e) {
+                    throw new BusinessException("解析演出修改审核快照失败");
+                }
+            } else {
+                event.setEditAuditStatus(Event.EDIT_AUDIT_REJECTED);
+                event.setPendingPayload(null);
+                eventService.updateById(event);
+
+                return Result.success("已驳回演出修改申请，客户端继续展示原信息");
+            }
         }
 
-        eventService.updateById(event);
-        evictEventDetailCache(id);
-        return Result.success(isPass ? "演出项目已审核通过" : "已驳回该演出项目的发布申请");
+        // 2. 新增审核
+        if (Objects.equals(event.getAuditStatus(), Event.AUDIT_PENDING)) {
+            if (isPass) {
+                event.setAuditStatus(Event.AUDIT_APPROVED);
+                event.setStatus(3);
+            } else {
+                event.setAuditStatus(Event.AUDIT_REJECTED);
+                event.setStatus(4);
+            }
+
+            eventService.updateById(event);
+            evictEventDetailCache(id);
+
+            return Result.success(isPass ? "演出项目已审核通过" : "已驳回该演出项目");
+        }
+
+        throw new BusinessException("当前演出没有待审核申请");
+    }
+
+    @PutMapping("/revoke/{id}")
+    @PreAuthorize("hasAuthority('event:publish') or principal.username == '1'")
+    public Result<String> revokeEventAudit(@PathVariable Long id) {
+        Event event = eventService.getById(id);
+        if (event == null) {
+            throw new BusinessException("演出不存在");
+        }
+
+        // 撤销新增审核
+        if (Objects.equals(event.getAuditStatus(), Event.AUDIT_PENDING)) {
+            event.setAuditStatus(Event.AUDIT_REVOKED);
+            event.setStatus(4);
+            eventService.updateById(event);
+            evictEventDetailCache(id);
+            return Result.success("已撤销新增审核申请，可重新编辑后提交");
+        }
+
+        // 撤销修改审核
+        if (Objects.equals(event.getEditAuditStatus(), Event.EDIT_AUDIT_PENDING)) {
+            event.setEditAuditStatus(null);
+            event.setPendingPayload(null);
+            eventService.updateById(event);
+            return Result.success("已撤销修改审核申请，客户端信息未受影响");
+        }
+
+        throw new BusinessException("当前状态无需撤销审核");
     }
 
     @PutMapping("/status/{id}")

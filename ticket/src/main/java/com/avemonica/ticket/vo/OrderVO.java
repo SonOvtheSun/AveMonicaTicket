@@ -23,6 +23,7 @@ public class OrderVO {
         private String city;
         private String venue;
         private String time;
+        private Integer runningTime;
     }
 
     @Data
@@ -32,5 +33,8 @@ public class OrderVO {
         private String seatInfo;
         private Integer checkStatus; // 1:未检票, 2:已检票, 4:后台配座中(未出票)
         private String qrCode;
+        private String spectatorId;
+        private String viewerName;
+        private String idCardNo;
     }
 }

@@ -14,6 +14,12 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import com.avemonica.ticket.entity.User;
+import com.avemonica.ticket.service.UserService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.util.Objects;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -25,10 +31,26 @@ import java.util.List;
 public class AdminBannerController {
 
     @Autowired
+    private UserService userService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
     private BannerService bannerService;
 
     @Autowired
     private BannerOverdateService overdateService;
+
+    private User getCurrentUser() {
+        String userId = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userService.getById(Long.valueOf(userId));
+    }
+
+    private boolean isSuperAdmin() {
+        User user = getCurrentUser();
+        return user != null && user.getId() == 1L;
+    }
 
     @GetMapping("/list")
     @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
@@ -38,12 +60,20 @@ public class AdminBannerController {
         if (type == 1) {
             // 即将展示：查热库，开始时间大于当前时间
             return Result.success(bannerService.list(
-                    new LambdaQueryWrapper<Banner>().gt(Banner::getStartTime, now).orderByDesc(Banner::getCreateTime)
+                    new LambdaQueryWrapper<Banner>()
+                            .eq(Banner::getAuditStatus, 1)
+                            .le(Banner::getStartTime, now)
+                            .ge(Banner::getEndTime, now)
+                            .orderByDesc(Banner::getCreateTime)
             ));
         } else if (type == 2) {
             // 展示中：查热库，当前时间处于开始与结束之间
             return Result.success(bannerService.list(
-                    new LambdaQueryWrapper<Banner>().le(Banner::getStartTime, now).ge(Banner::getEndTime, now).orderByDesc(Banner::getCreateTime)
+                    new LambdaQueryWrapper<Banner>()
+                            .eq(Banner::getAuditStatus, 1)
+                            .le(Banner::getStartTime, now)
+                            .ge(Banner::getEndTime, now)
+                            .orderByDesc(Banner::getCreateTime)
             ));
         } else {
             // 已过期：查冷库
@@ -58,49 +88,72 @@ public class AdminBannerController {
     @Transactional(rollbackFor = Exception.class)
     public Result<String> saveBanner(@RequestBody @Validated BannerSaveDTO dto) {
         LocalDateTime now = LocalDateTime.now();
-        boolean isNowExpired = dto.getEndTime().isBefore(now); // 判读修改后的时间是否属于过期
+        boolean superAdmin = isSuperAdmin();
 
+        boolean isNowExpired = dto.getEndTime().isBefore(now);
         if (!isNowExpired) {
             checkBannerDailyLimit(dto.getStartTime(), dto.getEndTime(), dto.getId());
         }
 
-        Banner activeBanner = new Banner();
-        BeanUtils.copyProperties(dto, activeBanner);
-        if (activeBanner.getCreateTime() == null) activeBanner.setCreateTime(now);
+        // 1. 超管：直接走原来的保存逻辑，立即生效
+        if (superAdmin) {
+            saveBannerDirectly(dto, now, isNowExpired);
+            return Result.success("横幅配置保存成功");
+        }
 
-        BannerOverdate coldBanner = new BannerOverdate();
-        BeanUtils.copyProperties(dto, coldBanner);
-        if (coldBanner.getCreateTime() == null) coldBanner.setCreateTime(now);
-        coldBanner.setArchiveTime(now);
-
+        // 2. 普通管理员新增：进入新增待审核
         if (dto.getId() == null) {
-            // 场景A：全新增
-            if (isNowExpired) {
-                overdateService.save(coldBanner); // 新增了一个过去的日期，直接打入冷库
-            } else {
-                bannerService.save(activeBanner);
-            }
-        } else {
-            // 场景B：编辑现有数据
-            if (dto.getIsExpiredEdit()) {
-                // 原本在冷库
-                if (isNowExpired) {
-                    overdateService.updateById(coldBanner); // 依然过期，更新冷库
-                } else {
-                    overdateService.removeById(dto.getId()); // 【满血复活】从冷库删掉，加到热库
-                    bannerService.save(activeBanner);
-                }
-            } else {
-                // 原本在热库
-                if (isNowExpired) {
-                    bannerService.removeById(dto.getId()); // 【提前下架】改成了过去的时间，踢入冷库
-                    overdateService.save(coldBanner);
-                } else {
-                    bannerService.updateById(activeBanner); // 依然在热库更新
-                }
+            Banner banner = new Banner();
+            BeanUtils.copyProperties(dto, banner);
+            banner.setAuditStatus(0);
+            banner.setEditAuditStatus(null);
+            banner.setPendingPayload(null);
+            banner.setAuditSubmitTime(now);
+            banner.setCreateBy(getCurrentUser().getId());
+            banner.setCreateTime(now);
+            bannerService.save(banner);
+            return Result.success("横幅已提交审核，审核通过后客户端才会展示");
+        }
+
+        // 3. 普通管理员编辑
+        Banner oldBanner = bannerService.getById(dto.getId());
+        if (oldBanner == null) {
+            throw new BusinessException("横幅不存在");
+        }
+
+        if (Objects.equals(oldBanner.getAuditStatus(), 0)) {
+            throw new BusinessException("该横幅正在审核中，如需修改，请先撤销审核申请");
+        }
+
+        if (Objects.equals(oldBanner.getEditAuditStatus(), 0)) {
+            throw new BusinessException("该横幅修改正在审核中，如需再次修改，请先撤销审核申请");
+        }
+
+        if (Objects.equals(oldBanner.getAuditStatus(), 1)) {
+            try {
+                oldBanner.setPendingPayload(objectMapper.writeValueAsString(dto));
+                oldBanner.setEditAuditStatus(0);
+                oldBanner.setAuditSubmitTime(now);
+                bannerService.updateById(oldBanner);
+                return Result.success("横幅修改已提交审核，审核通过前客户端仍展示原横幅");
+            } catch (Exception e) {
+                throw new BusinessException("保存横幅修改审核快照失败");
             }
         }
-        return Result.success("横幅配置保存成功");
+
+        if (Objects.equals(oldBanner.getAuditStatus(), 2) || Objects.equals(oldBanner.getAuditStatus(), 3)) {
+            Banner banner = new Banner();
+            BeanUtils.copyProperties(dto, banner);
+            banner.setId(dto.getId());
+            banner.setAuditStatus(0);
+            banner.setEditAuditStatus(null);
+            banner.setPendingPayload(null);
+            banner.setAuditSubmitTime(now);
+            bannerService.updateById(banner);
+            return Result.success("横幅已重新提交审核");
+        }
+
+        throw new BusinessException("当前横幅状态不允许修改");
     }
 
     /**
@@ -152,5 +205,124 @@ public class AdminBannerController {
             bannerService.removeById(id);
         }
         return Result.success("删除成功");
+    }
+
+    @GetMapping("/audit-list")
+    @PreAuthorize("hasAuthority('audit:manage') or principal.username == '1'")
+    public Result<List<Banner>> getPendingBanners() {
+        List<Banner> list = bannerService.list(
+                new LambdaQueryWrapper<Banner>()
+                        .and(w -> w.eq(Banner::getAuditStatus, 0)
+                                .or()
+                                .eq(Banner::getEditAuditStatus, 0))
+                        .orderByDesc(Banner::getAuditSubmitTime)
+        );
+        return Result.success(list);
+    }
+
+    @PutMapping("/audit/{id}")
+    @PreAuthorize("hasAuthority('audit:manage') or principal.username == '1'")
+    @Transactional(rollbackFor = Exception.class)
+    public Result<String> auditBanner(@PathVariable Long id, @RequestParam Boolean isPass) {
+        Banner banner = bannerService.getById(id);
+        if (banner == null) {
+            throw new BusinessException("横幅不存在");
+        }
+
+        // 修改审核
+        if (Objects.equals(banner.getEditAuditStatus(), 0)) {
+            if (isPass) {
+                try {
+                    BannerSaveDTO dto = objectMapper.readValue(banner.getPendingPayload(), BannerSaveDTO.class);
+                    LocalDateTime now = LocalDateTime.now();
+                    boolean isNowExpired = dto.getEndTime().isBefore(now);
+                    saveBannerDirectly(dto, now, isNowExpired);
+                    return Result.success("横幅修改审核已通过，客户端信息已同步更新");
+                } catch (Exception e) {
+                    throw new BusinessException("解析横幅修改审核快照失败");
+                }
+            } else {
+                banner.setEditAuditStatus(2);
+                banner.setPendingPayload(null);
+                bannerService.updateById(banner);
+                return Result.success("已驳回横幅修改申请，客户端继续展示原横幅");
+            }
+        }
+
+        // 新增审核
+        if (Objects.equals(banner.getAuditStatus(), 0)) {
+            if (isPass) {
+                banner.setAuditStatus(1);
+            } else {
+                banner.setAuditStatus(2);
+            }
+            bannerService.updateById(banner);
+            return Result.success(isPass ? "横幅新增审核已通过" : "已驳回横幅新增申请");
+        }
+
+        throw new BusinessException("当前横幅没有待审核申请");
+    }
+
+    @PutMapping("/revoke/{id}")
+    @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
+    public Result<String> revokeBannerAudit(@PathVariable Long id) {
+        Banner banner = bannerService.getById(id);
+        if (banner == null) {
+            throw new BusinessException("横幅不存在");
+        }
+
+        if (Objects.equals(banner.getAuditStatus(), 0)) {
+            banner.setAuditStatus(3);
+            bannerService.updateById(banner);
+            return Result.success("已撤销横幅新增审核申请，可重新编辑后提交");
+        }
+
+        if (Objects.equals(banner.getEditAuditStatus(), 0)) {
+            banner.setEditAuditStatus(null);
+            banner.setPendingPayload(null);
+            bannerService.updateById(banner);
+            return Result.success("已撤销横幅修改审核申请，客户端信息未受影响");
+        }
+
+        throw new BusinessException("当前状态无需撤销审核");
+    }
+
+    private void saveBannerDirectly(BannerSaveDTO dto, LocalDateTime now, boolean isNowExpired) {
+        Banner activeBanner = new Banner();
+        BeanUtils.copyProperties(dto, activeBanner);
+        if (activeBanner.getCreateTime() == null) activeBanner.setCreateTime(now);
+        activeBanner.setAuditStatus(1);
+        activeBanner.setEditAuditStatus(null);
+        activeBanner.setPendingPayload(null);
+        activeBanner.setAuditSubmitTime(now);
+
+        BannerOverdate coldBanner = new BannerOverdate();
+        BeanUtils.copyProperties(dto, coldBanner);
+        if (coldBanner.getCreateTime() == null) coldBanner.setCreateTime(now);
+        coldBanner.setArchiveTime(now);
+
+        if (dto.getId() == null) {
+            if (isNowExpired) {
+                overdateService.save(coldBanner);
+            } else {
+                bannerService.save(activeBanner);
+            }
+        } else {
+            if (dto.getIsExpiredEdit()) {
+                if (isNowExpired) {
+                    overdateService.updateById(coldBanner);
+                } else {
+                    overdateService.removeById(dto.getId());
+                    bannerService.save(activeBanner);
+                }
+            } else {
+                if (isNowExpired) {
+                    bannerService.removeById(dto.getId());
+                    overdateService.save(coldBanner);
+                } else {
+                    bannerService.updateById(activeBanner);
+                }
+            }
+        }
     }
 }

@@ -16,11 +16,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -36,6 +38,9 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
     private UserService userService;
     @Autowired
     private UserMapper userMapper;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Autowired
     private TicketCategoryMapper ticketCategoryMapper;
@@ -65,6 +70,8 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
             event.setAuditStatus(Event.AUDIT_PENDING);
             event.setStatus(Event.STATUS_OFFLINE);
         }
+        event.setAuditSubmitTime(LocalDateTime.now());
+
         if (event.getStatus() != null && event.getStatus() == 1 && event.getSaleTime() == null) {
             throw new BusinessException("发布失败：演出设置为上架状态时，必须明确设定开票时间！");
         }
@@ -111,98 +118,54 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateEventWithTicketsAndArtists(Long id, EventAddDTO dto) {
-        Event event = getById(id);
-        if(event == null){
+        Event oldEvent = getById(id);
+        if (oldEvent == null) {
             throw new BusinessException("修改的演出不存在！");
         }
 
         User currentUser = getCurrentUser();
-        boolean isSuperAdmin = (currentUser.getId() == 1L);
+        boolean isSuperAdmin = currentUser.getId() == 1L;
 
-        Event newEvent = new Event();
-        BeanUtils.copyProperties(dto, newEvent);
-        newEvent.setId(id);
-        event.setCreateBy(event.getCreateBy());
+        validateEventDto(dto);
 
-        if(!isSuperAdmin){
-            event.setAuditStatus(Event.AUDIT_PENDING);
-            event.setStatus(4);
-        } else{
-            event.setAuditStatus(event.getAuditStatus());
+        // 1. 超管：免审，直接覆盖主表、票档、艺人关系
+        if (isSuperAdmin) {
+            Integer finalStatus = dto.getStatus() != null ? dto.getStatus() : oldEvent.getStatus();
+            applyEventMainData(id, dto, Event.AUDIT_APPROVED, finalStatus);
+            return;
         }
 
-        if (newEvent.getStatus() != null && newEvent.getStatus() == 1 && newEvent.getSaleTime() == null) {
-            throw new BusinessException("修改失败：演出设置为上架状态时，必须明确设定开票时间！");
+        // 2. 普通管理员：新增待审核中，不允许直接改
+        if (Objects.equals(oldEvent.getAuditStatus(), Event.AUDIT_PENDING)) {
+            throw new BusinessException("该演出正在审核中，如需修改，请先撤销审核申请");
         }
 
-        if (event.getSaleTime() != null && event.getShowTime() != null) {
-            // 如果开票时间 晚于 (演出时间 - 24小时)
-            if (event.getSaleTime().isAfter(event.getShowTime().minusHours(24))) {
-                throw new BusinessException("风控拦截：开票时间必须早于演出时间至少 24 小时，请重新设置！");
+        // 3. 普通管理员：修改待审核中，不允许再次改
+        if (Objects.equals(oldEvent.getEditAuditStatus(), Event.EDIT_AUDIT_PENDING)) {
+            throw new BusinessException("该演出的修改正在审核中，如需再次修改，请先撤销审核申请");
+        }
+
+        // 4. 普通管理员编辑已审核通过演出：只保存修改快照，不影响客户端旧数据
+        if (Objects.equals(oldEvent.getAuditStatus(), Event.AUDIT_APPROVED)) {
+            try {
+                oldEvent.setPendingPayload(objectMapper.writeValueAsString(dto));
+                oldEvent.setEditAuditStatus(Event.EDIT_AUDIT_PENDING);
+                oldEvent.setAuditSubmitTime(LocalDateTime.now());
+                updateById(oldEvent);
+                return;
+            } catch (Exception e) {
+                throw new BusinessException("保存修改审核快照失败");
             }
         }
 
-        this.updateById(newEvent);
-
-        eventArtistService.remove(new LambdaQueryWrapper<EventArtist>().eq(EventArtist::getEventId, id));
-        if (dto.getArtistIds() != null && !dto.getArtistIds().isEmpty()) {
-            List<EventArtist> relations = dto.getArtistIds().stream().map(artistId -> {
-                EventArtist ea = new EventArtist();
-                ea.setEventId(id);
-                ea.setArtistId(artistId);
-                return ea;
-            }).collect(Collectors.toList());
-            eventArtistService.saveBatch(relations);
+        // 5. 普通管理员编辑已撤销/已驳回演出：允许重新提交新增审核
+        if (Objects.equals(oldEvent.getAuditStatus(), Event.AUDIT_REJECTED)
+                || Objects.equals(oldEvent.getAuditStatus(), Event.AUDIT_REVOKED)) {
+            applyEventMainData(id, dto, Event.AUDIT_PENDING, Event.STATUS_OFFLINE);
+            return;
         }
 
-        if (dto.getTickets() != null) {
-            // 获取数据库里现存的老票档
-            List<TicketCategory> oldTickets = ticketCategoryMapper.selectList(
-                    new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, id)
-            );
-
-            // 记录前端传来的新票档名称，用于后续判断哪些票档被删除了
-            List<String> newTicketNames = dto.getTickets().stream()
-                    // 假设你的 DTO 内部票档类里有 getName() 方法
-                    .map(TicketCategoryDTO::getName)
-                    .toList();
-
-            // 遍历前端传来的表单票档
-            dto.getTickets().forEach(t -> {
-                // 在老票档中寻找有没有名字一样的 (例如都是 "VIP票")
-                TicketCategory existingTicket = oldTickets.stream()
-                        .filter(ot -> ot.getName().equals(t.getName()))
-                        .findFirst().orElse(null);
-
-                if (existingTicket != null) {
-                    // 【场景 A：修改老票档】
-                    // 计算总库存扩容或缩减了多少张
-                    int stockDiff = t.getStock() - existingTicket.getTotalStock();
-                    existingTicket.setPrice(t.getPrice());
-                    existingTicket.setTotalStock(t.getStock());
-                    // 剩余库存同步加上差值 (如果减库存，差值是负数，自然就减掉了)
-                    existingTicket.setRemainingStock(existingTicket.getRemainingStock() + stockDiff);
-
-                    ticketCategoryMapper.updateById(existingTicket);
-                } else {
-                    // 【场景 B：全新追加的票档】
-                    TicketCategory category = new TicketCategory();
-                    category.setEventId(id);
-                    category.setName(t.getName());
-                    category.setPrice(t.getPrice());
-                    category.setTotalStock(t.getStock());
-                    category.setRemainingStock(t.getStock()); // 新增票档初始剩余等于总数
-                    ticketCategoryMapper.insert(category);
-                }
-            });
-
-            // 【场景 C：处理被前端删掉的票档】
-            oldTickets.forEach(ot -> {
-                if (!newTicketNames.contains(ot.getName())) {
-                    ticketCategoryMapper.deleteById(ot.getId());
-                }
-            });
-        }
+        throw new BusinessException("当前演出状态不允许修改");
     }
 
     /**
@@ -308,5 +271,101 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         return pageData;
     }
 
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void applyEventMainData(Long id, EventAddDTO dto, Integer auditStatus, Integer status) {
+        Event oldEvent = getById(id);
+        if (oldEvent == null) {
+            throw new BusinessException("演出不存在");
+        }
+
+        validateEventDto(dto);
+
+        Event newEvent = new Event();
+        BeanUtils.copyProperties(dto, newEvent);
+        newEvent.setId(id);
+        newEvent.setCreateBy(oldEvent.getCreateBy());
+        newEvent.setAuditStatus(auditStatus);
+        newEvent.setStatus(status);
+        newEvent.setEditAuditStatus(null);
+        newEvent.setPendingPayload(null);
+        newEvent.setAuditSubmitTime(LocalDateTime.now());
+
+        updateById(newEvent);
+
+        eventArtistService.remove(
+                new LambdaQueryWrapper<EventArtist>().eq(EventArtist::getEventId, id)
+        );
+
+        if (dto.getArtistIds() != null && !dto.getArtistIds().isEmpty()) {
+            List<EventArtist> relations = dto.getArtistIds().stream().map(artistId -> {
+                EventArtist ea = new EventArtist();
+                ea.setEventId(id);
+                ea.setArtistId(artistId);
+                return ea;
+            }).collect(Collectors.toList());
+            eventArtistService.saveBatch(relations);
+        }
+
+        syncTicketCategories(id, dto.getTickets());
+    }
+
+    private void syncTicketCategories(Long eventId, List<TicketCategoryDTO> tickets) {
+        List<TicketCategory> oldTickets = ticketCategoryMapper.selectList(
+                new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, eventId)
+        );
+
+        if (tickets == null || tickets.isEmpty()) {
+            oldTickets.forEach(t -> ticketCategoryMapper.deleteById(t.getId()));
+            return;
+        }
+
+        List<String> newTicketNames = tickets.stream()
+                .map(TicketCategoryDTO::getName)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toList());
+
+        tickets.forEach(t -> {
+            TicketCategory existingTicket = oldTickets.stream()
+                    .filter(ot -> Objects.equals(ot.getName(), t.getName()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (existingTicket != null) {
+                int stockDiff = t.getStock() - existingTicket.getTotalStock();
+                existingTicket.setPrice(t.getPrice());
+                existingTicket.setTotalStock(t.getStock());
+                existingTicket.setRemainingStock(Math.max(0, existingTicket.getRemainingStock() + stockDiff));
+                ticketCategoryMapper.updateById(existingTicket);
+            } else {
+                TicketCategory category = new TicketCategory();
+                category.setEventId(eventId);
+                category.setName(t.getName());
+                category.setPrice(t.getPrice());
+                category.setTotalStock(t.getStock());
+                category.setRemainingStock(t.getStock());
+                ticketCategoryMapper.insert(category);
+            }
+        });
+
+        oldTickets.forEach(ot -> {
+            if (!newTicketNames.contains(ot.getName())) {
+                ticketCategoryMapper.deleteById(ot.getId());
+            }
+        });
+    }
+
+    private void validateEventDto(EventAddDTO dto) {
+        if (dto.getStatus() != null && dto.getStatus() == 1 && dto.getSaleTime() == null) {
+            throw new BusinessException("演出设置为上架状态时，必须明确设定开票时间！");
+        }
+
+        if (dto.getSaleTime() != null && dto.getShowTime() != null) {
+            if (dto.getSaleTime().isAfter(dto.getShowTime().minusHours(24))) {
+                throw new BusinessException("开票时间必须早于演出时间至少 24 小时，请重新设置！");
+            }
+        }
+    }
 
 }

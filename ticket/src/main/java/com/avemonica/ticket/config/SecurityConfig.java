@@ -50,7 +50,8 @@ public class SecurityConfig {
                                 "/error",
                                 "/uploads/**",
                                 "/api/event/upcoming",
-                                "/api/event/**"
+                                "/api/event/**",
+                                "/api/artist/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 ).addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

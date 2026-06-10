@@ -102,6 +102,14 @@ public class Event {
 
     private String style;
 
+    private Integer runningTime;
+
+    private Integer editAuditStatus;
+
+    private String pendingPayload;
+
+    private LocalDateTime auditSubmitTime;
+
     // ==========================================
     // 💡 状态字典常量定义，拒绝魔法数字
     // ==========================================
@@ -115,5 +123,10 @@ public class Event {
     public static final int AUDIT_PENDING = 0;  // 待审核
     public static final int AUDIT_APPROVED = 1; // 已通过
     public static final int AUDIT_REJECTED = 2; // 已驳回
+    public static final Integer AUDIT_REVOKED = 3;
+
+    public static final Integer EDIT_AUDIT_PENDING = 0;
+    public static final Integer EDIT_AUDIT_REJECTED = 2;
+
 
 }

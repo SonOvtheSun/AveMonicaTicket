@@ -13,6 +13,7 @@ const PublicHeader = () => {
     const [currentUser, setCurrentUser] = useState(null);
 
     const [selectedCity, setSelectedCity] = useState(localStorage.getItem('currentCity') || '全国');
+    const [searchKeyword, setSearchKeyword] = useState('');
 
     // 根据当前路由动态控制头部导航高亮
     const navItems = [
@@ -55,19 +56,39 @@ const PublicHeader = () => {
         ];
     }, []);
 
-    // 🚨 5. 城市切换处理函数
+    // 城市切换处理函数：更新本地状态、持久化，并通知当前页面立即刷新数据
     const handleCityChange = (value) => {
-        if (value && value.length > 0) {
-            // 如果选的是省市层级，取最后一级（市）；如果选的是全国，就是 '全国'
-            const city = value[value.length - 1];
-            setSelectedCity(city);
+        if (!value || value.length === 0) return;
 
-            // 可选：将选择的城市存入 localStorage，方便其他页面读取
-            localStorage.setItem('currentCity', city);
+        // 如果选的是省市层级，取最后一级（市）；如果选的是全国，就是 '全国'
+        const city = value[value.length - 1];
 
-            // 可选：如果你想在切换城市后刷新首页，可以抛出一个自定义事件
-            window.dispatchEvent(new CustomEvent('headerCityChange', { detail: city }));
+        setSelectedCity(city);
+        localStorage.setItem('currentCity', city);
+
+        // 统一广播给所有 C 端页面：当前页面监听到后立即重新拉取数据
+        window.dispatchEvent(new CustomEvent('headerCityChange', { detail: city }));
+
+        // 兼容旧页面中可能仍然监听 cityChanged 的代码，避免部分页面不刷新
+        window.dispatchEvent(new CustomEvent('cityChanged', { detail: city }));
+    };
+
+
+    // 搜索处理：支持按演出名称、艺人名称搜索演出
+    useEffect(() => {
+        if (location.pathname === '/search') {
+            const keywordFromUrl = new URLSearchParams(location.search).get('keyword') || '';
+            setSearchKeyword(keywordFromUrl);
         }
+    }, [location.pathname, location.search]);
+
+    const handleSearchSubmit = () => {
+        const keyword = searchKeyword.trim();
+        if (!keyword) {
+            message.warning('请输入要搜索的演出或艺人名称');
+            return;
+        }
+        navigate(`/search?keyword=${encodeURIComponent(keyword)}`);
     };
 
     // 退出登录
@@ -165,7 +186,11 @@ const PublicHeader = () => {
                     <Input
                         className="search-input"
                         prefix={<Search size={16} color="#999" />}
-                        placeholder="搜索演出、艺人、场馆"
+                        placeholder="搜索演出、艺人"
+                        value={searchKeyword}
+                        allowClear
+                        onChange={(e) => setSearchKeyword(e.target.value)}
+                        onPressEnter={handleSearchSubmit}
                     />
                 </div>
 
