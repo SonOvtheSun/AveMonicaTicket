@@ -63,7 +63,7 @@ public class AdminBannerController {
             return Result.success(bannerService.list(
                     new LambdaQueryWrapper<Banner>()
                             .eq(Banner::getAuditStatus, 1)
-                            .le(Banner::getStartTime, now)
+                            .ge(Banner::getStartTime, now)
                             .ge(Banner::getEndTime, now)
                             .orderByDesc(Banner::getCreateTime)
             ));

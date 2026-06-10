@@ -154,7 +154,7 @@ const EventManager = () => {
     };
 
     const statusConfig = {
-        1: { color: 'cyan', text: '预售中' },
+        1: { color: 'cyan', text: '上架中' },
         2: { color: 'green', text: '在售' },
         3: { color: 'red', text: '已停售' },
         4: { color: 'default', text: '已隐藏' }
@@ -224,7 +224,7 @@ const EventManager = () => {
 
                                 return (
                                     <Tag key={idx} color={tagColor} style={{ margin: 0, borderRadius: 4, border: tagBorder }}>
-                                        {displayText}
+                                        {displayText}（ID:{artist.id}）
                                     </Tag>
                                 );
                             })}
@@ -261,9 +261,9 @@ const EventManager = () => {
             key: 'city',
             width: 100,
             render: (city) => city ? (
-                <Tag color="cyan" style={{ margin: 0 }}>
+                <div  style={{ margin: 0 }}>
                     {city}
-                </Tag>
+                </div>
             ) : (
                 <span style={{ color: '#999', fontSize: 12 }}>未设置</span>
             )

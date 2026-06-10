@@ -42,7 +42,7 @@ public class PublicArtistController {
         wrapper.eq(Artist::getAuditStatus, 1);
 
         if (StringUtils.hasText(style) && !"全部".equals(style)) {
-            wrapper.eq(Artist::getStyle, style);
+            wrapper.like(Artist::getStyle, style);
         }
 
         if (StringUtils.hasText(keyword)) {
