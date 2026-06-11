@@ -14,6 +14,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +30,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Autowired
     private SmsService smsService;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
     public UserServiceImpl(SmsService smsService) {
         this.smsService = smsService;
@@ -79,11 +83,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BusinessException("账号或密码错误");
         }
 
-        // 3. 登录成功，生成 Token (这里暂时用 UUID 模拟，后续可换成真实的 JWT)
+        // 3. 登录成功，生成 Token
+        String token = jwtUtils.createToken(user.getId());
 
-        // TODO: 可将 token 存入 Redis，设置过期时间
+        // 🚨 核心互踢逻辑：将最新 Token 存入 Redis，实现单设备覆盖 (设置 7 天过期，需与你 JWT 真实有效期一致)
+        String redisKey = "user:token:" + user.getId();
+        redisTemplate.opsForValue().set(redisKey, token, 7, java.util.concurrent.TimeUnit.DAYS);
 
-        return jwtUtils.createToken(user.getId());
+        return token;
     }
 
     @Override

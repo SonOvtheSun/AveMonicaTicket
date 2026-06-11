@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Tag, Button, Space, message, Modal, Descriptions, Image, Divider, Popconfirm } from 'antd';
 import { CheckCircle, XCircle, FileSearch } from 'lucide-react';
-import axios from 'axios';
+import axios from '../../utils/request';
 import dayjs from 'dayjs'; // 用于格式化时间，消除 'T'
 
 const AuditManager = () => {

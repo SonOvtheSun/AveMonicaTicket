@@ -75,7 +75,12 @@ const AdminLayout = () => {
         (hasAccess('artist:add') || hasAccess('artist:manage') || hasAccess('audit:manage')) && {
             key: '/admin/artists',
             icon: <Mic2 size={18} />,
-            label: '艺人库管理'
+            label: '音乐人库管理'
+        },
+        (hasAccess('banner:manage') || hasAccess('banner:view') || isSuperAdmin) && {
+            key: '/admin/banners',
+            icon: <Projector size={18} />,
+            label: '首页横幅管理'
         },
         hasAccess('audit:manage') && {
             key: '/admin/audit',
@@ -83,11 +88,6 @@ const AdminLayout = () => {
             label: '演出与艺人审核'
         },
 
-        (hasAccess('banner:manage') || hasAccess('banner:view') || isSuperAdmin) && {
-            key: '/admin/banners',
-            icon: <Projector size={18} />,
-            label: '首页横幅管理'
-        },
         hasAccess('comment:manage') && {
             key: '/admin/comments',
             icon: <MessageSquare size={18} />,

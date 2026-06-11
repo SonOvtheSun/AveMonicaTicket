@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Space, Input, Tag, Popconfirm, message, Modal, Form, Select, Upload, Image, Empty } from 'antd';
 import { SearchOutlined, EditOutlined, StopOutlined, CheckCircleOutlined, UploadOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import axios from '../../utils/request';
 import ImgCrop from "antd-img-crop";
 
 const MUSIC_STYLE_OPTIONS = [

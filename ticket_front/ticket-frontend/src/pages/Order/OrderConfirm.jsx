@@ -4,7 +4,7 @@ import { Alert, Tag, Divider, Checkbox, Button, message, Space, Row, Col, Form, 
 import { CheckCircleFilled, InfoCircleOutlined, AlipayCircleOutlined, WechatOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
 import './OrderConfirm.css';
-import axios from "axios";
+import axios from "../../utils/request";
 
 const OrderConfirm = () => {
     const location = useLocation();
@@ -40,10 +40,7 @@ const OrderConfirm = () => {
 
     const fetchSpectators = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await axios.get('/api/user/spectator/list', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const res = await axios.get('/api/user/spectator/list');
             if (res.data.code === 200) {
                 setSpectators(res.data.data);
             }
@@ -69,10 +66,7 @@ const OrderConfirm = () => {
             const values = await spectatorForm.validateFields();
             if (spectators.length >= 50) return message.warning('最多只能保存 50 个常用购票人');
 
-            const token = localStorage.getItem('token');
-            const res = await axios.post('/api/user/spectator/add', values, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const res = await axios.post('/api/user/spectator/add', values);
 
             if (res.data.code === 200) {
                 message.success('添加成功！');
@@ -97,7 +91,6 @@ const OrderConfirm = () => {
 
         setSubmitting(true);
         try {
-            const token = localStorage.getItem('token');
             const res = await axios.post('/api/order/create', {
                 eventId: event.id,
                 ticketId: selectedTicket.id,
@@ -105,8 +98,6 @@ const OrderConfirm = () => {
                 spectatorIds: selectedSpectatorIds,
                 paymentMethod: paymentMethod,
                 submitToken: location.state.submitToken
-            }, {
-                headers: { Authorization: `Bearer ${token}` }
             });
 
             if (res.data.code === 200) {
@@ -116,9 +107,7 @@ const OrderConfirm = () => {
 
                     const pollTimer = setInterval(async () => {
                         try {
-                            const pollRes = await axios.get(`/api/order/result/${queueToken}`, {
-                                headers: { Authorization: `Bearer ${token}` }
-                            });
+                            const pollRes = await axios.get(`/api/order/result/${queueToken}`);
 
                             if (pollRes.data.code === 200 && pollRes.data.data) {
                                 const resultStr = pollRes.data.data;

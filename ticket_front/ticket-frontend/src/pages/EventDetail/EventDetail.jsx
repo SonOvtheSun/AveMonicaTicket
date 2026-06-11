@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, message, Row, Col, Avatar, Button, InputNumber, Modal, Form, Input, Select, Alert } from 'antd';
 import { CalendarOutlined, EnvironmentOutlined, UserOutlined, ArrowLeftOutlined, TagsOutlined, ClockCircleOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import axios from '../../utils/request';
 import './EventDetail.css';
 import dayjs from 'dayjs';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
@@ -70,9 +70,7 @@ const EventDetail = () => {
         try {
             const token = localStorage.getItem('token');
             if (!token) return;
-            const res = await axios.get('/api/user/spectator/list', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const res = await axios.get('/api/user/spectator/list');
             if (res.data.code === 200) {
                 setSpectators(res.data.data);
             }
@@ -133,9 +131,7 @@ const EventDetail = () => {
             const token = localStorage.getItem('token');
             if (!token) return;
             try {
-                const res = await axios.get(`/api/reservation/get/${id}`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
+                const res = await axios.get(`/api/reservation/get/${id}`);
                 if (res.data.code === 200 && res.data.data) {
                     setReservedData(res.data.data);
                 }
@@ -202,10 +198,7 @@ const EventDetail = () => {
     const handleAddSpectator = async () => {
         try {
             const values = await spectatorForm.validateFields();
-            const token = localStorage.getItem('token');
-            const res = await axios.post('/api/user/spectator/add', values, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const res = await axios.post('/api/user/spectator/add', values);
             if (res.data.code === 200) {
                 message.success('观演人添加成功！');
                 setSpectatorModalVisible(false);
@@ -230,8 +223,6 @@ const EventDetail = () => {
                 eventId: Number(id),
                 ticketId: tempTicketId,
                 spectatorIds: tempSpectatorIds
-            }, {
-                headers: { Authorization: `Bearer ${token}` }
             });
 
             if (res.data.code === 200) {
@@ -313,8 +304,6 @@ const EventDetail = () => {
         try {
             const res = await axios.post('/api/order/pre-check', {
                 eventId: event.id
-            }, {
-                headers: { Authorization: `Bearer ${token}` }
             });
 
             hideLoading();

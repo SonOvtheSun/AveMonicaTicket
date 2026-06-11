@@ -182,7 +182,6 @@ public class AdminEventController {
         if (Objects.equals(event.getAuditStatus(), Event.AUDIT_PENDING)) {
             if (isPass) {
                 event.setAuditStatus(Event.AUDIT_APPROVED);
-                event.setStatus(3);
             } else {
                 event.setAuditStatus(Event.AUDIT_REJECTED);
                 event.setStatus(4);

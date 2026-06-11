@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Pagination, Spin, Empty, Input, ConfigProvider } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../../utils/request';
 import locale from 'antd/locale/zh_CN';
 import PublicHeader from '../../components/PublicHeader/PublicHeader'; // 替换为你的路径
 import './ArtistsPage.css';

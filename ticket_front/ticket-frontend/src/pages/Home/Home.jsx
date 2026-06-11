@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
 import dayjs from 'dayjs';
-import axios from 'axios';
+import axios from '../../utils/request';
 import './Home.css';
 
 const { Content } = Layout;

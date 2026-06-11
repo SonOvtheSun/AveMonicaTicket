@@ -41,6 +41,9 @@ public class UserController {
     @Autowired
     private SysPermissionMapper sysPermissionMapper;
 
+    @Autowired
+    private org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
+
     @PostMapping("/register")
     public Result<String> register(@RequestBody UserRegisterDTO dto) {
         userService.register(dto);
@@ -89,6 +92,10 @@ public class UserController {
             // 用户存在，执行登录逻辑，颁发 Token
             String token = jwtUtils.createToken(user.getId());
             smsService.consumeCode(phone);
+
+            // 🚨 核心互踢逻辑：短信登录也覆盖 Redis 里的 Token
+            String redisKey = "user:token:" + user.getId();
+            redisTemplate.opsForValue().set(redisKey, token, 7, java.util.concurrent.TimeUnit.DAYS);
             return Result.success("登录成功", token);
         } else {
             // 重点：用户不存在，返回特殊状态码，告诉前端去弹出“设置密码昵称”的框

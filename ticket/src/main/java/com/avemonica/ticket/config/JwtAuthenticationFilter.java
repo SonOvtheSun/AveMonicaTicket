@@ -6,6 +6,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -20,6 +21,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Autowired
     private JwtUtils jwtUtils;
+    @Autowired
+    private StringRedisTemplate redisTemplate;
     @Autowired
     private UserDetailsService userDetailsService;
 
@@ -42,14 +45,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (token != null && jwtUtils.validateToken(token)) {
             Long userId = jwtUtils.getUserId(token);
 
-            // 加载用户信息和角色（权限）
-            UserDetails userDetails = userDetailsService.loadUserByUsername(String.valueOf(userId));
+            if (userId != null) {
+                String redisKey = "user:token:" + userId;
+                String latestToken = redisTemplate.opsForValue().get(redisKey);
 
-            // 将身份和权限存入 Security 上下文
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                // 如果 Redis 里有 Token，且与当前请求带来的 Token 不一致时，判定为被踢下线
+                if (latestToken != null && !latestToken.equals(token)) {
+                    response.setContentType("application/json;charset=utf-8");
+                    response.getWriter().write("{\"code\": 401, \"message\": \"您的账号已在其他设备登录，您已被强制下线，请重新登录！\"}");
+                    return; // 直接 return，终止请求链
+                }
 
-            SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                // 加载用户信息和角色（权限）
+                UserDetails userDetails = userDetailsService.loadUserByUsername(String.valueOf(userId));
+
+                // 将身份和权限存入 Security 上下文
+                UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
         }
 
         // 5. 放行请求（如果 token 无效或没带 Bearer，上下文就是空的，会被后面的拦截器拦下返回 403）

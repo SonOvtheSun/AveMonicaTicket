@@ -54,7 +54,7 @@ public class AdminBannerController {
     }
 
     @GetMapping("/list")
-    @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('banner:manage') or hasAuthority('banner:view') or principal.username == '1'")
     public Result<?> getBanners(@RequestParam Integer type) {
         LocalDateTime now = LocalDateTime.now();
 
@@ -377,7 +377,7 @@ public class AdminBannerController {
      * 下架横幅：将已上线的横幅打回待审核状态
      */
     @PutMapping("/takedown/{id}")
-    @PreAuthorize("hasAnyAuthority('banner:manage', 'audit:manage') or authentication.name == '1'")
+    @PreAuthorize("hasAnyAuthority('banner:manage', 'audit:manage', 'banner:view') or authentication.name == '1'")
     public Result<String> takeDownBanner(@PathVariable Long id) {
         Banner banner = bannerService.getById(id);
         if (banner == null) {

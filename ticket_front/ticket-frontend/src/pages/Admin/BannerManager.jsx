@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, Table, Tabs, Button, Modal, Form, Input, DatePicker, Upload, message, Tag, Image, Space, Popconfirm, Select, Spin } from 'antd';
 // 🚨 引入 StopOutlined 用于下架按钮
 import { PlusOutlined, UploadOutlined, EditOutlined, DeleteOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import axios from '../../utils/request';
 import dayjs from 'dayjs';
 
 const BannerManager = () => {
