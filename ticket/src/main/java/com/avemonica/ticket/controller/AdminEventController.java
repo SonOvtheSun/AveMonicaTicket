@@ -80,7 +80,7 @@ public class AdminEventController {
 
 
     @GetMapping("/list")
-    @PreAuthorize("hasAuthority('event:list')")
+    @PreAuthorize("hasAuthority('event:list') or authentication.name == '1'")
     public Result<IPage<Event>> listEvents(@RequestParam(defaultValue = "1") int current,
                                            @RequestParam(defaultValue = "10") int size,
                                            @RequestParam(required = false) String keyword) { // 🚨 接收 keyword
@@ -93,7 +93,7 @@ public class AdminEventController {
 
 
     @GetMapping("/audit-list")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('audit:manage') or authentication.name == '1'")
     public Result<IPage<Event>> getPendingEvents(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "5") Integer size) {
@@ -133,7 +133,7 @@ public class AdminEventController {
     }
 
     @PutMapping("/audit/{id}")
-    @PreAuthorize("hasAuthority('event:audit') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('audit:manage') or authentication.name == '1'")
     @Transactional(rollbackFor = Exception.class)
     public Result<String> auditEvent(@PathVariable Long id, @RequestParam Boolean isPass) {
         Event event = eventService.getById(id);
@@ -198,7 +198,7 @@ public class AdminEventController {
     }
 
     @PutMapping("/revoke/{id}")
-    @PreAuthorize("hasAuthority('event:publish') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('event:publish') or hasAuthority('event:edit') or authentication.name == '1'")
     public Result<String> revokeEventAudit(@PathVariable Long id) {
         Event event = eventService.getById(id);
         if (event == null) {
@@ -230,7 +230,7 @@ public class AdminEventController {
     }
 
     @PutMapping("/status/{id}")
-    @PreAuthorize("hasAuthority('event:publish') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('event:publish') or hasAuthority('event:edit') or authentication.name == '1'")
     public Result<String> updateEventStatus(@PathVariable Long id, @RequestParam Integer status) {
         Event event = eventService.getById(id);
         if(event == null){
@@ -248,7 +248,7 @@ public class AdminEventController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('event:publish') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('event:publish') or hasAuthority('event:edit') or authentication.name == '1'")
     public Result<String> updateEvent(@PathVariable Long id, @RequestBody @Validated EventAddDTO dto) {
         eventService.updateEventWithTicketsAndArtists(id, dto);
         evictEventDetailCache(id);
@@ -259,7 +259,7 @@ public class AdminEventController {
      * 审核员专属：下架演出（打回未审核状态，并强制隐藏）
      */
     @PutMapping("/takedown/{id}")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('audit:manage') or hasAuthority('event:edit') or authentication.name == '1'")
     public Result<String> takeDownEvent(@PathVariable Long id) {
         Event event = eventService.getById(id);
         if (event == null) {
@@ -275,14 +275,14 @@ public class AdminEventController {
     }
 
     @PostMapping("/add")
-    @PreAuthorize("hasAuthority('event:add') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('event:publish') or hasAuthority('event:edit') or authentication.name == '1'")
     public Result<String> addEvent(@RequestBody @Validated EventAddDTO dto) {
         eventService.saveEventWithTicketsAndArtists(dto);
         return Result.success("演出发布成功", null);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('event:delete')")
+    @PreAuthorize("hasAuthority('event:delete') or hasAuthority('event:edit') or authentication.name == '1'")
     @Transactional(rollbackFor = Exception.class) // 🚨 加上事务，防止删了票档但演出没删掉的情况发生
     public Result<String> deleteEvent(@PathVariable Long id) {
         ticketService.remove(
@@ -300,7 +300,7 @@ public class AdminEventController {
     }
 
     @PutMapping("/confirm-edit-reject/{id}")
-    @PreAuthorize("hasAuthority('event:publish') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('event:publish') or authentication.name == '1'")
     public Result<String> confirmEventEditReject(@PathVariable Long id) {
         Event event = eventService.getById(id);
         if (event == null) {

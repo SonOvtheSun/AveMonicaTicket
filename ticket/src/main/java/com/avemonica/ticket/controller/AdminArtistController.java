@@ -74,7 +74,7 @@ public class AdminArtistController {
 
     //分页获取艺人列表 (支持按名字模糊搜索)
     @GetMapping("/page")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('artist:manage') or hasAuthority('artist:view') or authentication.name == '1'")
     public Result<IPage<Artist>> getArtistPage(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "10") Integer size,
@@ -97,7 +97,7 @@ public class AdminArtistController {
 
     //编辑艺人信息
     @PutMapping("/update")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == 'admin'")
+    @PreAuthorize("hasAuthority('artist:manage') or authentication.name == '1'")
     public Result<String> updateArtist(@RequestBody Artist artist) {
         if (artist.getId() == null) {
             return Result.error("艺人ID不能为空");
@@ -160,7 +160,7 @@ public class AdminArtistController {
 
     // 修改艺人状态 (例如：下架、恢复)
     @PutMapping("/{id}/status/{status}")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == 'admin'")
+    @PreAuthorize("hasAuthority('artist:manage') or hasAuthority('artist:view') or hasAuthority('audit:manage') or authentication.name == '1'")
     public Result<String> changeStatus(@PathVariable Long id, @PathVariable Integer status) {
         Artist artist = new Artist();
         artist.setId(id);
@@ -197,7 +197,7 @@ public class AdminArtistController {
     }
 
     @DeleteMapping("/delete/{id}")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == 'admin'")
+    @PreAuthorize("hasAuthority('audit:manage') or hasAuthority('artist:manage') or authentication.name == '1'")
     public Result<String> deleteArtist(@PathVariable Long id) {
         // 如果你的数据库配置了逻辑删除 (deleted 字段)，这里会自动执行逻辑删除
         // 如果没有配置，这里就是真实的物理删除
@@ -211,7 +211,7 @@ public class AdminArtistController {
      * 权限：仅限拥有 audit:manage 权限的审核员或超管
      */
     @GetMapping("/audit-list")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == 'admin'")
+    @PreAuthorize("hasAuthority('audit:manage') or authentication.name == '1'")
     public Result<IPage<Artist>> getPendingArtists(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "5") Integer size) {
@@ -233,7 +233,7 @@ public class AdminArtistController {
      * 2. 审核艺人 (通过 / 驳回)
      */
     @PutMapping("/audit/{id}")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == 'admin'")
+    @PreAuthorize("hasAuthority('audit:manage') or authentication.name == '1'")
     public Result<String> auditArtist(@PathVariable Long id, @RequestParam Boolean isPass) {
         Artist artist = artistService.getById(id);
         if (artist == null) {
@@ -283,7 +283,7 @@ public class AdminArtistController {
     }
 
     @PutMapping("/revoke/{id}")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == 'admin'")
+    @PreAuthorize("hasAuthority('artist:manage') or hasAuthority('artist:view') or authentication.name == '1'")
     public Result<String> revokeArtistAudit(@PathVariable Long id) {
         Artist artist = artistService.getById(id);
         if (artist == null) {
@@ -312,7 +312,10 @@ public class AdminArtistController {
     }
 
     @PutMapping("/confirm-edit-reject/{id}")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('audit:manage') " +
+            "or hasAuthority('artist:view') " +
+            "or hasAuthority('artist:manage') " +
+            "or authentication.name == '1'")
     public Result<String> confirmArtistEditReject(@PathVariable Long id) {
         Artist artist = artistService.getById(id);
         if (artist == null) {

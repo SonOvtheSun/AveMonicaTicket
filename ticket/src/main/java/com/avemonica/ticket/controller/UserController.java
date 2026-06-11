@@ -134,7 +134,7 @@ public class UserController {
      * 利用 @PreAuthorize 注解，轻松实现接口级别的权限控制
      */
     @PostMapping("/admin/test")
-    @PreAuthorize("principal.username == '1'") // 只有在 UserDetailsServiceImpl 里被赋予了 ROLE_ADMIN 的人才能进
+    @PreAuthorize("authentication.name == '1'") // 只有在 UserDetailsServiceImpl 里被赋予了 ROLE_ADMIN 的人才能进
     public Result<String> adminTest() {
         return Result.success("尊贵的管理员，欢迎进入 Ave Monica 票务核心控制台！", null);
     }

@@ -56,7 +56,8 @@ const UserManager = () => {
         { value: 3, label: '2. 评论审核员', color: 'purple' },
         { value: 4, label: '3. 订单管理员', color: 'cyan' },
         { value: 5, label: '4. 演出管理方', color: 'blue' },
-        { value: 6, label: '5. 普通游客', color: 'default' },
+        { value: 6, label: '5. 管理员', color: 'default' },
+        { value: 7, label: '6. 普通游客', color: 'default' }
     ];
 
     const roleOptionsR = [
@@ -65,7 +66,8 @@ const UserManager = () => {
         { value: 3, label: '2. 评论审核员', color: 'purple' },
         { value: 4, label: '3. 订单管理员', color: 'cyan' },
         { value: 5, label: '4. 演出管理方', color: 'blue' },
-        { value: 6, label: '5. 普通游客', color: 'default' },
+        { value: 6, label: '5. 管理员', color: 'default' },
+        { value: 7, label: '6. 普通游客', color: 'default' },
     ];
 
     const columns = [

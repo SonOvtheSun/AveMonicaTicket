@@ -57,7 +57,7 @@ const EventManager = () => {
         fetchEvents(); }, []);
 
     const isSuperAdmin = userRole === 1;
-    const hasPublishPerm = isSuperAdmin || userPerms.includes('event:publish');
+    const hasPublishPerm = isSuperAdmin || userPerms.includes('event:publish') || userPerms.includes("event:edit");
     const hasAuditPerm = isSuperAdmin || userPerms.includes('audit:manage');
 
     const handleTableChange = (newPagination) => fetchEvents(newPagination.current, newPagination.pageSize);

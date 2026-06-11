@@ -17,7 +17,7 @@ public class AdminUserController{
     private UserService userService;
 
     @GetMapping("/list")
-    @PreAuthorize("principal.username == '1'")
+    @PreAuthorize("authentication.name == '1'")
     public Result<IPage<User>> listUsers(@RequestParam(defaultValue = "1") int current,
                                          @RequestParam(defaultValue = "10") int size){
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
@@ -30,7 +30,7 @@ public class AdminUserController{
     }
 
     @PutMapping("/role/{id}")
-    @PreAuthorize("principal.username == '1'")
+    @PreAuthorize("authentication.name == '1'")
     public Result<String> updateUserRole(@PathVariable Long id, @RequestParam Integer role){
         User user = userService.getById(id);
         if (user == null) {

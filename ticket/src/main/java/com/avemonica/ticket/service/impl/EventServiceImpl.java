@@ -178,7 +178,7 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         boolean isSuperAdmin = (currentUser.getId() == 1L);
 
         List<String> permissions = userMapper.selectPermissionsByUserId(currentUser.getId());
-        boolean hasAuditPerm = permissions.contains("audit:manage");
+        boolean hasAuditPerm = permissions.contains("audit:manage") || permissions.contains("event:view_all");
 
         LambdaQueryWrapper<Event> wrapper = new LambdaQueryWrapper<>();
         if (!isSuperAdmin && !hasAuditPerm) {

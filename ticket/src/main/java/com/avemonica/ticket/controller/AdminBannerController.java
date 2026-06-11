@@ -58,20 +58,26 @@ public class AdminBannerController {
     public Result<?> getBanners(@RequestParam Integer type) {
         LocalDateTime now = LocalDateTime.now();
 
-        if (type == 1) {
-            // 即将展示：查热库，开始时间大于当前时间
+        if (type == 0) {
+            // 🚨 新增分支：审核中（查询 新增待审核 或 修改待审核 的数据）
             return Result.success(bannerService.list(
                     new LambdaQueryWrapper<Banner>()
-                            .eq(Banner::getAuditStatus, 1)
-                            .ge(Banner::getStartTime, now)
-                            .ge(Banner::getEndTime, now)
+                            .and(w -> w.eq(Banner::getAuditStatus, 0).or().eq(Banner::getEditAuditStatus, 0)).or().eq(Banner::getAuditStatus, 3)
+                            .orderByDesc(Banner::getCreateTime)
+            ));
+        } else if (type == 1) {
+            // 即将展示：开始时间大于当前时间，且主状态必须是已审核通过
+            return Result.success(bannerService.list(
+                    new LambdaQueryWrapper<Banner>()
+                            .eq(Banner::getAuditStatus, 1) // 🚨 过滤掉处于“新增待审核”的脏数据
+                            .gt(Banner::getStartTime, now)
                             .orderByDesc(Banner::getCreateTime)
             ));
         } else if (type == 2) {
-            // 展示中：查热库，当前时间处于开始与结束之间
+            // 展示中：当前时间处于开始与结束之间，且主状态必须是已审核通过
             return Result.success(bannerService.list(
                     new LambdaQueryWrapper<Banner>()
-                            .eq(Banner::getAuditStatus, 1)
+                            .eq(Banner::getAuditStatus, 1) // 🚨 过滤掉处于“新增待审核”的脏数据
                             .le(Banner::getStartTime, now)
                             .ge(Banner::getEndTime, now)
                             .orderByDesc(Banner::getCreateTime)
@@ -85,7 +91,7 @@ public class AdminBannerController {
     }
 
     @PostMapping("/save")
-    @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('banner:manage') or authentication.name == '1'")
     @Transactional(rollbackFor = Exception.class)
     public Result<String> saveBanner(@RequestBody @Validated BannerSaveDTO dto) {
         LocalDateTime now = LocalDateTime.now();
@@ -198,7 +204,7 @@ public class AdminBannerController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('banner:manage') or authentication.name == '1'")
     public Result<String> deleteBanner(@PathVariable Long id, @RequestParam Boolean isExpired) {
         if (isExpired) {
             overdateService.removeById(id);
@@ -209,7 +215,7 @@ public class AdminBannerController {
     }
 
     @GetMapping("/audit-list")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('audit:manage') or authentication.name == '1'")
     public Result<List<Banner>> getPendingBanners() {
         List<Banner> list = bannerService.list(
                 new LambdaQueryWrapper<Banner>()
@@ -222,7 +228,7 @@ public class AdminBannerController {
     }
 
     @PutMapping("/audit/{id}")
-    @PreAuthorize("hasAuthority('audit:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('audit:manage') or authentication.name == '1'")
     @Transactional(rollbackFor = Exception.class)
     public Result<String> auditBanner(@PathVariable Long id, @RequestParam Boolean isPass) {
         Banner banner = bannerService.getById(id);
@@ -278,7 +284,7 @@ public class AdminBannerController {
     }
 
     @PutMapping("/revoke/{id}")
-    @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('banner:manage') or authentication.name == '1'")
     public Result<String> revokeBannerAudit(@PathVariable Long id) {
         Banner banner = bannerService.getById(id);
         if (banner == null) {
@@ -345,7 +351,7 @@ public class AdminBannerController {
     }
 
     @PutMapping("/confirm-edit-reject/{id}")
-    @PreAuthorize("hasAuthority('banner:manage') or principal.username == '1'")
+    @PreAuthorize("hasAuthority('banner:manage') or authentication.name == '1'")
     public Result<String> confirmBannerEditReject(@PathVariable Long id) {
         Banner banner = bannerService.getById(id);
         if (banner == null) {
@@ -365,5 +371,23 @@ public class AdminBannerController {
         );
 
         return Result.success("已确认修改驳回结果");
+    }
+
+    /**
+     * 下架横幅：将已上线的横幅打回待审核状态
+     */
+    @PutMapping("/takedown/{id}")
+    @PreAuthorize("hasAnyAuthority('banner:manage', 'audit:manage') or authentication.name == '1'")
+    public Result<String> takeDownBanner(@PathVariable Long id) {
+        Banner banner = bannerService.getById(id);
+        if (banner == null) {
+            throw new BusinessException("横幅不存在");
+        }
+
+        // 0 代表新增待审状态，打回原形
+        banner.setAuditStatus(0);
+        bannerService.updateById(banner);
+
+        return Result.success("横幅已下架并退回待审核状态");
     }
 }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Table, Tabs, Button, Modal, Form, Input, DatePicker, Upload, message, Tag, Image, Space, Popconfirm, Select, Spin } from 'antd';
-import { PlusOutlined, UploadOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+// 🚨 引入 StopOutlined 用于下架按钮
+import { PlusOutlined, UploadOutlined, EditOutlined, DeleteOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import dayjs from 'dayjs';
 
@@ -20,13 +21,27 @@ const BannerManager = () => {
     const [form] = Form.useForm();
     const [fileList, setFileList] = useState([]);
 
+    // 🚨 权限状态管理
     const [userRole, setUserRole] = useState(6);
+    const [permissions, setPermissions] = useState([]);
+
+    // ==========================================
+    // 🚨 核心权限计算逻辑
+    // ==========================================
     const isSuperAdmin = userRole === 1;
+    // 1. 横幅管理权限：拥有操作横幅的最高权 (可见编辑、删除、撤销)
+    const canManageBanner = isSuperAdmin || permissions.includes('banner:manage');
+    // 2. 审核权限：拥有审核权 (用来叠加下架按钮的可见性)
+    const canAudit = isSuperAdmin || permissions.includes('audit:manage');
+    // 3. 下架权限：只要有审核权或横幅管理权，都可以下架
+    const canTakeDown = canManageBanner || canAudit;
 
     useEffect(() => {
         axios.get('/api/user/info').then(res => {
             if (res.data.code === 200) {
                 setUserRole(res.data.data.role || 6);
+                // 🚨 提取权限数组
+                setPermissions(res.data.data.permissions || []);
             }
         });
     }, []);
@@ -97,6 +112,21 @@ const BannerManager = () => {
         }
     };
 
+    // 🚨 新增下架处理函数
+    const handleTakeDown = async (id) => {
+        try {
+            const res = await axios.put(`/api/admin/banner/takedown/${id}`);
+            if (res.data.code === 200) {
+                message.success('已下架并打回待审核状态');
+                fetchBanners();
+            } else {
+                message.error(res.data.message || '下架失败');
+            }
+        } catch (error) {
+            message.error('请求下架失败');
+        }
+    };
+
     const getBannerStatusTag = (record) => {
         if (record?.editAuditStatus === 0) return <Tag color="processing">修改待审核</Tag>;
         if (record?.editAuditStatus === 2) return <Tag color="red">修改被驳回</Tag>;
@@ -142,11 +172,14 @@ const BannerManager = () => {
                 const isNewPending = record.auditStatus === 0;
                 const isEditPending = record.editAuditStatus === 0;
                 const hasPendingAudit = isNewPending || isEditPending;
-                const canEdit = isSuperAdmin || !hasPendingAudit;
+
+                // 如果有待审核状态，普通运营不能点编辑，超管可以强制点
+                const canClickEdit = canManageBanner && (!hasPendingAudit || isSuperAdmin);
 
                 return (
                     <Space>
-                        {record.editAuditStatus === 2 && (
+                        {/* 确认驳回：需横幅管理权 */}
+                        {canManageBanner && record.editAuditStatus === 2 && (
                             <Popconfirm
                                 title="确认修改审核被驳回？"
                                 description="确认后将清除修改驳回状态，页面恢复为当前已生效横幅。"
@@ -159,15 +192,21 @@ const BannerManager = () => {
                                 </Button>
                             </Popconfirm>
                         )}
-                        <Button
-                            type="link"
-                            icon={<EditOutlined />}
-                            disabled={!canEdit}
-                            onClick={() => openModal(record)}
-                        >
-                            编辑
-                        </Button>
-                        {!isSuperAdmin && hasPendingAudit && (
+
+                        {/* 编辑按钮：需横幅管理权 */}
+                        {canManageBanner && (
+                            <Button
+                                type="link"
+                                icon={<EditOutlined />}
+                                disabled={!canClickEdit}
+                                onClick={() => openModal(record)}
+                            >
+                                编辑
+                            </Button>
+                        )}
+
+                        {/* 撤销审核：需横幅管理权 */}
+                        {canManageBanner && hasPendingAudit && (
                             <Popconfirm
                                 title="确定撤销审核申请？"
                                 description="撤销后可重新编辑并提交审核。"
@@ -182,9 +221,26 @@ const BannerManager = () => {
                             </Popconfirm>
                         )}
 
-                        <Popconfirm title="确定删除吗？" onConfirm={() => handleDelete(record.id)}>
-                            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
-                        </Popconfirm>
+                        {/* 🚨 下架按钮：需审核权 或 横幅管理权，且当前必须是审核通过的正常状态 */}
+                        {canTakeDown && record.auditStatus === 1 && (
+                            <Popconfirm
+                                title="确定要下架该横幅吗？"
+                                description="下架后该横幅将立即隐藏，并退回待审核状态。"
+                                onConfirm={() => handleTakeDown(record.id)}
+                                okText="强制下架"
+                                cancelText="取消"
+                                okButtonProps={{ danger: true }}
+                            >
+                                <Button type="link" danger icon={<StopOutlined />}>下架</Button>
+                            </Popconfirm>
+                        )}
+
+                        {/* 删除按钮：需横幅管理权 */}
+                        {canManageBanner && (
+                            <Popconfirm title="确定删除吗？" onConfirm={() => handleDelete(record.id)}>
+                                <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+                            </Popconfirm>
+                        )}
                     </Space>
                 );
             }
@@ -296,24 +352,28 @@ const BannerManager = () => {
                     <Button type="primary" onClick={() => fetchBanners(activeTab, searchText)}>搜索</Button>
                 </div>
 
-                <Button
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    onClick={() => openModal()}
-                    style={{
-                        backgroundColor: '#FF8899',
-                        borderColor: '#FF8899',
-                        borderRadius: '6px',
-                        boxShadow: '0 4px 12px rgba(255, 136, 153, 0.4)'
-                    }}
-                >
-                    新增横幅
-                </Button>
+                {/* 仅横幅管理员可见新增按钮 */}
+                {canManageBanner && (
+                    <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={() => openModal()}
+                        style={{
+                            backgroundColor: '#FF8899',
+                            borderColor: '#FF8899',
+                            borderRadius: '6px',
+                            boxShadow: '0 4px 12px rgba(255, 136, 153, 0.4)'
+                        }}
+                    >
+                        新增横幅
+                    </Button>
+                )}
             </div>
 
             <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key)} items={[
                 { key: '2', label: '展示中' },
                 { key: '1', label: '即将展示' },
+                { key: '0', label: '审核中' }, // 🚨 新增的审核中栏目
                 { key: '3', label: '展示过期 (已归档)' }
             ]} />
 

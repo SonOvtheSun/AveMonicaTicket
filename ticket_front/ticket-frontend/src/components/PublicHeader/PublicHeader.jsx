@@ -196,7 +196,7 @@ const PublicHeader = () => {
 
                 {/* 3. 账户操作区 */}
                 <div className="header-right">
-                    {currentUser?.role && currentUser.role < 6 && (
+                    {currentUser?.role && currentUser.role < 7 && (
                         <Button className="admin-dashboard-btn" icon={<Settings size={16} />} onClick={() => navigate('/admin')}>
                             票务管理中心
                         </Button>
