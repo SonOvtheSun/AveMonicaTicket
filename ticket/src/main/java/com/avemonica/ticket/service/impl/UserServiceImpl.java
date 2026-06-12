@@ -40,7 +40,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public void register(UserRegisterDTO dto) {
-        // 1. 检查手机号是否已被注册
         LambdaQueryWrapper<User> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(User::getPhone, dto.getPhone());
         if (this.count(queryWrapper) > 0) {
@@ -51,21 +50,32 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BusinessException("用户名已存在");
         }
 
-        if (!smsService.verifyCode(dto.getPhone(), dto.getCode())) {
-            throw new BusinessException("验证码错误或已过期");
+        boolean smsVerifiedByTicket = false;
+
+        if (dto.getRegisterTicket() != null && !dto.getRegisterTicket().trim().isEmpty()) {
+            String ticketKey = "sms:register:ticket:" + dto.getRegisterTicket();
+            String ticketPhone = redisTemplate.opsForValue().get(ticketKey);
+
+            if (ticketPhone == null || !ticketPhone.equals(dto.getPhone())) {
+                throw new BusinessException("注册凭证无效或已过期，请重新获取验证码");
+            }
+
+            smsVerifiedByTicket = true;
+            redisTemplate.delete(ticketKey);
         }
 
-        // 2. 构建新用户对象
+        if (!smsVerifiedByTicket) {
+            if (!smsService.verifyCode(dto.getPhone(), dto.getCode())) {
+                throw new BusinessException("验证码错误或已过期");
+            }
+        }
+
         User user = new User();
         user.setPhone(dto.getPhone());
         user.setUsername(dto.getUsername());
-        String defaultAvatar = "/uploads/avatar/default.png";
-        user.setAvatar(defaultAvatar);
-        // 3. 密码加密存储 (绝对不要存明文！)
-        String encodedPassword = passwordEncoder.encode(dto.getPassword());
-        user.setPassword(encodedPassword);
+        user.setAvatar("/uploads/avatar/default.png");
+        user.setPassword(passwordEncoder.encode(dto.getPassword()));
 
-        // 4. 保存到数据库
         this.save(user);
     }
 

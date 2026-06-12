@@ -115,7 +115,10 @@ const Auth = () => {
                         navigate('/');
                     } else if (res.data.code === 201) {
                         // 新用户，验证码正确，弹出完善信息框
-                        setTempAuthData({ phone: values.phone, code: values.code });
+                        setTempAuthData({
+                            phone: values.phone,
+                            registerTicket: res.data.data
+                        });
                         setShowAutoRegModal(true);
                         setTurnstileToken(null);
                         turnstileRef.current?.reset(); // 重置供弹窗里使用
@@ -160,8 +163,8 @@ const Auth = () => {
             const res = await axios.post('/api/user/register', {
                 phone: tempAuthData.phone,
                 password: values.password,
-                code: tempAuthData.code,
-                username: values.username    // 注意这里我们之前已经统改为 username 了
+                registerTicket: tempAuthData.registerTicket,
+                username: values.username
             });
 
             if (res.data.code === 200) {

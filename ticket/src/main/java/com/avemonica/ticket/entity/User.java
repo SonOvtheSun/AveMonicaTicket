@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -30,7 +31,7 @@ public class User {
     private Integer idType;
     private String realName;
     private Integer gender;
-    private LocalDateTime birthday;
+    private LocalDate birthday;
     private String bio;
     private String email;
 }

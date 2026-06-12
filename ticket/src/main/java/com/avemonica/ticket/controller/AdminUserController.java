@@ -7,6 +7,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,6 +17,9 @@ import org.springframework.web.bind.annotation.*;
 public class AdminUserController{
     @Autowired
     private UserService userService;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
     @GetMapping("/list")
     @PreAuthorize("authentication.name == '1'")
@@ -62,6 +67,8 @@ public class AdminUserController{
         }
 
         userService.removeById(id);
+        // 2. 🚨 主动销毁 Redis 中的 Token 记录，触发互踢机制
+        redisTemplate.delete("user:token:" + id);
 
         return Result.success("账户已注销");
     }

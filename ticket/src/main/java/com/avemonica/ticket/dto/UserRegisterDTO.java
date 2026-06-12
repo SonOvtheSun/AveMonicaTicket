@@ -20,4 +20,6 @@ public class UserRegisterDTO {
 
     @NotBlank(message = "验证码不能为空")
     private String code;
+
+    private String registerTicket;
 }

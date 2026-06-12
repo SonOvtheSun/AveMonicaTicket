@@ -56,15 +56,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     return; // 直接 return，终止请求链
                 }
 
+                try {
+                    // 加载用户信息和角色（权限）
+                    UserDetails userDetails = userDetailsService.loadUserByUsername(String.valueOf(userId));
 
-                // 加载用户信息和角色（权限）
-                UserDetails userDetails = userDetailsService.loadUserByUsername(String.valueOf(userId));
+                    // 将身份和权限存入 Security 上下文
+                    UsernamePasswordAuthenticationToken authentication =
+                            new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
 
-                // 将身份和权限存入 Security 上下文
-                UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                } catch (org.springframework.security.core.userdetails.UsernameNotFoundException e) {
+                    // 🚨 核心拦截：如果数据库里找不到这个用户（账号已注销），强制按 401 处理！
+                    response.setContentType("application/json;charset=utf-8");
+                    response.getWriter().write("{\"code\": 401, \"message\": \"您的账号已被注销或不存在，请重新登录！\"}");
+                    return; // 直接终止请求链
+                }
             }
         }
 

@@ -1,3 +1,11 @@
+aliyun:
+  dypns:
+    access-key-id: ${ALIBABA_CLOUD_ACCESS_KEY_ID}
+    access-key-secret: ${ALIBABA_CLOUD_ACCESS_KEY_SECRET}
+    sign-name: 速通互联验证码
+    template-code: 100001
+
+
 avemonica:
   upload:
     # 总的上传根目录（末尾不加斜杠，方便后面拼接）

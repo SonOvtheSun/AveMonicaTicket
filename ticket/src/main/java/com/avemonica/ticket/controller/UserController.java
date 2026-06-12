@@ -78,32 +78,39 @@ public class UserController {
     // 之前可能只有密码登录，现在我们需要处理免密登录的逻辑
     @PostMapping("/login-sms")
     public Result<String> loginBySms(@RequestParam String phone, @RequestParam String code) {
-        // 第一步：校验验证码
-        boolean isValid = smsService.checkCodeOnly(phone, code);
+        // 1. 验证码只在这里校验一次
+        boolean isValid = smsService.verifyCode(phone, code);
         if (!isValid) {
             return Result.error("验证码错误或已过期");
         }
 
-        // 第二步：检查用户是否存在
-        boolean userExists = userService.checkUserExistsByPhone(phone); // 你需要在 UserService 里加这个方法
-
+        // 2. 查用户
         User user = userService.getOne(new LambdaQueryWrapper<User>().eq(User::getPhone, phone));
-        if (userExists) {
-            // 用户存在，执行登录逻辑，颁发 Token
-            String token = jwtUtils.createToken(user.getId());
-            smsService.consumeCode(phone);
 
-            // 🚨 核心互踢逻辑：短信登录也覆盖 Redis 里的 Token
+        if (user != null) {
+            // 老用户：直接登录
+            String token = jwtUtils.createToken(user.getId());
+
             String redisKey = "user:token:" + user.getId();
             redisTemplate.opsForValue().set(redisKey, token, 7, java.util.concurrent.TimeUnit.DAYS);
+
             return Result.success("登录成功", token);
-        } else {
-            // 重点：用户不存在，返回特殊状态码，告诉前端去弹出“设置密码昵称”的框
-            // 这里用 code = 201 模拟“需要补全信息”
-            Result<String> res = Result.success("验证成功，请完善注册信息", null);
-            res.setCode(201);
-            return res;
         }
+
+        // 3. 新用户：生成临时注册凭证
+        String registerTicket = java.util.UUID.randomUUID().toString().replace("-", "");
+        String ticketKey = "sms:register:ticket:" + registerTicket;
+
+        redisTemplate.opsForValue().set(
+                ticketKey,
+                phone,
+                10,
+                java.util.concurrent.TimeUnit.MINUTES
+        );
+
+        Result<String> res = Result.success("验证成功，请完善注册信息", registerTicket);
+        res.setCode(201);
+        return res;
     }
 
     @GetMapping("/info")

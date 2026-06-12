@@ -59,6 +59,10 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.kafka:spring-kafka-test'
     testImplementation 'org.springframework.security:spring-security-test'
+
+    implementation 'com.aliyun:dypnsapi20170525:2.0.0'
+    implementation 'com.aliyun:tea-openapi:0.3.2'
+    implementation 'com.aliyun:tea-util:0.2.23'
 }
 
 tasks.named('test') {
