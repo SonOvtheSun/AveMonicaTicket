@@ -1,6 +1,7 @@
 package com.avemonica.ticket.controller;
 
 import com.avemonica.ticket.common.Result;
+import com.avemonica.ticket.config.AuthExp;
 import com.avemonica.ticket.dto.BannerSaveDTO;
 import com.avemonica.ticket.entity.Banner;
 import com.avemonica.ticket.entity.BannerOverdate;
@@ -54,7 +55,7 @@ public class AdminBannerController {
     }
 
     @GetMapping("/list")
-    @PreAuthorize("hasAuthority('banner:manage') or hasAuthority('banner:view') or principal.username == '1'")
+    @PreAuthorize(AuthExp.BANNER_VIEW)
     public Result<?> getBanners(@RequestParam Integer type) {
         LocalDateTime now = LocalDateTime.now();
 
@@ -91,7 +92,7 @@ public class AdminBannerController {
     }
 
     @PostMapping("/save")
-    @PreAuthorize("hasAuthority('banner:manage') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.BANNER_MANAGE)
     @Transactional(rollbackFor = Exception.class)
     public Result<String> saveBanner(@RequestBody @Validated BannerSaveDTO dto) {
         LocalDateTime now = LocalDateTime.now();
@@ -204,7 +205,7 @@ public class AdminBannerController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('banner:manage') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.BANNER_MANAGE)
     public Result<String> deleteBanner(@PathVariable Long id, @RequestParam Boolean isExpired) {
         if (isExpired) {
             overdateService.removeById(id);
@@ -215,7 +216,7 @@ public class AdminBannerController {
     }
 
     @GetMapping("/audit-list")
-    @PreAuthorize("hasAuthority('audit:manage') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.AUDIT_MANAGE)
     public Result<List<Banner>> getPendingBanners() {
         List<Banner> list = bannerService.list(
                 new LambdaQueryWrapper<Banner>()
@@ -228,7 +229,7 @@ public class AdminBannerController {
     }
 
     @PutMapping("/audit/{id}")
-    @PreAuthorize("hasAuthority('audit:manage') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.AUDIT_MANAGE)
     @Transactional(rollbackFor = Exception.class)
     public Result<String> auditBanner(@PathVariable Long id, @RequestParam Boolean isPass) {
         Banner banner = bannerService.getById(id);
@@ -284,7 +285,7 @@ public class AdminBannerController {
     }
 
     @PutMapping("/revoke/{id}")
-    @PreAuthorize("hasAuthority('banner:manage') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.BANNER_MANAGE)
     public Result<String> revokeBannerAudit(@PathVariable Long id) {
         Banner banner = bannerService.getById(id);
         if (banner == null) {
@@ -351,7 +352,7 @@ public class AdminBannerController {
     }
 
     @PutMapping("/confirm-edit-reject/{id}")
-    @PreAuthorize("hasAuthority('banner:manage') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.BANNER_MANAGE)
     public Result<String> confirmBannerEditReject(@PathVariable Long id) {
         Banner banner = bannerService.getById(id);
         if (banner == null) {
@@ -377,7 +378,7 @@ public class AdminBannerController {
      * 下架横幅：将已上线的横幅打回待审核状态
      */
     @PutMapping("/takedown/{id}")
-    @PreAuthorize("hasAnyAuthority('banner:manage', 'audit:manage', 'banner:view') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.AUDIT_MANAGE + " or " + AuthExp.BANNER_MANAGE)
     public Result<String> takeDownBanner(@PathVariable Long id) {
         Banner banner = bannerService.getById(id);
         if (banner == null) {

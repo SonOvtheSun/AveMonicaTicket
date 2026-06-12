@@ -92,7 +92,10 @@ public class PublicEventController {
      * 获取演出详情：多级缓存核心战区 (Caffeine -> Redis -> MySQL)
      */
     @GetMapping("/detail/{id}")
-    public Result<Event> getEventDetail(@PathVariable Long id) {
+    public Result<Event> getEventDetail(
+            @PathVariable Long id,
+            @RequestParam(required = false) String viewToken
+    ) {
         String cacheKey = EVENT_CACHE_KEY_PREFIX + id;
         Event event = null;
 
@@ -103,53 +106,90 @@ public class PublicEventController {
             String localJson = localCache.getIfPresent(cacheKey);
             if (StringUtils.hasText(localJson)) {
                 log.info("🎯 命中 L1 本地缓存, EventID: {}", id);
-                return Result.success(objectMapper.readValue(localJson, Event.class));
+                event = objectMapper.readValue(localJson, Event.class);
             }
 
             // ==========================================
             // L2: 查找分布式缓存 (Redis)
             // ==========================================
-            String redisJson = redisTemplate.opsForValue().get(cacheKey);
-            if (StringUtils.hasText(redisJson)) {
-                log.info("🎯 命中 L2 Redis 缓存, EventID: {}", id);
-
-                // 将数据回填到本地缓存，供下一次请求直接使用
-                localCache.put(cacheKey, redisJson);
-
-                return Result.success(objectMapper.readValue(redisJson, Event.class));
+            if (event == null) {
+                String redisJson = redisTemplate.opsForValue().get(cacheKey);
+                if (StringUtils.hasText(redisJson)) {
+                    log.info("🎯 命中 L2 Redis 缓存, EventID: {}", id);
+                    localCache.put(cacheKey, redisJson); // 回填 L1
+                    event = objectMapper.readValue(redisJson, Event.class);
+                }
             }
 
             // ==========================================
             // L3: 缓存全未命中，查询数据库 (MySQL)
             // ==========================================
-            log.warn("⚠️ 缓存击穿，查询 MySQL, EventID: {}", id);
-            // 🚨 工业界防击穿警告：高并发下，这里应当加分布式锁 (Redisson)，防止10万人同时把 DB 压垮。
-            // 简化演示，直接查库：
-            event = eventService.getById(id);
-            if (event == null || event.getStatus() == 4) {
-                // 缓存穿透防御：如果是恶意攻击查不存在的ID，也应缓存一个空对象，避免一直打 DB
-                return Result.error("该演出不存在或已下架");
+            if (event == null) {
+                log.warn("⚠️ 缓存击穿，查询 MySQL, EventID: {}", id);
+                event = eventService.getById(id);
+                if (event == null || event.getStatus() == 4) {
+                    return Result.error("该演出不存在或已下架");
+                }
+
+                // 查票档和艺人信息
+                List<TicketCategory> tickets = ticketService.list(
+                        new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, id)
+                );
+                event.setTickets(tickets);
+
+                List<java.util.Map<String, Object>> artists = artistMapper.selectArtistMapsByEventId(id);
+                event.setArtists(artists);
+
+                // 回填缓存
+                String finalJson = objectMapper.writeValueAsString(event);
+                redisTemplate.opsForValue().set(cacheKey, finalJson, 30, TimeUnit.MINUTES);
+                localCache.put(cacheKey, finalJson);
             }
 
-            // 查票档信息
-            List<TicketCategory> tickets = ticketService.list(
-                    new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, id)
-            );
-            event.setTickets(tickets);
-
-            // 查参演艺人信息
-            List<java.util.Map<String, Object>> artists = artistMapper.selectArtistMapsByEventId(id);
-            event.setArtists(artists);
-
             // ==========================================
-            // 将查询结果回填到 Redis 和本地缓存
+            // 🚨 终极绝招：缓存外挂！动态注入实时的浏览量与想看数据
             // ==========================================
-            String finalJson = objectMapper.writeValueAsString(event);
+            String viewsKey = "event:views:" + id;
+            String wantKey = "event:want:" + id;
 
-            // Redis 存 30 分钟 (可设置随机过期时间防止雪崩)
-            redisTemplate.opsForValue().set(cacheKey, finalJson, 30, TimeUnit.MINUTES);
-            // Caffeine 存 5 秒
-            localCache.put(cacheKey, finalJson);
+// 1. 浏览量实时统计：同一次页面加载只统计一次
+            Long currentViews;
+
+            if (StringUtils.hasText(viewToken)) {
+                String viewDedupKey = "event:view:dedup:" + id + ":" + viewToken;
+
+                Boolean firstView = redisTemplate.opsForValue()
+                        .setIfAbsent(viewDedupKey, "1", 10, TimeUnit.MINUTES);
+
+                if (Boolean.TRUE.equals(firstView)) {
+                    currentViews = redisTemplate.opsForValue().increment(viewsKey);
+                } else {
+                    String viewText = redisTemplate.opsForValue().get(viewsKey);
+                    currentViews = StringUtils.hasText(viewText) ? Long.valueOf(viewText) : 0L;
+                }
+            } else {
+                // 兼容旧请求：没有 viewToken 时仍然统计
+                currentViews = redisTemplate.opsForValue().increment(viewsKey);
+            }
+
+            event.setPageViews((event.getPageViews() != null ? event.getPageViews() : 0) + currentViews.intValue());
+            // 2. 拉取实时想看总数
+            Long wantCount = redisTemplate.opsForSet().size(wantKey);
+            if (wantCount != null && wantCount > 0) {
+                event.setWantCount(wantCount.intValue());
+            }
+
+            // 3. 判断当前登录用户是否已点过“想看”
+            event.setHasWanted(false);
+            try {
+                String userIdStr = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName();
+                if (StringUtils.hasText(userIdStr) && !"anonymousUser".equals(userIdStr)) {
+                    Boolean isMember = redisTemplate.opsForSet().isMember(wantKey, userIdStr);
+                    event.setHasWanted(Boolean.TRUE.equals(isMember));
+                }
+            } catch (Exception e) {
+                // 游客访问，不抛异常，hasWanted 保持为 false
+            }
 
             return Result.success(event);
 
@@ -302,6 +342,40 @@ public class PublicEventController {
         result.put("pages", pageData.getPages());
 
         return Result.success(result);
+    }
+
+    /**
+     * 切换“想看”状态接口
+     */
+    @PostMapping("/want/{id}")
+    public Result<Boolean> toggleWant(@PathVariable Long id) {
+        try {
+            // 必须登录才能点想看
+            String userIdStr = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName();
+            if (!StringUtils.hasText(userIdStr) || "anonymousUser".equals(userIdStr)) {
+                Result<Boolean> res = Result.error("请先登录");
+                res.setCode(401);
+                return res;
+            }
+
+            String wantKey = "event:want:" + id;
+
+            // 判断当前用户是否在 Set 中
+            Boolean isMember = redisTemplate.opsForSet().isMember(wantKey, userIdStr);
+
+            if (Boolean.TRUE.equals(isMember)) {
+                // 如果已经在里面，说明是取消想看 -> 从 Set 中移除
+                redisTemplate.opsForSet().remove(wantKey, userIdStr);
+                return Result.success("操作成功", false); // 返回 false 表示当前未想看
+            } else {
+                // 如果不在里面，说明是点击想看 -> 加入 Set
+                redisTemplate.opsForSet().add(wantKey, userIdStr);
+                return Result.success("操作成功", true); // 返回 true 表示当前已想看
+            }
+        } catch (Exception e) {
+            log.error("切换想看状态异常", e);
+            return Result.error("系统异常");
+        }
     }
 
 }

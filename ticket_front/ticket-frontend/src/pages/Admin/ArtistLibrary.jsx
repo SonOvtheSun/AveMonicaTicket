@@ -29,24 +29,40 @@ const ArtistLibrary = () => {
 
     // 🚨 权限状态管理
     const [userRole, setUserRole] = useState(6);
-    const [permissions, setPermissions] = useState([]); // 存储用户的细粒度权限标识
+    const [userId, setUserId] = useState(null);
+    const [permissions, setPermissions] = useState([]);
 
     // ==========================================
     // 🚨 核心权限计算逻辑
     // ==========================================
     const isSuperAdmin = userRole === 1;
-    // 1. 管理权限：拥有最高操作权
-    const canManage = isSuperAdmin;
-    // 2. 新增权限：能看到新增按钮（manage向下兼容add）
-    const canAdd = canManage || permissions.includes('artist:add') || permissions.includes('artist:manage');
-    // 3. 浏览权限：能看到列表（manage向下兼容view）
-    const canView = canManage || permissions.includes('artist:view') || permissions.includes('artist:manage');
-    // 4. 基础编辑权限：提交者通常可以修改和撤销自己的草稿
-    const canEditBase = canManage || permissions.includes('artist:manage');
+
+    const hasPerm = (perm) => permissions.includes(perm);
+
+// 艺人管理员：可以管理所有艺人
+    const canManageArtist = isSuperAdmin || hasPerm('artist:manage');
+
+// 艺人查看：artist:manage 包含 artist:view 的业务含义
+    const canViewArtist = canManageArtist || hasPerm('artist:view') || hasPerm('event:publish');
+
+// 新增艺人：艺人管理员、演出管理方、超管都可以
+    const canAddArtist = canManageArtist || hasPerm('event:publish');
+
+// 演出管理方：只能操作自己提交的艺人
+    const canSubmitArtist = hasPerm('event:publish');
+
+    const isOwnArtist = (record) => {
+        if (!record || !userId) return false;
+        return Number(record.createBy) === Number(userId);
+    };
+
+    const canOperateOwnArtist = (record) => {
+        return canManageArtist || (canSubmitArtist && isOwnArtist(record));
+    };
 
     const fetchData = async (page = pagination.current, keyword = searchText) => {
         // 如果没有浏览权限，直接不发请求
-        if (!canView) return;
+        if (!canViewArtist) return;
 
         setLoading(true);
         try {
@@ -67,19 +83,20 @@ const ArtistLibrary = () => {
     useEffect(() => {
         axios.get('/api/user/info').then(res => {
             if (res.data.code === 200) {
-                setUserRole(res.data.data.role || 6);
-                // 🚨 假设后端返回了 permissions 数组，例如 ['artist:add', 'artist:view']
-                setPermissions(res.data.data.permissions || []);
+                const user = res.data.data || {};
+                setUserRole(user.role || 6);
+                setUserId(user.id || user.userId || null);
+                setPermissions(user.permissions || []);
             }
         });
     }, []);
 
     // 权限获取到之后再拉取数据
     useEffect(() => {
-        if (canView) {
+        if (canViewArtist) {
             fetchData();
         }
-    }, [canView]);
+    }, [canViewArtist]);
 
     const handleConfirmEditReject = async (id) => {
         try {
@@ -256,52 +273,96 @@ const ArtistLibrary = () => {
                 const isEditPending = record.editAuditStatus === 0;
                 const hasPendingAudit = isNewPending || isEditPending;
 
-                // 🚨 如果是超管或有 manage 权限，无视审核状态皆可编辑；如果是普通运营，遇到待审核禁用编辑
-                const canClickEdit = canManage || (canEditBase && !hasPendingAudit);
+                const canOperateThis = canOperateOwnArtist(record);
+                const canClickEdit = canManageArtist || (canOperateThis && !hasPendingAudit);
 
                 return (
                     <Space>
-                        {/* 确认驳回：拥有基础编辑权限即可 */}
-                        {canEditBase && record.editAuditStatus === 2 && (
-                            <Popconfirm title="确认修改审核被驳回？" onConfirm={() => handleConfirmEditReject(record.id)} okText="确认" cancelText="取消">
-                                <Button size="small" style={{ color: '#52c41a', borderColor: '#52c41a' }}>确认</Button>
+                        {/* 修改被驳回后的确认：管理员可确认所有；提交人只能确认自己的 */}
+                        {canOperateThis && record.editAuditStatus === 2 && (
+                            <Popconfirm
+                                title="确认修改审核被驳回？"
+                                onConfirm={() => handleConfirmEditReject(record.id)}
+                                okText="确认"
+                                cancelText="取消"
+                            >
+                                <Button size="small" style={{ color: '#52c41a', borderColor: '#52c41a' }}>
+                                    确认
+                                </Button>
                             </Popconfirm>
                         )}
 
-                        {/* 编辑 */}
-                        {canEditBase && (
-                            <Button type="primary" size="small" icon={<EditOutlined />} disabled={!canClickEdit} onClick={() => openEditModal(record)}>
+                        {/* 编辑：管理员可编辑所有；演出管理方只能编辑自己提交且非待审核中的 */}
+                        {canOperateThis && (
+                            <Button
+                                type="primary"
+                                size="small"
+                                icon={<EditOutlined />}
+                                disabled={!canClickEdit}
+                                onClick={() => openEditModal(record)}
+                            >
                                 编辑
                             </Button>
                         )}
 
-                        {/* 撤销审核：通常是提交者的操作，manage 和超管可以直接去审核大厅，无需撤销 */}
-                        {canEditBase && !canManage && hasPendingAudit && (
-                            <Popconfirm title="确定撤销审核申请？" onConfirm={() => handleRevokeAudit(record.id)} okButtonProps={{ danger: true }}>
-                                <Button danger size="small">撤销审核</Button>
+                        {/* 撤销审核：管理员和提交人都能撤销；event:publish 只能撤销自己的，后端也会二次校验 */}
+                        {canOperateThis && hasPendingAudit && (
+                            <Popconfirm
+                                title="确定撤销审核申请？"
+                                description="撤销后可重新编辑并提交审核。"
+                                onConfirm={() => handleRevokeAudit(record.id)}
+                                okText="确定撤销"
+                                cancelText="取消"
+                                okButtonProps={{ danger: true }}
+                            >
+                                <Button danger size="small">
+                                    撤销审核
+                                </Button>
                             </Popconfirm>
                         )}
 
-                        {/* ================= 下方高危操作，仅限 manage 权限 ================= */}
-                        {(canManage || permissions.includes("audit:manage") || permissions.includes("artist:manage")) && record.auditStatus === 1 && (
-                            <Popconfirm title="确定要下架该艺人吗？" onConfirm={() => handleStatusChange(record.id, 0)} okButtonProps={{ danger: true }}>
-                                <Button danger size="small" icon={<StopOutlined />}>下架</Button>
+                        {/* 下架 / 恢复 / 删除：只给 artist:manage 或超管 */}
+                        {(canManageArtist || permissions.includes("artist:view")) && record.auditStatus === 1 && (
+                            <Popconfirm
+                                title="确定要下架该艺人吗？"
+                                onConfirm={() => handleStatusChange(record.id, 0)}
+                                okButtonProps={{ danger: true }}
+                            >
+                                <Button danger size="small" icon={<StopOutlined />}>
+                                    下架
+                                </Button>
                             </Popconfirm>
                         )}
 
-                        {canManage && record.auditStatus === 2 && (
-                            <Popconfirm title="确定恢复该艺人？" onConfirm={() => handleStatusChange(record.id, 1)}>
-                                <Button size="small" style={{ color: '#52c41a', borderColor: '#52c41a' }} icon={<CheckCircleOutlined />}>恢复</Button>
+                        {canManageArtist && record.auditStatus === 2 && (
+                            <Popconfirm
+                                title="确定恢复该艺人？"
+                                onConfirm={() => handleStatusChange(record.id, 1)}
+                            >
+                                <Button
+                                    size="small"
+                                    style={{ color: '#52c41a', borderColor: '#52c41a' }}
+                                    icon={<CheckCircleOutlined />}
+                                >
+                                    恢复
+                                </Button>
                             </Popconfirm>
                         )}
 
-                        {canManage || permissions.includes("artist:manage") && (
-                            <Popconfirm title="确定要彻底删除吗？" description="警告：删除后数据不可恢复！" onConfirm={() => handleDelete(record.id)} okButtonProps={{ danger: true }}>
-                                <Button type="primary" danger size="small" icon={<DeleteOutlined />}>删除</Button>
+                        {canManageArtist && (
+                            <Popconfirm
+                                title="确定要彻底删除吗？"
+                                description="警告：删除后数据不可恢复！"
+                                onConfirm={() => handleDelete(record.id)}
+                                okButtonProps={{ danger: true }}
+                            >
+                                <Button type="primary" danger size="small" icon={<DeleteOutlined />}>
+                                    删除
+                                </Button>
                             </Popconfirm>
                         )}
                     </Space>
-                )
+                );
             }
         }
     ];
@@ -315,7 +376,7 @@ const ArtistLibrary = () => {
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', gap: 10 }}>
                     {/* 🚨 如果没有 view 权限，连搜索框都不需要看了 */}
-                    {canView && (
+                    {canViewArtist && (
                         <>
                             <Input
                                 placeholder="输入姓名、地区或风格进行搜索"
@@ -332,15 +393,20 @@ const ArtistLibrary = () => {
                 </div>
 
                 {/* 🚨 仅拥有 add 或 manage 权限的人可见新增按钮 */}
-                {canAdd && (
-                    <Button type="primary" icon={<PlusOutlined />} style={{ backgroundColor: '#FF8899', borderColor: '#FF8899' }} onClick={openAddModal}>
+                {canAddArtist && (
+                    <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        style={{ backgroundColor: '#FF8899', borderColor: '#FF8899' }}
+                        onClick={openAddModal}
+                    >
                         新增音乐人
                     </Button>
                 )}
             </div>
 
             {/* 🚨 仅拥有 view 权限的人可见列表 */}
-            {canView ? (
+            {canViewArtist ? (
                 <Table
                     columns={columns}
                     dataSource={data}

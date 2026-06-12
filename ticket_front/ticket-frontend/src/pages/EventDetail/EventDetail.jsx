@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Spin, message, Row, Col, Avatar, Button, InputNumber, Modal, Form, Input, Select, Alert } from 'antd';
-import { CalendarOutlined, EnvironmentOutlined, UserOutlined, ArrowLeftOutlined, TagsOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { CalendarOutlined, EnvironmentOutlined, UserOutlined, ArrowLeftOutlined, TagsOutlined, ClockCircleOutlined, HeartOutlined, HeartFilled, EyeOutlined } from '@ant-design/icons';
 import axios from '../../utils/request';
 import './EventDetail.css';
 import dayjs from 'dayjs';
@@ -49,6 +49,59 @@ const EventDetail = () => {
 
     // 🚨 新增：防止轮询重绘覆盖用户操作的防御标记
     const hasAutoFilled = useRef(false);
+
+    // 🚨 新增：想看与浏览量状态
+    const [wantCount, setWantCount] = useState(0);
+    const [isWanted, setIsWanted] = useState(false);
+    const [pageViews, setPageViews] = useState(0);
+
+    const eventViewTokenMap = new Map();
+
+    const getEventViewToken = (eventId) => {
+        if (!eventViewTokenMap.has(eventId)) {
+            const token = window.crypto?.randomUUID
+                ? window.crypto.randomUUID()
+                : `${Date.now()}-${Math.random()}`;
+            eventViewTokenMap.set(eventId, token);
+        }
+        return eventViewTokenMap.get(eventId);
+    };
+
+    // 🚨 新增：点击“想看”按钮的交互逻辑
+    const handleToggleWant = async () => {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            message.info('请先登录后再操作');
+            return navigate('/auth');
+        }
+
+        try {
+            // 发送请求到后端切换状态
+            const res = await axios.post('/api/favorite/toggle', { targetId: id, type: 1 });
+            if (res.data.code === 200) {
+                const newState = !isWanted;
+                setIsWanted(newState);
+                // 乐观更新 UI 数量
+                setWantCount(prev => newState ? prev + 1 : prev - 1);
+                message.success(newState ? '已标记为想看' : '已取消想看');
+            } else {
+                message.error(res.data.message || '操作失败');
+            }
+        } catch (err) {
+            message.error('网络请求异常');
+        }
+    };
+
+    const formatStatNumber = (num) => {
+        const value = Number(num || 0);
+        return value.toLocaleString('zh-CN');
+    };
+
+    const getWantSubtitle = () => {
+        if (wantCount >= 1000) return '人气飙升中';
+        if (wantCount > 0) return '正在被更多同好关注';
+        return '成为第一个想看的人';
+    };
 
 
     // 🚨 自动填充魔法：当演出正式开售(saleAvailable变true)且有云端预约记录时，自动锁定票档和数量
@@ -108,9 +161,19 @@ const EventDetail = () => {
 
         const fetchDetail = async () => {
             try {
-                const res = await axios.get(`/api/event/detail/${id}`);
+                const res = await axios.get(`/api/event/detail/${id}`, {
+                    params: {
+                        viewToken: getEventViewToken(id)
+                    }
+                });
                 if (res.data.code === 200) {
                     setEvent(res.data.data);
+
+                    // 🚨 新增：同步后端返回的统计数据（后端需在 detail 接口中补充这三个字段返回）
+                    setWantCount(res.data.data.wantCount || 0);
+                    setIsWanted(res.data.data.hasWanted || false);
+                    setPageViews(res.data.data.pageViews || 0);
+
                     const firstAvailable = sortTicketsByPriceAsc(res.data.data.tickets || [])
                         .find(t => t.remainingStock > 0);
                     if (firstAvailable) setSelectedTicket(firstAvailable);
@@ -363,6 +426,11 @@ const EventDetail = () => {
 
                     <div className="info-col">
                         <h1 className="event-title-large">{event.title}</h1>
+                        <div className="event-title-views">
+                            <EyeOutlined />
+                            <span>{formatStatNumber(pageViews)} 次浏览</span>
+                        </div>
+
 
                         <div className="info-row">
                             <CalendarOutlined className="info-icon" />
@@ -386,6 +454,32 @@ const EventDetail = () => {
                         <div className="info-row">
                             <EnvironmentOutlined className="info-icon" />
                             <span>详细地址：{event.address || '地址待定'}</span>
+                        </div>
+
+                        {/* 想看模块 */}
+                        <div className="event-want-card">
+                            <div className="event-want-content">
+                                <div className="event-want-brand">
+                                    <span className="event-want-brand-text">AM想看</span>
+                                    <HeartFilled className="event-want-brand-heart" />
+                                </div>
+
+                                <div className="event-want-main">
+                                    <span className="event-want-count">{formatStatNumber(wantCount)}</span>
+                                    <span className="event-want-unit">人想看</span>
+                                </div>
+
+                                <div className="event-want-subtitle">{getWantSubtitle()}</div>
+
+                            </div>
+
+                            <Button
+                                className={`event-want-btn ${isWanted ? 'active' : ''}`}
+                                onClick={handleToggleWant}
+                            >
+                                {isWanted ? <HeartFilled /> : <HeartOutlined />}
+                                <span>{isWanted ? '已想看' : '想看'}</span>
+                            </Button>
                         </div>
 
                         {event.status === 1 && !saleAvailable && (

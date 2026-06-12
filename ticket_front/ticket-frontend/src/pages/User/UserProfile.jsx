@@ -20,7 +20,7 @@ import {
 } from 'antd';
 import { UserOutlined, SafetyCertificateOutlined, SettingOutlined, TeamOutlined, PlusOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import axios from 'axios';
+import axios from '../../utils/request';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
 import './UserProfile.css';
 import pcasData from '../../assets/pcas.json';
@@ -57,7 +57,7 @@ const UserProfile = () => {
             name: province,
             children: Object.entries(cities).map(([city, districts]) => ({
                 name: city,
-                children: Object.entries(districts).map(district => ({
+                children: Object.entries(districts).map(([district]) => ({
                     name: district
                 }))
             }))
@@ -105,13 +105,12 @@ const UserProfile = () => {
         const token = localStorage.getItem('token');
         if (!token) return;
 
-        const headers = { Authorization: `Bearer ${token}` };
         try {
             // 🚨 将用户基本信息接口一并加入请求
             const [specRes, addrRes, infoRes] = await Promise.all([
-                axios.get('/api/user/spectator/list', { headers }),
-                axios.get('/api/user/address/list', { headers }),
-                axios.get('/api/user/profile/info', { headers })
+                axios.get('/api/user/spectator/list'),
+                axios.get('/api/user/address/list'),
+                axios.get('/api/user/profile/info')
             ]);
 
             if (specRes.data.code === 200) setSpectators(specRes.data.data);
@@ -149,7 +148,6 @@ const UserProfile = () => {
     // 🚨 替换为真实 axios 保存逻辑
     const handleSaveBasicInfo = async (values) => {
         try {
-            const token = localStorage.getItem('token');
             const payload = {
                 username: values.username, // 🚨 使用 username
                 gender: parseInt(values.gender),
@@ -158,9 +156,7 @@ const UserProfile = () => {
                 bio: values.bio
             };
 
-            const res = await axios.post('/api/user/profile/update', payload, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const res = await axios.post('/api/user/profile/update', payload);
 
             if (res.data.code === 200) {
                 message.success('基本信息保存成功');
@@ -177,14 +173,11 @@ const UserProfile = () => {
     const handleRealNameSubmit = async () => {
         try {
             const values = await authForm.validateFields();
-            const token = localStorage.getItem('token');
 
             const res = await axios.post('/api/user/profile/real-name-auth', {
                 realName: values.realName,
                 idCard: values.idCard,
                 idType: 1
-            }, {
-                headers: { Authorization: `Bearer ${token}` }
             });
 
             if (res.data.code === 200) {
@@ -222,9 +215,7 @@ const UserProfile = () => {
             const url = editingSpectatorId ? '/api/user/spectator/update' : '/api/user/spectator/add';
             const payload = { ...values, id: editingSpectatorId };
 
-            const res = await axios.post(url, payload, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-            });
+            const res = await axios.post(url, payload);
 
             if (res.data.code === 200) {
                 message.success(editingSpectatorId ? '修改成功！' : '添加成功！');
@@ -263,9 +254,7 @@ const UserProfile = () => {
 
     const handleDeleteSpectator = async (id) => {
         try {
-            const res = await axios.post(`/api/user/spectator/delete/${id}`, {}, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-            });
+            const res = await axios.post(`/api/user/spectator/delete/${id}`, {});
             if (res.data.code === 200) {
                 message.success('删除成功');
                 fetchData();
@@ -296,9 +285,7 @@ const UserProfile = () => {
 
             const url = editingAddressId ? '/api/user/address/update' : '/api/user/address/add';
 
-            const res = await axios.post(url, payload, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-            });
+            const res = await axios.post(url, payload);
 
             if (res.data.code === 200) {
                 message.success(editingAddressId ? '修改成功！' : '添加成功！');
@@ -314,9 +301,7 @@ const UserProfile = () => {
 
     const handleDeleteAddress = async (id) => {
         try {
-            const res = await axios.post(`/api/user/address/delete/${id}`, {}, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-            });
+            const res = await axios.post(`/api/user/address/delete/${id}`, {});
             if (res.data.code === 200) {
                 message.success('删除成功');
                 fetchData();
@@ -365,9 +350,7 @@ const UserProfile = () => {
             if (values.newPassword !== values.confirmPassword) {
                 return message.error('两次输入的新密码不一致');
             }
-            const res = await axios.post('/api/user/profile/update-password', values, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-            });
+            const res = await axios.post('/api/user/profile/update-password', values);
             if (res.data.code === 200) {
                 message.success('密码修改成功！');
                 setPwdModalVisible(false);
@@ -382,9 +365,7 @@ const UserProfile = () => {
     const handleUpdateEmail = async () => {
         try {
             const values = await emailForm.validateFields();
-            const res = await axios.post('/api/user/profile/update-email', values, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-            });
+            const res = await axios.post('/api/user/profile/update-email', values);
             if (res.data.code === 200) {
                 message.success('邮箱绑定成功！');
                 setEmailModalVisible(false);
@@ -400,9 +381,7 @@ const UserProfile = () => {
     const handleUpdatePhone = async () => {
         try {
             const values = await phoneForm.validateFields();
-            const res = await axios.post('/api/user/profile/update-phone', values, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-            });
+            const res = await axios.post('/api/user/profile/update-phone', values);
             if (res.data.code === 200) {
                 message.success('手机号更换成功！');
                 setPhoneModalVisible(false);

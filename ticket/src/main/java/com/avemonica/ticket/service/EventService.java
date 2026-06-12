@@ -10,6 +10,10 @@ import com.baomidou.mybatisplus.extension.service.IService;
  */
 public interface EventService extends IService<Event> {
 
+    boolean toggleWant(Long eventId, Long userId);
+
+    Event getEventDetailWithRealTimeStats(Long eventId, Long currentUserId);
+
     /**
      * 发布新演出（级联保存演出基础信息、多档票价、多参演艺人）
      * * @param dto 包含演出、票档、艺人ID列表的复合 DTO

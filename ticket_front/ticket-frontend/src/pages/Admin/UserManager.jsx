@@ -1,12 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Card, Tag, Select, message, Avatar, Space } from 'antd';
-import { User, ShieldAlert } from 'lucide-react'; // 修复了之前的图标报错
+import { Table, Card, Tag, Select, message, Avatar, Space, Button, Popconfirm } from 'antd';
+import { User, ShieldAlert, Trash2 } from 'lucide-react';
 import axios from 'axios';
 
 const UserManager = () => {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(false);
     const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
+
+    const handleDeleteUser = async (userId) => {
+        try {
+            const res = await axios.delete(`/api/admin/user/${userId}`);
+
+            if (res.data.code === 200) {
+                message.success(res.data.message || '账户已注销');
+
+                if (users.length === 1 && pagination.current > 1) {
+                    fetchUsers(pagination.current - 1, pagination.pageSize);
+                } else {
+                    fetchUsers(pagination.current, pagination.pageSize);
+                }
+            } else {
+                message.error(res.data.message || '注销失败');
+            }
+        } catch (error) {
+            message.error(error.response?.data?.message || '注销账户失败');
+        }
+    };
 
     const fetchUsers = async (page = 1, size = 10) => {
         setLoading(true);
@@ -74,6 +94,7 @@ const UserManager = () => {
         {
             title: '用户信息',
             key: 'userInfo',
+            width: 200,
             render: (_, record) => (
                 <Space>
                     <Avatar src={record.avatar} icon={<User />} />
@@ -88,11 +109,13 @@ const UserManager = () => {
             title: '绑定手机号',
             dataIndex: 'phone',
             key: 'phone',
+            width: 160,
             render: (text) => <span style={{ fontFamily: 'monospace' }}>{text || '未绑定'}</span>
         },
         {
             title: '当前角色状态',
             key: 'currentRole',
+            width: 150,
             render: (_, record) => {
                 // 如果数据库没设默认值或者为空，默认显示为 6(普通游客)
                 const currentRoleConfig = roleOptionsR.find(r => r.value === (record.role || 6)) || roleOptions[4];
@@ -100,13 +123,14 @@ const UserManager = () => {
             }
         },
         {
-            title: '权限分配操作',
-            key: 'action',
+            title: '权限分配',
+            key: 'roleAction',
+            width: 200,
             render: (_, record) => (
                 record.id === 1 ? (
                     <span style={{ color: '#ff4d4f', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <ShieldAlert size={14}/> 系统内置超管不可修改
-                    </span>
+                <ShieldAlert size={14}/> 系统内置超管不可修改
+            </span>
                 ) : (
                     <Select
                         value={record.role || 6}
@@ -115,6 +139,35 @@ const UserManager = () => {
                         options={roleOptions}
                         size="small"
                     />
+                )
+            )
+        },
+        {
+            title: '账户操作',
+            key: 'accountAction',
+            width: 140,
+            align: 'right',
+            render: (_, record) => (
+                record.id === 1 ? (
+                    <span style={{ color: '#999', fontSize: 12 }}>不可注销</span>
+                ) : (
+                    <Popconfirm
+                        title="确定注销该账户？"
+                        description="注销后该用户将无法继续使用当前账户。此操作不可逆。"
+                        okText="确认注销"
+                        cancelText="取消"
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() => handleDeleteUser(record.id)}
+                    >
+                        <Button
+                            danger
+                            size="small"
+                            type="default"
+                            icon={<Trash2 size={14} />}
+                        >
+                            注销
+                        </Button>
+                    </Popconfirm>
                 )
             )
         }

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ConfigProvider, Empty, Pagination, Spin, Tabs } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../../utils/request';
 import dayjs from 'dayjs';
 import locale from 'antd/locale/zh_CN';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';

@@ -113,6 +113,13 @@ public class Event {
 
     private LocalDateTime auditSubmitTime;
 
+    private Integer pageViews;
+    private Integer wantCount;
+
+    // 🚨 补充一个标识字段：当前登录用户是否已点“想看” (不映射到数据库表中)
+    @TableField(exist = false)
+    private Boolean hasWanted;
+
 
     // ==========================================
     // 💡 状态字典常量定义，拒绝魔法数字

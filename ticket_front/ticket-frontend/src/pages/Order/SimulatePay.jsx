@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Button, message, Spin } from 'antd';
 import { AlipayCircleOutlined, SafetyCertificateFilled } from '@ant-design/icons';
-import axios from 'axios';
+import axios from '../../utils/request';
 
 const SimulatePay = () => {
     const location = useLocation();
@@ -19,11 +19,8 @@ const SimulatePay = () => {
     const handleConfirmPay = async () => {
         setPaying(true);
         try {
-            const token = localStorage.getItem('token');
             // 调用后端的支付接口，将订单状态从 1 改为 3
-            const res = await axios.post('/api/order/pay', { orderId }, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const res = await axios.post('/api/order/pay', { orderId });
 
             if (res.data.code === 200) {
                 message.success('支付成功！');

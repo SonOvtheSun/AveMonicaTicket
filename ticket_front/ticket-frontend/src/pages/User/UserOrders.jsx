@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, Tag, Button, Modal, Popconfirm, message, Spin, QRCode, Empty, Divider, Space, Typography } from 'antd';
 import { DeleteOutlined, CustomerServiceOutlined, PayCircleOutlined, RightOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import axios from '../../utils/request';
 import PublicHeader from '../../components/PublicHeader/PublicHeader'; // 替换为你的实际路径
 import { useNavigate } from 'react-router-dom';
 import './UserOrders.css';
@@ -64,9 +64,7 @@ const UserOrders = () => {
             }
 
             // 订单分类由前端根据票的实时检票状态动态计算，避免“待检票”被后端订单状态误分到“已完成”
-            const res = await axios.get('/api/order/list?status=all', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const res = await axios.get('/api/order/list?status=all');
 
             if (res.data.code === 200) {
                 setOrders(res.data.data || []);
@@ -127,9 +125,7 @@ const UserOrders = () => {
                 ? `/api/order/cancel/${order.id}`
                 : `/api/order/delete/${order.id}`;
 
-            const res = await axios.post(endpoint, {}, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const res = await axios.post(endpoint, {});
 
             if (res.data.code === 200) {
                 message.success(order.status === 1 ? '订单已成功取消，购票资格已释放' : '订单已删除');

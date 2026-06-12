@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import locale from 'antd/locale/zh_CN';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
 import './ArtistDetail.css';
+import {CheckCircleOutlined, HeartOutlined} from "@ant-design/icons";
 
 const EVENT_PAGE_SIZE = 10;
 
@@ -19,6 +20,28 @@ const ArtistDetail = () => {
     const [eventsLoadingMore, setEventsLoadingMore] = useState(false);
     const [eventPage, setEventPage] = useState(1);
     const [hasMoreEvents, setHasMoreEvents] = useState(false);
+
+    // 在状态定义区加入
+    const [isFavorited, setIsFavorited] = useState(false);
+
+    // 🚨 关注艺人交互逻辑
+    const handleToggleFavorite = async () => {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            message.info('请先登录后再操作');
+            return navigate('/auth');
+        }
+        try {
+            // 假设后端接口为 /api/favorite/toggle，type=2 代表艺人
+            const res = await axios.post('/api/favorite/toggle', { targetId: id, type: 2 });
+            if (res.data.code === 200) {
+                setIsFavorited(!isFavorited);
+                message.success(isFavorited ? '已取消关注' : '已关注该音乐人');
+            }
+        } catch (err) {
+            message.error('操作失败');
+        }
+    };
 
     const fetchArtistEvents = async (page = 1, append = false) => {
         if (append) {
@@ -70,6 +93,7 @@ const ArtistDetail = () => {
                 const artistRes = await axios.get(`/api/artist/${id}`);
                 if (artistRes.data.code === 200) {
                     setArtist(artistRes.data.data);
+                    setIsFavorited(artistRes.data.data.isFavorited || false); // 🚨 初始化关注状态
                     document.title = `${artistRes.data.data.name} - Ave Monica`;
                 } else {
                     message.error(artistRes.data.message);
@@ -228,24 +252,45 @@ const ArtistDetail = () => {
                 <PublicHeader />
 
                 <div className="ad-container">
-                    {/* 1. 秀动经典的左暗右亮拼接 Banner */}
-                    <div className="ad-banner">
-                        <div className="ad-banner-left">
-                            <div className="ad-avatar-glow">
-                                <img src={artist.avatarUrl || 'https://via.placeholder.com/200'} alt={artist.name} className="ad-avatar" />
+                    {/* 1. 音乐人头图：现代活力风格 */}
+                    <div className="ad-hero-card">
+                        <div className="ad-hero-bg-avatar" style={{ backgroundImage: `url(${artist.avatarUrl || 'https://via.placeholder.com/600'})` }} />
+                        <div className="ad-hero-orb ad-hero-orb-one" />
+                        <div className="ad-hero-orb ad-hero-orb-two" />
+
+                        <div className="ad-hero-avatar-wrap">
+                            <div className="ad-hero-avatar-ring">
+                                <img
+                                    src={artist.avatarUrl || 'https://via.placeholder.com/200'}
+                                    alt={artist.name}
+                                    className="ad-avatar"
+                                />
                             </div>
                         </div>
-                        <div className="ad-banner-right">
-                            <h1 className="ad-artist-name">{artist.name}</h1>
-                            <div className="ad-artist-meta-list">
-                                <div className="ad-meta-item">
-                                    <span className="ad-meta-label">地区：</span>
-                                    <span className="ad-meta-value">{artist.region || '未知'}</span>
-                                </div>
-                                <div className="ad-meta-item">
-                                    <span className="ad-meta-label">风格：</span>
-                                    <span className="ad-meta-value">{artist.style || '未定'}</span>
-                                </div>
+
+                        <div className="ad-hero-info">
+
+                            <div className="ad-hero-title-row">
+                                <h1 className="ad-artist-name">{artist.name}</h1>
+                                <Button
+                                    className={`ad-follow-btn ${isFavorited ? 'followed' : ''}`}
+                                    shape="round"
+                                    icon={isFavorited ? <CheckCircleOutlined /> : <HeartOutlined />}
+                                    onClick={handleToggleFavorite}
+                                >
+                                    {isFavorited ? '已关注' : '关注'}
+                                </Button>
+                            </div>
+
+                            <div className="ad-hero-meta">
+                                <span className="ad-hero-chip">
+                                    <span className="ad-hero-chip-label">地区</span>
+                                    {artist.region || '未知'}
+                                </span>
+                                <span className="ad-hero-chip">
+                                    <span className="ad-hero-chip-label">风格</span>
+                                    {artist.style || '未定'}
+                                </span>
                             </div>
                         </div>
                     </div>

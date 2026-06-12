@@ -48,4 +48,22 @@ public class AdminUserController{
         return Result.success("角色权限更新成功");
     }
 
+    @DeleteMapping("/{id}")
+    @PreAuthorize("authentication.name == '1'")
+    public Result<String> deleteUser(@PathVariable Long id) {
+        User user = userService.getById(id);
+        if (user == null) {
+            return Result.error("用户不存在");
+        }
+
+        // 防止注销系统最高管理员
+        if (user.getId() == 1L) {
+            return Result.error("系统最高管理员账户不可注销");
+        }
+
+        userService.removeById(id);
+
+        return Result.success("账户已注销");
+    }
+
 }

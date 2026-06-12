@@ -50,7 +50,8 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         '电子',
         '金属',
         '雷鬼',
-        '核'
+        '核',
+        '其他'
     ].map(style => ({ value: style, label: style }));
 
     const styleOptions = MUSIC_STYLE_OPTIONS;

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { User, Lock, ArrowRight, Smartphone, ShieldCheck, Smile, ArrowLeft } from 'lucide-react';
 import { Turnstile } from '@marsidev/react-turnstile'; // 引入验证组件
 import './Auth.css';
-import axios from 'axios';
+import axios from '../../utils/request';
 import { useNavigate } from 'react-router-dom';
 import { debounce } from 'lodash';
 

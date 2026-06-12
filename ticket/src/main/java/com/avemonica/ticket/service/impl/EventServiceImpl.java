@@ -11,21 +11,19 @@ import com.avemonica.ticket.mapper.UserMapper;
 import com.avemonica.ticket.service.EventArtistService;
 import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.UserService;
-import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -50,6 +48,69 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
     @Autowired
     private ArtistMapper artistMapper; // 注入艺人的 Mapper
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
+    // 记录某演出浏览量的 Key (String 类型: event:views:1)
+    public static final String EVENT_VIEWS_KEY = "event:views:";
+
+    // 记录某演出想看用户的 Key (Set 类型: event:want:1，内部存 userId)
+    public static final String EVENT_WANT_KEY = "event:want:";
+
+    /**
+     * 1. 切换“想看”状态
+     */
+    @Override
+    public boolean toggleWant(Long eventId, Long userId) {
+        String wantKey = EVENT_WANT_KEY + eventId;
+
+        // 判断当前用户是否在 Set 中
+        Boolean isMember = redisTemplate.opsForSet().isMember(wantKey, userId.toString());
+
+        if (Boolean.TRUE.equals(isMember)) {
+            // 如果已经在里面，说明是取消想看 -> 从 Set 中移除
+            redisTemplate.opsForSet().remove(wantKey, userId.toString());
+            return false; // 返回当前状态：未想看
+        } else {
+            // 如果不在里面，说明是点击想看 -> 加入 Set
+            redisTemplate.opsForSet().add(wantKey, userId.toString());
+            return true; // 返回当前状态：已想看
+        }
+    }
+
+    /**
+     * 2. 获取详情时：注入实时 Redis 数据并自增浏览量
+     */
+    @Override
+    public Event getEventDetailWithRealTimeStats(Long eventId, Long currentUserId) {
+        // 先从数据库或本地缓存查出基础 Event 信息
+        Event event = this.getById(eventId);
+        if (event == null) return null;
+
+        String viewsKey = EVENT_VIEWS_KEY + eventId;
+        String wantKey = EVENT_WANT_KEY + eventId;
+
+        // 🚨 核心1：每次被访问，Redis 浏览量 +1
+        Long currentViews = redisTemplate.opsForValue().increment(viewsKey);
+        event.setPageViews(event.getPageViews() + currentViews.intValue()); // DB 基础值 + Redis 新增值
+
+        // 🚨 核心2：获取实时想看总人数
+        Long wantCount = redisTemplate.opsForSet().size(wantKey);
+        // 如果 Redis 里没数据，说明还没人点过或者 Redis 刚清空，兜底用 DB 里的数据；否则用 Redis 的
+        event.setWantCount(wantCount != null && wantCount > 0 ? wantCount.intValue() : event.getWantCount());
+
+        // 🚨 核心3：判断当前用户是否点过想看
+        if (currentUserId != null) {
+            Boolean hasWanted = redisTemplate.opsForSet().isMember(wantKey, currentUserId.toString());
+            event.setHasWanted(hasWanted != null ? hasWanted : false);
+        } else {
+            event.setHasWanted(false);
+        }
+
+        return event;
+    }
+
 
     @Override
     @Transactional(rollbackFor = Exception.class) // 开启强事务
@@ -178,10 +239,13 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         boolean isSuperAdmin = (currentUser.getId() == 1L);
 
         List<String> permissions = userMapper.selectPermissionsByUserId(currentUser.getId());
-        boolean hasAuditPerm = permissions.contains("audit:manage") || permissions.contains("event:view_all");
+        boolean canViewAllEvents =
+                isSuperAdmin ||
+                        permissions.contains("audit:manage") ||
+                        permissions.contains("event:view_all");
 
         LambdaQueryWrapper<Event> wrapper = new LambdaQueryWrapper<>();
-        if (!isSuperAdmin && !hasAuditPerm) {
+        if (!canViewAllEvents) {
             wrapper.eq(Event::getCreateBy, currentUser.getId());
         }
         wrapper.orderByDesc(Event::getCreateTime);

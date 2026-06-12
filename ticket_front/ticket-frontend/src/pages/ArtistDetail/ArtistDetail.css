@@ -320,3 +320,293 @@
     from { opacity: 0; transform: translateY(18px) scale(0.985); }
     to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+/* ================= 现代活力版音乐人头图 ================= */
+.ad-page-bg {
+    background:
+            radial-gradient(circle at 8% 8%, rgba(255, 136, 153, 0.10), transparent 30%),
+            radial-gradient(circle at 92% 0%, rgba(255, 195, 210, 0.18), transparent 26%),
+            linear-gradient(180deg, #fff9fb 0%, #f8f8fb 42%, #ffffff 100%);
+}
+
+.ad-container {
+    width: 1200px;
+    max-width: calc(100% - 48px);
+    margin: 30px auto 0;
+}
+
+.ad-hero-card {
+    position: relative;
+    min-height: 300px;
+    margin-bottom: 30px;
+    padding: 38px 48px;
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    align-items: center;
+    gap: 44px;
+    overflow: hidden;
+    border-radius: 28px;
+    border: 1px solid rgba(255, 136, 153, 0.18);
+    background:
+            linear-gradient(135deg, rgba(255, 136, 153, 0.95), rgba(255, 107, 128, 0.96)),
+            #FF8899;
+    box-shadow:
+            0 24px 60px rgba(255, 136, 153, 0.24),
+            0 10px 24px rgba(36, 18, 24, 0.08);
+    animation: adFadeInDown 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ad-hero-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+            linear-gradient(90deg, rgba(18, 18, 22, 0.74) 0%, rgba(18, 18, 22, 0.42) 28%, rgba(255,255,255,0) 56%),
+            radial-gradient(circle at 68% 15%, rgba(255,255,255,0.28), transparent 22%),
+            radial-gradient(circle at 88% 78%, rgba(255,255,255,0.18), transparent 24%);
+    pointer-events: none;
+}
+
+.ad-hero-bg-avatar {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: 0.18;
+    filter: blur(22px) saturate(1.2);
+    transform: scale(1.08);
+}
+
+.ad-hero-orb {
+    position: absolute;
+    z-index: 1;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+.ad-hero-orb-one {
+    width: 220px;
+    height: 220px;
+    left: -70px;
+    top: -68px;
+    background: radial-gradient(circle, rgba(255,255,255,0.30), rgba(255,255,255,0));
+}
+
+.ad-hero-orb-two {
+    width: 260px;
+    height: 260px;
+    right: -85px;
+    bottom: -98px;
+    background: radial-gradient(circle, rgba(255,255,255,0.22), rgba(255,255,255,0));
+}
+
+.ad-hero-avatar-wrap,
+.ad-hero-info {
+    position: relative;
+    z-index: 2;
+}
+
+.ad-hero-avatar-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.ad-hero-avatar-ring {
+    position: relative;
+    width: 186px;
+    height: 186px;
+    border-radius: 50%;
+    padding: 7px;
+    background:
+            linear-gradient(135deg, rgba(255,255,255,0.96), rgba(255,255,255,0.38)),
+            rgba(255,255,255,0.36);
+    box-shadow:
+            0 22px 46px rgba(0, 0, 0, 0.28),
+            0 0 0 10px rgba(255,255,255,0.10);
+    backdrop-filter: blur(10px);
+}
+
+.ad-hero-avatar-ring::after {
+    content: '';
+    position: absolute;
+    inset: -16px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.34);
+    opacity: 0.9;
+}
+
+.ad-hero-avatar-ring .ad-avatar {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 4px solid rgba(255,255,255,0.92);
+    background: #fff;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.18);
+}
+
+.ad-hero-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 12px;
+    margin-bottom: 14px;
+    border-radius: 999px;
+    color: rgba(255,255,255,0.90);
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    background: rgba(255,255,255,0.16);
+    border: 1px solid rgba(255,255,255,0.20);
+    backdrop-filter: blur(8px);
+}
+
+.ad-hero-title-row {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.ad-artist-name {
+    margin: 0;
+    color: #fff;
+    font-size: 46px;
+    font-weight: 950;
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    text-shadow: 0 12px 28px rgba(0,0,0,0.18);
+}
+
+.ad-follow-btn {
+    height: 38px !important;
+    padding: 0 18px !important;
+    color: #FF6B80 !important;
+    border: none !important;
+    border-radius: 999px !important;
+    background: rgba(255,255,255,0.92) !important;
+    font-weight: 800 !important;
+    box-shadow: 0 12px 24px rgba(0,0,0,0.10) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px;
+    transition: all 0.25s ease !important;
+}
+
+.ad-follow-btn:hover {
+    transform: translateY(-2px);
+    background: #ffffff !important;
+    color: #FF4F70 !important;
+    box-shadow: 0 16px 30px rgba(255, 255, 255, 0.18) !important;
+}
+
+.ad-follow-btn.followed {
+    color: #fff !important;
+    background: rgba(31, 36, 48, 0.26) !important;
+    border: 1px solid rgba(255,255,255,0.26) !important;
+    box-shadow: none !important;
+    backdrop-filter: blur(10px);
+}
+
+.ad-hero-meta {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+}
+
+.ad-hero-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 14px;
+    border-radius: 999px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    background: rgba(255,255,255,0.16);
+    border: 1px solid rgba(255,255,255,0.22);
+    backdrop-filter: blur(8px);
+}
+
+.ad-hero-chip-label {
+    color: rgba(255,255,255,0.72);
+    font-weight: 700;
+}
+
+.ad-hero-description {
+    max-width: 680px;
+    margin-top: 18px;
+    color: rgba(255,255,255,0.82);
+    font-size: 14px;
+    line-height: 1.7;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* 内容卡片同步升级 */
+.ad-content {
+    background: rgba(255, 255, 255, 0.92);
+    padding: 22px 40px 60px;
+    border-radius: 24px;
+    border: 1px solid rgba(255, 136, 153, 0.10);
+    box-shadow: 0 18px 42px rgba(36, 18, 24, 0.06);
+    backdrop-filter: blur(10px);
+}
+
+.ad-custom-tabs .ant-tabs-tab {
+    font-size: 17px;
+    font-weight: 800;
+}
+
+@media (max-width: 900px) {
+    .ad-hero-card {
+        grid-template-columns: 1fr;
+        min-height: auto;
+        padding: 30px 24px;
+        gap: 24px;
+        text-align: center;
+    }
+
+    .ad-hero-card::before {
+        background:
+                linear-gradient(180deg, rgba(18, 18, 22, 0.50) 0%, rgba(18, 18, 22, 0.18) 45%, rgba(255,255,255,0) 100%),
+                radial-gradient(circle at 72% 18%, rgba(255,255,255,0.24), transparent 24%);
+    }
+
+    .ad-hero-title-row,
+    .ad-hero-meta {
+        justify-content: center;
+    }
+
+    .ad-artist-name {
+        font-size: 36px;
+    }
+
+    .ad-hero-avatar-ring {
+        width: 150px;
+        height: 150px;
+    }
+}
+
+@media (max-width: 600px) {
+    .ad-container {
+        max-width: calc(100% - 28px);
+        margin-top: 18px;
+    }
+
+    .ad-artist-name {
+        font-size: 30px;
+    }
+
+    .ad-content {
+        padding: 18px 18px 40px;
+        border-radius: 18px;
+    }
+}

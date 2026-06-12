@@ -1,6 +1,7 @@
 package com.avemonica.ticket.controller;
 
 import com.avemonica.ticket.common.Result;
+import com.avemonica.ticket.config.AuthExp;
 import com.avemonica.ticket.entity.Artist;
 import com.avemonica.ticket.entity.User;
 import com.avemonica.ticket.exception.BusinessException;
@@ -14,6 +15,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -43,6 +45,43 @@ public class AdminArtistController {
         return userService.getOne(new LambdaQueryWrapper<User>().eq(User::getId, Long.valueOf(userId)));
     }
 
+    private boolean isSuperAdmin(User user) {
+        return user != null && user.getId() != null && user.getId() == 1L;
+    }
+
+    private boolean hasCurrentAuthority(String authority) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getAuthorities() == null) {
+            return false;
+        }
+
+        return authentication.getAuthorities().stream()
+                .anyMatch(a -> authority.equals(a.getAuthority()));
+    }
+
+    /**
+     * 允许：
+     * 1. 超管
+     * 2. artist:manage
+     * 3. event:publish 且只能操作自己提交的艺人
+     */
+    private void checkArtistOwnerOrManager(Artist oldArtist, User currentUser) {
+        boolean superAdmin = isSuperAdmin(currentUser);
+        boolean artistManager = hasCurrentAuthority("artist:manage");
+
+        if (superAdmin || artistManager) {
+            return;
+        }
+
+        if (oldArtist == null || oldArtist.getCreateBy() == null || currentUser == null) {
+            throw new BusinessException("无权操作该艺人");
+        }
+
+        if (!Objects.equals(oldArtist.getCreateBy(), currentUser.getId())) {
+            throw new BusinessException("无权操作他人提交的艺人");
+        }
+    }
+
     /**
      * 1. 获取所有艺人列表 (供发布演出时的下拉框使用)
      */
@@ -50,6 +89,7 @@ public class AdminArtistController {
      * 1. 动态获取艺人列表 (供发布演出时的下拉框远程搜索使用)
      */
     @GetMapping("/listAll")
+    @PreAuthorize(AuthExp.ARTIST_SELECTOR)
     public Result<IPage<Artist>> listAllArtists(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "10") Integer size,
@@ -74,7 +114,7 @@ public class AdminArtistController {
 
     //分页获取艺人列表 (支持按名字模糊搜索)
     @GetMapping("/page")
-    @PreAuthorize("hasAuthority('artist:manage') or hasAuthority('artist:view') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.ARTIST_VIEW)
     public Result<IPage<Artist>> getArtistPage(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "10") Integer size,
@@ -97,19 +137,22 @@ public class AdminArtistController {
 
     //编辑艺人信息
     @PutMapping("/update")
-    @PreAuthorize("hasAuthority('artist:manage') or authentication.name == '1'")
+    @PreAuthorize("hasAnyAuthority('artist:manage', 'event:publish') or authentication.name == '1'")
     public Result<String> updateArtist(@RequestBody Artist artist) {
         if (artist.getId() == null) {
             return Result.error("艺人ID不能为空");
         }
 
         User currentUser = getCurrentUser();
-        boolean isSuperAdmin = currentUser.getId() == 1L;
+        boolean isSuperAdmin = isSuperAdmin(currentUser);
 
         Artist oldArtist = artistService.getById(artist.getId());
         if (oldArtist == null) {
             throw new BusinessException("艺人不存在");
         }
+
+        // 核心：event:publish 只能修改自己提交的艺人
+        checkArtistOwnerOrManager(oldArtist, currentUser);
 
         if (!StringUtils.hasText(artist.getAvatarUrl())) {
             throw new BusinessException("头像不能为空！");
@@ -160,7 +203,7 @@ public class AdminArtistController {
 
     // 修改艺人状态 (例如：下架、恢复)
     @PutMapping("/{id}/status/{status}")
-    @PreAuthorize("hasAuthority('artist:manage') or hasAuthority('artist:view') or hasAuthority('audit:manage') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.ARTIST_MANAGE + AuthExp.AUDIT_MANAGE)
     public Result<String> changeStatus(@PathVariable Long id, @PathVariable Integer status) {
         Artist artist = new Artist();
         artist.setId(id);
@@ -174,6 +217,7 @@ public class AdminArtistController {
      * 2. 提交新增艺人 (进入待审核状态)
      */
     @PostMapping("/add")
+    @PreAuthorize(AuthExp.ARTIST_ADD)
     public Result<String> addArtist(@RequestBody Artist artist) {
         User currentUser = getCurrentUser();
         boolean isSuperAdmin = (currentUser.getId() == 1L);
@@ -197,7 +241,7 @@ public class AdminArtistController {
     }
 
     @DeleteMapping("/delete/{id}")
-    @PreAuthorize("hasAuthority('audit:manage') or hasAuthority('artist:manage') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.ARTIST_MANAGE)
     public Result<String> deleteArtist(@PathVariable Long id) {
         // 如果你的数据库配置了逻辑删除 (deleted 字段)，这里会自动执行逻辑删除
         // 如果没有配置，这里就是真实的物理删除
@@ -211,7 +255,7 @@ public class AdminArtistController {
      * 权限：仅限拥有 audit:manage 权限的审核员或超管
      */
     @GetMapping("/audit-list")
-    @PreAuthorize("hasAuthority('audit:manage') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.AUDIT_MANAGE)
     public Result<IPage<Artist>> getPendingArtists(
             @RequestParam(defaultValue = "1") Integer current,
             @RequestParam(defaultValue = "5") Integer size) {
@@ -233,7 +277,7 @@ public class AdminArtistController {
      * 2. 审核艺人 (通过 / 驳回)
      */
     @PutMapping("/audit/{id}")
-    @PreAuthorize("hasAuthority('audit:manage') or authentication.name == '1'")
+    @PreAuthorize(AuthExp.AUDIT_MANAGE)
     public Result<String> auditArtist(@PathVariable Long id, @RequestParam Boolean isPass) {
         Artist artist = artistService.getById(id);
         if (artist == null) {
@@ -283,12 +327,15 @@ public class AdminArtistController {
     }
 
     @PutMapping("/revoke/{id}")
-    @PreAuthorize("hasAuthority('artist:manage') or hasAuthority('artist:view') or authentication.name == '1'")
+    @PreAuthorize("hasAnyAuthority('artist:manage', 'event:publish') or authentication.name == '1'")
     public Result<String> revokeArtistAudit(@PathVariable Long id) {
         Artist artist = artistService.getById(id);
         if (artist == null) {
             throw new BusinessException("艺人不存在");
         }
+
+        User currentUser = getCurrentUser();
+        checkArtistOwnerOrManager(artist, currentUser);
 
         if (Objects.equals(artist.getAuditStatus(), 0)) {
             artist.setAuditStatus(3);
@@ -312,15 +359,15 @@ public class AdminArtistController {
     }
 
     @PutMapping("/confirm-edit-reject/{id}")
-    @PreAuthorize("hasAuthority('audit:manage') " +
-            "or hasAuthority('artist:view') " +
-            "or hasAuthority('artist:manage') " +
-            "or authentication.name == '1'")
+    @PreAuthorize("hasAnyAuthority('artist:manage', 'event:publish') or authentication.name == '1'")
     public Result<String> confirmArtistEditReject(@PathVariable Long id) {
         Artist artist = artistService.getById(id);
         if (artist == null) {
             throw new BusinessException("艺人不存在");
         }
+
+        User currentUser = getCurrentUser();
+        checkArtistOwnerOrManager(artist, currentUser);
 
         if (!Objects.equals(artist.getEditAuditStatus(), 2)) {
             throw new BusinessException("当前艺人没有待确认的修改驳回状态");

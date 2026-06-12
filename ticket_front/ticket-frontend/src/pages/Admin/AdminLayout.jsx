@@ -67,12 +67,12 @@ const AdminLayout = () => {
             icon: <LayoutDashboard size={18} />,
             label: '工作台大盘'
         },
-        (hasAccess('event:list')|| hasAccess('event:publish') || hasAccess('audit:manage')) && {
+        (hasAccess('event:view')|| hasAccess('event:publish') || hasAccess('audit:manage')) && {
             key: '/admin/events',
             icon: <Ticket size={18} />,
             label: '演出项目管理'
         },
-        (hasAccess('artist:add') || hasAccess('artist:manage') || hasAccess('audit:manage')) && {
+        (hasAccess('artist:view') || hasAccess('artist:manage') || hasAccess('audit:manage')) && {
             key: '/admin/artists',
             icon: <Mic2 size={18} />,
             label: '音乐人库管理'

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Input, Dropdown, Avatar, Button, message, Cascader } from 'antd';
 import { Search, MapPin, ChevronDown, User, FileText, Heart, LogOut, Settings } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../../utils/request';
 import './PublicHeader.css'; // 我们下一步会把相关 CSS 移到这里
 import pcasData from '../../assets/pcas.json';
 
@@ -117,7 +117,12 @@ const PublicHeader = () => {
                 label: '订单' ,
                 onClick: () => navigate('/user/orders')
             },
-            { key: 'favorites', icon: <Heart size={16} />, label: '收藏' },
+            {
+                key: 'favorites',
+                icon: <Heart size={16} />,
+                label: '我的收藏',
+                onClick: () => navigate('/user/favorites') // 🚨 绑定跳转路由
+            },
             { type: 'divider' },
             {
                 key: 'logout',
