@@ -120,6 +120,9 @@ public class Event {
     @TableField(exist = false)
     private Boolean hasWanted;
 
+    private Long collectionId;
+    private String collectionAlias;
+
 
     // ==========================================
     // 💡 状态字典常量定义，拒绝魔法数字

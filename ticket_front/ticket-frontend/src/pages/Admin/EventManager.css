@@ -43,3 +43,28 @@
     color: #FF8899 !important;
     border-color: #FF8899 !important;
 }
+
+.collection-event-select-label {
+    display: block;
+    max-width: 340px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.collection-event-option {
+    max-width: 520px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.collection-current-event-line {
+    margin-top: 8px;
+    max-width: 560px;
+    color: #999;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

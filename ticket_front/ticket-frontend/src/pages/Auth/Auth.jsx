@@ -22,6 +22,22 @@ const Auth = () => {
     const [turnstileToken, setTurnstileToken] = useState(null);
     const turnstileRef = useRef();
 
+    const [turnstileKey, setTurnstileKey] = useState(0);
+    const [turnstileError, setTurnstileError] = useState(false);
+
+    const reloadTurnstile = () => {
+        setTurnstileToken(null);
+        setTurnstileError(false);
+
+        try {
+            reloadTurnstile();
+        } catch (e) {
+            // reset 失败时直接靠 key 强制重建
+        }
+
+        setTurnstileKey(k => k + 1);
+    };
+
     const [showAutoRegModal, setShowAutoRegModal] = useState(false);
     const [tempAuthData, setTempAuthData] = useState({});
 
@@ -56,6 +72,12 @@ const Auth = () => {
         return () => clearInterval(timer);
     }, [countdown]); // 只监听倒计时的变化
 
+    useEffect(() => {
+        setTurnstileToken(null);
+        setTurnstileError(false);
+        setTurnstileKey(k => k + 1);
+    }, [isLogin, loginType]);
+
     // 获取验证码
     const handleGetCode = async () => {
         try {
@@ -73,7 +95,8 @@ const Auth = () => {
                 message.success('验证码已发送');
                 setCountdown(60); // 开启 60 秒倒计时
             } else {
-                console.error(err);
+                message.error(res.data.message || '验证码发送失败');
+                reloadTurnstile();
             }
         } catch (err) {}
     };
@@ -102,7 +125,7 @@ const Auth = () => {
                         navigate('/'); // 跳转回主页
                     } else {
                         message.error(res.data.message);
-                        turnstileRef.current?.reset(); // 失败后必须重置验证码，Turnstile 是一次性的
+                        reloadTurnstile(); // 失败后必须重置验证码，Turnstile 是一次性的
                     }
                 } else if (loginType === 'sms') {
                     // 2. 免密登录
@@ -121,10 +144,10 @@ const Auth = () => {
                         });
                         setShowAutoRegModal(true);
                         setTurnstileToken(null);
-                        turnstileRef.current?.reset(); // 重置供弹窗里使用
+                        reloadTurnstile(); // 重置供弹窗里使用
                     } else {
                         message.error(res.data.message);
-                        turnstileRef.current?.reset();
+                        reloadTurnstile();
                     }
                 }
             } else {
@@ -144,13 +167,13 @@ const Auth = () => {
                     form.resetFields();
                 } else {
                     message.error(res.data.message);
-                    turnstileRef.current?.reset();
+                    reloadTurnstile();
                 }
             }
         } catch (err) {
             // 捕获网络错误或后端的全局异常 (例如 400 Bad Request)
             message.error(err.response?.data?.message || '系统繁忙，请稍后再试');
-            turnstileRef.current?.reset();
+            reloadTurnstile();
         } finally {
             setLoading(false);
         }
@@ -286,11 +309,37 @@ const Auth = () => {
                             {/* Cloudflare Turnstile 验证组件 */}
                             <div className="turnstile-wrapper">
                                 <Turnstile
+                                    key={turnstileKey}
                                     ref={turnstileRef}
-                                    siteKey="1x00000000000000000000AA" // 替换为你的真实 Site Key
-                                    options={{ theme: 'light' }}
-                                    onSuccess={(token) => setTurnstileToken(token)}
+                                    siteKey="1x00000000000000000000AA"
+                                    options={{
+                                        theme: 'light'
+                                    }}
+                                    onSuccess={(token) => {
+                                        setTurnstileToken(token);
+                                        setTurnstileError(false);
+                                    }}
+                                    onExpire={() => {
+                                        setTurnstileToken(null);
+                                        reloadTurnstile();
+                                    }}
+                                    onError={() => {
+                                        setTurnstileToken(null);
+                                        setTurnstileError(true);
+                                    }}
+                                    onTimeout={() => {
+                                        setTurnstileToken(null);
+                                        reloadTurnstile();
+                                    }}
                                 />
+
+                                {turnstileError && (
+                                    <div style={{ marginTop: 8, textAlign: 'center' }}>
+                                        <Button size="small" type="link" onClick={reloadTurnstile}>
+                                            安全验证加载失败，点击重试
+                                        </Button>
+                                    </div>
+                                )}
                             </div>
 
                             <Button type="primary" htmlType="submit" className="auth-submit-btn" block loading={loading}>

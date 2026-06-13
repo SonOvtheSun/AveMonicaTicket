@@ -55,6 +55,9 @@ const EventDetail = () => {
     const [isWanted, setIsWanted] = useState(false);
     const [pageViews, setPageViews] = useState(0);
 
+    // 合集场次切换：当前演出属于某个合集时，展示同合集下的其他场次
+    const [collectionEvents, setCollectionEvents] = useState([]);
+
     const eventViewTokenMap = new Map();
 
     const getEventViewToken = (eventId) => {
@@ -101,6 +104,16 @@ const EventDetail = () => {
         if (wantCount >= 1000) return '人气飙升中';
         if (wantCount > 0) return '正在被更多同好关注';
         return '成为第一个想看的人';
+    };
+
+    const formatCollectionEventTime = (showTime) => {
+        if (!showTime) return '时间待定';
+        const value = dayjs(showTime);
+        return value.isValid() ? value.format('MM月DD日 HH:mm') : '时间待定';
+    };
+
+    const getCollectionEventName = (item) => {
+        return item.collectionAlias || item.city || item.title || '未命名场次';
     };
 
 
@@ -167,14 +180,31 @@ const EventDetail = () => {
                     }
                 });
                 if (res.data.code === 200) {
-                    setEvent(res.data.data);
+                    const eventData = res.data.data;
+                    setEvent(eventData);
 
                     // 🚨 新增：同步后端返回的统计数据（后端需在 detail 接口中补充这三个字段返回）
-                    setWantCount(res.data.data.wantCount || 0);
-                    setIsWanted(res.data.data.hasWanted || false);
-                    setPageViews(res.data.data.pageViews || 0);
+                    setWantCount(eventData.wantCount || 0);
+                    setIsWanted(eventData.hasWanted || false);
+                    setPageViews(eventData.pageViews || 0);
 
-                    const firstAvailable = sortTicketsByPriceAsc(res.data.data.tickets || [])
+                    if (eventData.collectionId) {
+                        try {
+                            const collectionRes = await axios.get(`/api/event/collection/${eventData.collectionId}/events`);
+                            if (collectionRes.data.code === 200) {
+                                setCollectionEvents(collectionRes.data.data || []);
+                            } else {
+                                setCollectionEvents([]);
+                            }
+                        } catch (e) {
+                            console.error('加载同合集演出失败', e);
+                            setCollectionEvents([]);
+                        }
+                    } else {
+                        setCollectionEvents([]);
+                    }
+
+                    const firstAvailable = sortTicketsByPriceAsc(eventData.tickets || [])
                         .find(t => t.remainingStock > 0);
                     if (firstAvailable) setSelectedTicket(firstAvailable);
                     fetchRealTimeStock();
@@ -508,6 +538,33 @@ const EventDetail = () => {
                                 </div>
                                 <div className="countdown-sale-time">
                                     {event.saleTime ? dayjs(event.saleTime).format('MM月DD日 HH:mm开抢') : '即将开抢'}
+                                </div>
+                            </div>
+                        )}
+
+                        {collectionEvents.length > 1 && (
+                            <div className="collection-switch-section">
+                                <div className="collection-switch-title-row">选择场次</div>
+
+                                <div className="tickets-container collection-ticket-container">
+                                    {collectionEvents.map(item => {
+                                        const isCurrent = Number(item.id) === Number(event.id);
+
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={item.id}
+                                                className={`ticket-pill collection-ticket-pill ${isCurrent ? 'active' : ''}`}
+                                                onClick={() => {
+                                                    if (!isCurrent) navigate(`/event/${item.id}`);
+                                                }}
+                                            >
+                                                <span className="ticket-name collection-ticket-name">
+                                                    {getCollectionEventName(item)}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}

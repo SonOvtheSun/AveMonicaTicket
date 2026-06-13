@@ -147,6 +147,20 @@ public class PublicEventController {
             }
 
             // ==========================================
+            // 缓存外挂：合集归属字段需要保持实时，避免合集调整后详情页仍读到旧缓存
+            // ==========================================
+            Event collectionInfo = eventService.getOne(
+                    new LambdaQueryWrapper<Event>()
+                            .select(Event::getId, Event::getCollectionId, Event::getCollectionAlias)
+                            .eq(Event::getId, id),
+                    false
+            );
+            if (collectionInfo != null) {
+                event.setCollectionId(collectionInfo.getCollectionId());
+                event.setCollectionAlias(collectionInfo.getCollectionAlias());
+            }
+
+            // ==========================================
             // 🚨 终极绝招：缓存外挂！动态注入实时的浏览量与想看数据
             // ==========================================
             String viewsKey = "event:views:" + id;
@@ -197,6 +211,37 @@ public class PublicEventController {
             log.error("获取演出详情出现异常: {}", e.getMessage());
             return Result.error("系统繁忙，请稍后再试");
         }
+    }
+
+    /**
+     * 获取同一合集下的所有非隐藏演出，供演出详情页做场次切换。
+     * 注意：这里不复用 /detail/{id}，避免切换列表增加浏览量。
+     */
+    @GetMapping("/collection/{collectionId}/events")
+    public Result<List<Event>> getCollectionEvents(@PathVariable Long collectionId) {
+        if (collectionId == null) {
+            return Result.error("合集ID不能为空");
+        }
+
+        List<Event> events = eventService.list(
+                new LambdaQueryWrapper<Event>()
+                        .select(
+                                Event::getId,
+                                Event::getTitle,
+                                Event::getCollectionId,
+                                Event::getCollectionAlias,
+                                Event::getCity,
+                                Event::getVenue,
+                                Event::getShowTime,
+                                Event::getSaleTime,
+                                Event::getStatus
+                        )
+                        .eq(Event::getCollectionId, collectionId)
+                        .ne(Event::getStatus, 4)
+                        .orderByAsc(Event::getShowTime)
+        );
+
+        return Result.success(events);
     }
 
     /**

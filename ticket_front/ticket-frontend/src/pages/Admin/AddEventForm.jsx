@@ -34,6 +34,9 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
     const [artistKeyword, setArtistKeyword] = useState('');
     const [hasMoreArtists, setHasMoreArtists] = useState(false);
 
+    const [collections, setCollections] = useState([]);
+    const [newCollectionName, setNewCollectionName] = useState('');
+
     // 风格预设选项
     const MUSIC_STYLE_OPTIONS = [
         '古典',
@@ -162,8 +165,16 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         }
     };
 
+    const fetchCollections = async () => {
+        try {
+            const res = await axios.get('/api/admin/collection/list');
+            if (res.data.code === 200) setCollections(res.data.data);
+        } catch (e) { }
+    };
+
     useEffect(() => {
         fetchArtists();
+        fetchCollections();
     }, []);
 
     useEffect(() => {
@@ -215,6 +226,8 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 tickets: mappedTickets,
                 artistIds: artistIds,
                 style: editingRecord.style ? [editingRecord.style] : [],
+                collectionId: editingRecord.collectionId,
+                collectionAlias: editingRecord.collectionAlias,
             });
 
         } else {
@@ -618,6 +631,51 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                     </>
                 )}
             </Form.List>
+
+            <Divider orientation="left" style={{ borderColor: '#FF8899', color: '#FF8899' }}>多场次/巡演合集配置 (选填)</Divider>
+
+            <Row gutter={16}>
+                <Col span={14}>
+                    <Form.Item name="collectionId" label="归属巡演合集" tooltip="若这是巡演的其中一站，请选择关联的合集。前端会在详情页展示所有关联场次。">
+                        <Select
+                            allowClear
+                            placeholder="请选择已有合集"
+                            size="large"
+                            options={collections.map(c => ({ label: c.name, value: c.id }))}
+                            dropdownRender={(menu) => (
+                                <>
+                                    {menu}
+                                    <Divider style={{ margin: '8px 0' }} />
+                                    <Space style={{ padding: '0 8px 4px' }}>
+                                        <Input
+                                            placeholder="输入新合集名称"
+                                            value={newCollectionName}
+                                            onChange={(e) => setNewCollectionName(e.target.value)}
+                                            onKeyDown={(e) => e.stopPropagation()}
+                                        />
+                                        <Button type="text" style={{ color: '#FF8899' }} onClick={async () => {
+                                            if (!newCollectionName) return;
+                                            const res = await axios.post('/api/admin/collection/add', { name: newCollectionName });
+                                            if(res.data.code === 200) {
+                                                message.success('合集创建成功');
+                                                setNewCollectionName('');
+                                                fetchCollections();
+                                            }
+                                        }}>
+                                            快速创建
+                                        </Button>
+                                    </Space>
+                                </>
+                            )}
+                        />
+                    </Form.Item>
+                </Col>
+                <Col span={10}>
+                    <Form.Item name="collectionAlias" label="本场次别名" tooltip="例如：北京场、首发站、Day 1">
+                        <Input placeholder="输入别名，如：上海场" size="large" />
+                    </Form.Item>
+                </Col>
+            </Row>
 
             <div style={{ marginTop: 40, textAlign: 'right' }}>
                 <Button
