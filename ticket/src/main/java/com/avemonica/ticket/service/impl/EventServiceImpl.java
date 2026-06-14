@@ -1,13 +1,11 @@
 package com.avemonica.ticket.service.impl;
 
 import com.avemonica.ticket.dto.EventAddDTO;
+import com.avemonica.ticket.dto.EventSessionDTO;
 import com.avemonica.ticket.dto.TicketCategoryDTO;
 import com.avemonica.ticket.entity.*;
 import com.avemonica.ticket.exception.BusinessException;
-import com.avemonica.ticket.mapper.ArtistMapper;
-import com.avemonica.ticket.mapper.EventMapper;
-import com.avemonica.ticket.mapper.TicketCategoryMapper;
-import com.avemonica.ticket.mapper.UserMapper;
+import com.avemonica.ticket.mapper.*;
 import com.avemonica.ticket.service.EventArtistService;
 import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.UserService;
@@ -37,6 +35,9 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
     private UserService userService;
     @Autowired
     private UserMapper userMapper;
+
+    @Autowired
+    private EventSessionMapper eventSessionMapper;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -113,54 +114,47 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
 
     @Override
-    @Transactional(rollbackFor = Exception.class) // 开启强事务
+    @Transactional(rollbackFor = Exception.class)
     public void saveEventWithTicketsAndArtists(EventAddDTO dto) {
         User currentUser = getCurrentUser();
-        boolean isSuperAdmin = (currentUser.getId() == 1L);
+        boolean isSuperAdmin = currentUser.getId() == 1L;
+
+        List<EventSessionDTO> sessions = normalizeSessions(dto);
+        validateEventSessions(dto, sessions);
 
         Event event = new Event();
         BeanUtils.copyProperties(dto, event);
-        event.setCreateBy(currentUser.getId()); // 绑定发布人
+        event.setCreateBy(currentUser.getId());
 
-        // 🛡️ 审核流与状态流转判定
+        // 用第一个场次回填 tb_event.show_time / sale_time，兼容列表排序和旧代码
+        fillEventDefaultTime(event, sessions);
+
         if (isSuperAdmin) {
-            // 超管：直接通过，状态由前端传过来的决定 (默认预售)
             event.setAuditStatus(Event.AUDIT_APPROVED);
-            if (event.getStatus() == null) event.setStatus(1);
-        } else {
-            // 普通管理员：强制待审核，且强制设定为下架状态 (不可见)
-            event.setAuditStatus(Event.AUDIT_PENDING);
-            event.setStatus(Event.STATUS_OFFLINE);
-        }
-        event.setAuditSubmitTime(LocalDateTime.now());
-
-        if (event.getStatus() != null && event.getStatus() == 1 && event.getSaleTime() == null) {
-            throw new BusinessException("发布失败：演出设置为上架状态时，必须明确设定开票时间！");
-        }
-
-        if (event.getSaleTime() != null && event.getShowTime() != null) {
-            // 如果开票时间 晚于 (演出时间 - 24小时)
-            if (event.getSaleTime().isAfter(event.getShowTime().minusHours(24))) {
-                throw new BusinessException("风控拦截：开票时间必须早于演出时间至少 24 小时，请重新设置！");
+            if (event.getStatus() == null) {
+                event.setStatus(1);
             }
+        } else {
+            // 普通提交人：先记录他选择的完整提交内容
+            try {
+                event.setPendingPayload(objectMapper.writeValueAsString(dto));
+            } catch (Exception e) {
+                throw new BusinessException("保存新增审核快照失败");
+            }
+
+            // 待审核期间不能直接按提交状态展示，否则 C 端可能提前可见
+            event.setAuditStatus(Event.AUDIT_PENDING);
+            event.setStatus(4);
         }
+
+        event.setAuditSubmitTime(LocalDateTime.now());
 
         this.save(event);
 
-        // 2. 批量保存票档 tb_ticket_category
-        if (dto.getTickets() != null) {
-            dto.getTickets().forEach(t -> {
-                TicketCategory category = new TicketCategory();
-                category.setEventId(event.getId());
-                category.setName(t.getName());
-                category.setPrice(t.getPrice());
-                category.setTotalStock(t.getStock());
-                category.setRemainingStock(t.getStock()); // 初始剩余库存等于总库存
-                ticketCategoryMapper.insert(category);
-            });
-        }
+        // 新模型：保存 sessions 和每个 session 下的票档
+        syncEventSessionsAndTickets(event.getId(), sessions);
 
-        // 3. 批量保存艺人关联 tb_event_artist
+        // 保存艺人关联
         if (dto.getArtistIds() != null && !dto.getArtistIds().isEmpty()) {
             List<EventArtist> relations = dto.getArtistIds().stream().map(artistId -> {
                 EventArtist ea = new EventArtist();
@@ -188,9 +182,21 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         User currentUser = getCurrentUser();
         boolean isSuperAdmin = currentUser.getId() == 1L;
 
-        validateEventDto(dto);
+        /*
+         * 多场次模型校验：
+         * 1. 如果 dto.sessions 有值，用 sessions 校验
+         * 2. 如果 dto.sessions 为空，则兼容旧字段 showTime / saleTime / tickets，生成一个默认场次
+         */
+        List<EventSessionDTO> sessions = normalizeSessions(dto);
+        validateEventSessions(dto, sessions);
 
-        // 1. 超管：免审，直接覆盖主表、票档、艺人关系
+        /*
+         * 关键：把规范化后的 sessions 回写进 dto。
+         * 这样普通管理员提交修改审核时，pendingPayload 里也会带上 sessions。
+         */
+        dto.setSessions(sessions);
+
+        // 1. 超管：免审，直接覆盖主表、场次、票档、艺人关系
         if (isSuperAdmin) {
             Integer finalStatus = dto.getStatus() != null ? dto.getStatus() : oldEvent.getStatus();
             applyEventMainData(id, dto, Event.AUDIT_APPROVED, finalStatus);
@@ -282,12 +288,31 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
         List<Long> eventIds = records.stream().map(Event::getId).collect(Collectors.toList());
 
-        // ======================= 补丁 1：装配票档 =======================
+        // ======================= 补丁 1：装配场次 + 票档 =======================
+        List<EventSession> allSessions = eventSessionMapper.selectList(
+                new LambdaQueryWrapper<EventSession>()
+                        .in(EventSession::getEventId, eventIds)
+                        .orderByAsc(EventSession::getSortOrder)
+                        .orderByAsc(EventSession::getShowTime)
+        );
+
         List<TicketCategory> allTickets = ticketCategoryMapper.selectList(
                 new LambdaQueryWrapper<TicketCategory>().in(TicketCategory::getEventId, eventIds)
         );
-        Map<Long, List<TicketCategory>> ticketMap = allTickets.stream()
+
+        Map<Long, List<TicketCategory>> ticketMapByEventId = allTickets.stream()
                 .collect(Collectors.groupingBy(TicketCategory::getEventId));
+
+        Map<Long, List<TicketCategory>> ticketMapBySessionId = allTickets.stream()
+                .filter(t -> t.getSessionId() != null)
+                .collect(Collectors.groupingBy(TicketCategory::getSessionId));
+
+        for (EventSession session : allSessions) {
+            session.setTickets(ticketMapBySessionId.getOrDefault(session.getId(), new ArrayList<>()));
+        }
+
+        Map<Long, List<EventSession>> sessionMapByEventId = allSessions.stream()
+                .collect(Collectors.groupingBy(EventSession::getEventId));
 
         // ======================= 补丁 2：装配艺人 =======================
         // 2.1 查关系表 tb_event_artist
@@ -329,8 +354,12 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
         // ======================= 统一赋值 =======================
         records.forEach(event -> {
-            event.setTickets(ticketMap.getOrDefault(event.getId(), new ArrayList<>()));
-            event.setArtists(eventArtistMap.getOrDefault(event.getId(), new ArrayList<>())); // 赋入艺人数据
+            event.setSessions(sessionMapByEventId.getOrDefault(event.getId(), new ArrayList<>()));
+
+        // 兼容旧表格的“票务策略”展示：这里给全部票档
+            event.setTickets(ticketMapByEventId.getOrDefault(event.getId(), new ArrayList<>()));
+
+            event.setArtists(eventArtistMap.getOrDefault(event.getId(), new ArrayList<>()));
         });
 
         return pageData;
@@ -345,7 +374,8 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
             throw new BusinessException("演出不存在");
         }
 
-        validateEventDto(dto);
+        List<EventSessionDTO> sessions = normalizeSessions(dto);
+        validateEventSessions(dto, sessions);
 
         Event newEvent = new Event();
         BeanUtils.copyProperties(dto, newEvent);
@@ -356,6 +386,9 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         newEvent.setEditAuditStatus(null);
         newEvent.setPendingPayload(null);
         newEvent.setAuditSubmitTime(LocalDateTime.now());
+
+        // 用第一个场次回填旧字段
+        fillEventDefaultTime(newEvent, sessions);
 
         updateById(newEvent);
 
@@ -380,12 +413,15 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
             eventArtistService.saveBatch(relations);
         }
 
-        syncTicketCategories(id, dto.getTickets());
+        // 新模型：同步场次和每场票档
+        syncEventSessionsAndTickets(id, sessions);
     }
 
-    private void syncTicketCategories(Long eventId, List<TicketCategoryDTO> tickets) {
+    private void syncTicketCategories(Long eventId, Long sessionId, List<TicketCategoryDTO> tickets) {
         List<TicketCategory> oldTickets = ticketCategoryMapper.selectList(
-                new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, eventId)
+                new LambdaQueryWrapper<TicketCategory>()
+                        .eq(TicketCategory::getEventId, eventId)
+                        .eq(TicketCategory::getSessionId, sessionId)
         );
 
         if (tickets == null || tickets.isEmpty()) {
@@ -393,49 +429,191 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
             return;
         }
 
-        List<String> newTicketNames = tickets.stream()
-                .map(TicketCategoryDTO::getName)
-                .filter(StringUtils::hasText)
-                .collect(Collectors.toList());
+        Set<Long> keepTicketIds = new HashSet<>();
 
-        tickets.forEach(t -> {
-            TicketCategory existingTicket = oldTickets.stream()
-                    .filter(ot -> Objects.equals(ot.getName(), t.getName()))
-                    .findFirst()
-                    .orElse(null);
+        for (TicketCategoryDTO t : tickets) {
+            if (!StringUtils.hasText(t.getName())) {
+                continue;
+            }
+
+            TicketCategory existingTicket = null;
+
+            if (t.getId() != null) {
+                existingTicket = oldTickets.stream()
+                        .filter(ot -> Objects.equals(ot.getId(), t.getId()))
+                        .findFirst()
+                        .orElse(null);
+            }
+
+            if (existingTicket == null) {
+                existingTicket = oldTickets.stream()
+                        .filter(ot -> Objects.equals(ot.getName(), t.getName()))
+                        .findFirst()
+                        .orElse(null);
+            }
 
             if (existingTicket != null) {
-                int stockDiff = t.getStock() - existingTicket.getTotalStock();
+                int oldTotalStock = existingTicket.getTotalStock() != null ? existingTicket.getTotalStock() : 0;
+                int oldRemainingStock = existingTicket.getRemainingStock() != null ? existingTicket.getRemainingStock() : 0;
+                int newStock = t.getStock() != null ? t.getStock() : 0;
+                int stockDiff = newStock - oldTotalStock;
+
+                existingTicket.setName(t.getName());
                 existingTicket.setPrice(t.getPrice());
-                existingTicket.setTotalStock(t.getStock());
-                existingTicket.setRemainingStock(Math.max(0, existingTicket.getRemainingStock() + stockDiff));
+                existingTicket.setTotalStock(newStock);
+                existingTicket.setRemainingStock(Math.max(0, oldRemainingStock + stockDiff));
+                existingTicket.setEventId(eventId);
+                existingTicket.setSessionId(sessionId);
+
                 ticketCategoryMapper.updateById(existingTicket);
+                keepTicketIds.add(existingTicket.getId());
             } else {
                 TicketCategory category = new TicketCategory();
                 category.setEventId(eventId);
+                category.setSessionId(sessionId);
                 category.setName(t.getName());
                 category.setPrice(t.getPrice());
                 category.setTotalStock(t.getStock());
                 category.setRemainingStock(t.getStock());
+
                 ticketCategoryMapper.insert(category);
+                keepTicketIds.add(category.getId());
             }
-        });
-
-        oldTickets.forEach(ot -> {
-            if (!newTicketNames.contains(ot.getName())) {
-                ticketCategoryMapper.deleteById(ot.getId());
-            }
-        });
-    }
-
-    private void validateEventDto(EventAddDTO dto) {
-        if (dto.getStatus() != null && dto.getStatus() == 1 && dto.getSaleTime() == null) {
-            throw new BusinessException("演出设置为上架状态时，必须明确设定开票时间！");
         }
 
-        if (dto.getSaleTime() != null && dto.getShowTime() != null) {
-            if (dto.getSaleTime().isAfter(dto.getShowTime().minusHours(24))) {
-                throw new BusinessException("开票时间必须早于演出时间至少 24 小时，请重新设置！");
+        for (TicketCategory oldTicket : oldTickets) {
+            if (!keepTicketIds.contains(oldTicket.getId())) {
+                ticketCategoryMapper.deleteById(oldTicket.getId());
+            }
+        }
+    }
+
+    private void validateEventSessions(EventAddDTO dto, List<EventSessionDTO> sessions) {
+        if (sessions == null || sessions.isEmpty()) {
+            return;
+        }
+
+        for (int i = 0; i < sessions.size(); i++) {
+            EventSessionDTO session = sessions.get(i);
+            String prefix = "第 " + (i + 1) + " 个场次";
+
+            if (session.getShowTime() == null) {
+                throw new BusinessException(prefix + "：请选择演出时间");
+            }
+
+            Integer sessionStatus = session.getStatus() != null
+                    ? session.getStatus()
+                    : dto.getStatus();
+
+            if (sessionStatus != null && sessionStatus == 1 && session.getSaleTime() == null) {
+                throw new BusinessException(prefix + "：上架状态必须设置开票时间");
+            }
+
+            if (session.getSaleTime() != null
+                    && session.getShowTime() != null
+                    && session.getSaleTime().isAfter(session.getShowTime().minusHours(24))) {
+                throw new BusinessException(prefix + "：开票时间必须早于演出时间至少 24 小时");
+            }
+        }
+    }
+
+    private List<EventSessionDTO> normalizeSessions(EventAddDTO dto) {
+        if (dto.getSessions() == null || dto.getSessions().isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        return dto.getSessions().stream()
+                .filter(session -> session != null && session.getShowTime() != null)
+                .collect(Collectors.toList());
+    }
+
+    private void fillEventDefaultTime(Event event, List<EventSessionDTO> sessions) {
+        if (sessions == null || sessions.isEmpty()) {
+            event.setShowTime(null);
+            event.setSaleTime(null);
+            return;
+        }
+
+        EventSessionDTO first = sessions.stream()
+                .filter(s -> s.getShowTime() != null)
+                .min(Comparator.comparing(EventSessionDTO::getShowTime))
+                .orElse(null);
+
+        if (first == null) {
+            event.setShowTime(null);
+            event.setSaleTime(null);
+            return;
+        }
+
+        event.setShowTime(first.getShowTime());
+        event.setSaleTime(first.getSaleTime());
+    }
+
+    private void syncEventSessionsAndTickets(Long eventId, List<EventSessionDTO> sessions) {
+        if (sessions == null || sessions.isEmpty()) {
+            ticketCategoryMapper.delete(
+                    new LambdaQueryWrapper<TicketCategory>()
+                            .eq(TicketCategory::getEventId, eventId)
+            );
+
+            eventSessionMapper.delete(
+                    new LambdaQueryWrapper<EventSession>()
+                            .eq(EventSession::getEventId, eventId)
+            );
+
+            return;
+        }
+
+        List<EventSession> oldSessions = eventSessionMapper.selectList(
+                new LambdaQueryWrapper<EventSession>().eq(EventSession::getEventId, eventId)
+        );
+
+        Set<Long> keepSessionIds = new HashSet<>();
+
+        for (int i = 0; i < sessions.size(); i++) {
+            EventSessionDTO dto = sessions.get(i);
+
+            EventSession session = null;
+
+            if (dto.getId() != null) {
+                session = oldSessions.stream()
+                        .filter(s -> Objects.equals(s.getId(), dto.getId()))
+                        .findFirst()
+                        .orElse(null);
+            }
+
+            if (session == null) {
+                session = new EventSession();
+                session.setEventId(eventId);
+                session.setCreateTime(LocalDateTime.now());
+            }
+
+            session.setSessionName(StringUtils.hasText(dto.getSessionName()) ? dto.getSessionName() : "默认场次");
+            session.setShowTime(dto.getShowTime());
+            session.setSaleTime(dto.getSaleTime());
+            session.setStatus(dto.getStatus() != null ? dto.getStatus() : 1);
+            session.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : i);
+            session.setUpdateTime(LocalDateTime.now());
+
+            if (session.getId() == null) {
+                eventSessionMapper.insert(session);
+            } else {
+                eventSessionMapper.updateById(session);
+            }
+
+            keepSessionIds.add(session.getId());
+
+            syncTicketCategories(eventId, session.getId(), dto.getTickets());
+        }
+
+        // 删除已经被前端移除的场次，并删除其票档
+        for (EventSession oldSession : oldSessions) {
+            if (!keepSessionIds.contains(oldSession.getId())) {
+                ticketCategoryMapper.delete(
+                        new LambdaQueryWrapper<TicketCategory>()
+                                .eq(TicketCategory::getSessionId, oldSession.getId())
+                );
+                eventSessionMapper.deleteById(oldSession.getId());
             }
         }
     }

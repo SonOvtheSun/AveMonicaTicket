@@ -1,7 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Spin, message, Row, Col, Avatar, Button, InputNumber, Modal, Form, Input, Select, Alert } from 'antd';
-import { CalendarOutlined, EnvironmentOutlined, UserOutlined, ArrowLeftOutlined, TagsOutlined, ClockCircleOutlined, HeartOutlined, HeartFilled, EyeOutlined } from '@ant-design/icons';
+import { Spin, message, Row, Col, Avatar, Button, InputNumber, Modal, Form, Input, Select } from 'antd';
+import {
+    CalendarOutlined,
+    EnvironmentOutlined,
+    UserOutlined,
+    ArrowLeftOutlined,
+    TagsOutlined,
+    ClockCircleOutlined,
+    HeartOutlined,
+    HeartFilled,
+    EyeOutlined
+} from '@ant-design/icons';
 import axios from '../../utils/request';
 import './EventDetail.css';
 import dayjs from 'dayjs';
@@ -9,6 +19,36 @@ import PublicHeader from '../../components/PublicHeader/PublicHeader';
 
 const sortTicketsByPriceAsc = (tickets = []) =>
     [...tickets].sort((a, b) => Number(a.price ?? 0) - Number(b.price ?? 0));
+
+// 放到组件外，避免组件每次 render 都重新生成 Map，导致同一页面可能重复计浏览量。
+const eventViewTokenMap = new Map();
+
+const getEventViewToken = (eventId) => {
+    if (!eventViewTokenMap.has(eventId)) {
+        const token = window.crypto?.randomUUID
+            ? window.crypto.randomUUID()
+            : `${Date.now()}-${Math.random()}`;
+        eventViewTokenMap.set(eventId, token);
+    }
+    return eventViewTokenMap.get(eventId);
+};
+
+const normalizeSessions = (eventData) => {
+    if (!eventData) return [];
+
+    if (!Array.isArray(eventData.sessions) || eventData.sessions.length === 0) {
+        return [];
+    }
+
+    return eventData.sessions.map((session, index) => ({
+        ...session,
+        sessionName: session.sessionName || `场次${index + 1}`,
+        status: session.status,
+        showTime: session.showTime,
+        saleTime: session.saleTime,
+        tickets: Array.isArray(session.tickets) ? session.tickets : []
+    }));
+};
 
 const EventDetail = () => {
     const { id } = useParams();
@@ -18,6 +58,7 @@ const EventDetail = () => {
     const [loading, setLoading] = useState(true);
 
     // 购票控制状态
+    const [selectedSessionId, setSelectedSessionId] = useState(null);
     const [selectedTicket, setSelectedTicket] = useState(null);
     const [quantity, setQuantity] = useState(1);
 
@@ -25,7 +66,7 @@ const EventDetail = () => {
     const [countdown, setCountdown] = useState({ days: 0, hours: '00', minutes: '00', seconds: '00' });
     const [saleAvailable, setSaleAvailable] = useState(false);
 
-    // 🚨 云端预约预填核心状态池
+    // 云端预约预填核心状态池
     const [reservedData, setReservedData] = useState(null);
     const [reservationModalVisible, setReservationModalVisible] = useState(false);
     const [spectators, setSpectators] = useState([]);
@@ -36,64 +77,40 @@ const EventDetail = () => {
     const [spectatorModalVisible, setSpectatorModalVisible] = useState(false);
     const [spectatorForm] = Form.useForm();
 
-    const isPresale = event?.status === 1 && !saleAvailable;
-    const showPurchaseOptions = event?.status === 1 && saleAvailable; // 🚨 预约状态下隐藏选票和数量，只在正式在售时显示
-
-    // status=3 且演出时间未到：隐藏购票信息，仅展示“敬请期待”
-    const showTimeObj = event?.showTime ? dayjs(event.showTime) : null;
-    const isShowTimeValid = !!showTimeObj && showTimeObj.isValid();
-    const isStatus3Future = event?.status === 3 && isShowTimeValid && showTimeObj.isAfter(dayjs());
-    const isStatus3Past = event?.status === 3 && isShowTimeValid && showTimeObj.isBefore(dayjs());
-    const hidePurchaseOptions = isStatus3Future;
-    const sortedTickets = sortTicketsByPriceAsc(event?.tickets || []);
-
-    // 🚨 新增：防止轮询重绘覆盖用户操作的防御标记
+    // 防止轮询重绘覆盖用户操作的防御标记
     const hasAutoFilled = useRef(false);
 
-    // 🚨 新增：想看与浏览量状态
+    // 想看与浏览量状态
     const [wantCount, setWantCount] = useState(0);
     const [isWanted, setIsWanted] = useState(false);
     const [pageViews, setPageViews] = useState(0);
 
-    // 合集场次切换：当前演出属于某个合集时，展示同合集下的其他场次
+    // 同一合集下的其他演出，用于切换巡演站点
     const [collectionEvents, setCollectionEvents] = useState([]);
 
-    const eventViewTokenMap = new Map();
+    const sessions = event ? normalizeSessions(event) : [];
+    const hasSession = sessions.length > 0;
+    const selectedSession = hasSession
+        ? (sessions.find(s => String(s.id) === String(selectedSessionId)) || sessions[0] || null)
+        : null;
 
-    const getEventViewToken = (eventId) => {
-        if (!eventViewTokenMap.has(eventId)) {
-            const token = window.crypto?.randomUUID
-                ? window.crypto.randomUUID()
-                : `${Date.now()}-${Math.random()}`;
-            eventViewTokenMap.set(eventId, token);
-        }
-        return eventViewTokenMap.get(eventId);
-    };
+    const activeStatus = selectedSession?.status ?? null;
+    const activeShowTime = selectedSession?.showTime ?? null;
+    const activeSaleTime = selectedSession?.saleTime ?? null;
 
-    // 🚨 新增：点击“想看”按钮的交互逻辑
-    const handleToggleWant = async () => {
-        const token = localStorage.getItem('token');
-        if (!token) {
-            message.info('请先登录后再操作');
-            return navigate('/auth');
-        }
+    const isNoSession = !!event && !hasSession;
 
-        try {
-            // 发送请求到后端切换状态
-            const res = await axios.post('/api/favorite/toggle', { targetId: id, type: 1 });
-            if (res.data.code === 200) {
-                const newState = !isWanted;
-                setIsWanted(newState);
-                // 乐观更新 UI 数量
-                setWantCount(prev => newState ? prev + 1 : prev - 1);
-                message.success(newState ? '已标记为想看' : '已取消想看');
-            } else {
-                message.error(res.data.message || '操作失败');
-            }
-        } catch (err) {
-            message.error('网络请求异常');
-        }
-    };
+    const isPresale = activeStatus === 1 && !saleAvailable;
+    const showPurchaseOptions = activeStatus === 1 && saleAvailable;
+
+    const showTimeObj = activeShowTime ? dayjs(activeShowTime) : null;
+    const isShowTimeValid = !!showTimeObj && showTimeObj.isValid();
+    const isStatus3Future = activeStatus === 3 && isShowTimeValid && showTimeObj.isAfter(dayjs());
+    const isStatus3Past = activeStatus === 3 && isShowTimeValid && showTimeObj.isBefore(dayjs());
+    const hidePurchaseOptions = isStatus3Future;
+
+    const sortedTickets = sortTicketsByPriceAsc(selectedSession?.tickets || []);
+    const totalPrice = selectedTicket ? (Number(selectedTicket.price || 0) * quantity).toFixed(2) : '0.00';
 
     const formatStatNumber = (num) => {
         const value = Number(num || 0);
@@ -106,96 +123,94 @@ const EventDetail = () => {
         return '成为第一个想看的人';
     };
 
-    const formatCollectionEventTime = (showTime) => {
-        if (!showTime) return '时间待定';
-        const value = dayjs(showTime);
-        return value.isValid() ? value.format('MM月DD日 HH:mm') : '时间待定';
-    };
-
     const getCollectionEventName = (item) => {
         return item.collectionAlias || item.city || item.title || '未命名场次';
     };
 
+    const getSessionDisplayName = (session, index) => {
+        if (session?.sessionName && session.sessionName !== '默认场次') return session.sessionName;
+        if (session?.showTime && dayjs(session.showTime).isValid()) return dayjs(session.showTime).format('MM月DD日 HH:mm');
+        return `场次${index + 1}`;
+    };
 
-    // 🚨 自动填充魔法：当演出正式开售(saleAvailable变true)且有云端预约记录时，自动锁定票档和数量
-    useEffect(() => {
-        // 增加 !hasAutoFilled.current 判断，确保只在初次开售或初次加载时填充一次
-        if (saleAvailable && reservedData && event?.tickets && !hasAutoFilled.current) {
-            const matchedTicket = event.tickets.find(t => t.id === reservedData.ticketId);
-            if (matchedTicket) {
-                setSelectedTicket(matchedTicket);
-                setQuantity(reservedData.spectatorIds.length || 1);
-
-                hasAutoFilled.current = true; // 🚨 标记为已填充，后续每 3 秒的库存轮询将不再强行覆盖你手动选的票
-            }
+    const handleToggleWant = async () => {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            message.info('请先登录后再操作');
+            return navigate('/auth');
         }
-    }, [saleAvailable, reservedData, event]);
 
-    // 拉取用户常用观演人列表
+        try {
+            const res = await axios.post('/api/favorite/toggle', { targetId: id, type: 1 });
+            if (res.data.code === 200) {
+                const newState = !isWanted;
+                setIsWanted(newState);
+                setWantCount(prev => newState ? prev + 1 : Math.max(0, prev - 1));
+                message.success(newState ? '已标记为想看' : '已取消想看');
+            } else {
+                message.error(res.data.message || '操作失败');
+            }
+        } catch (err) {
+            message.error('网络请求异常');
+        }
+    };
+
     const fetchSpectators = async () => {
         try {
             const token = localStorage.getItem('token');
             if (!token) return;
+
             const res = await axios.get('/api/user/spectator/list');
             if (res.data.code === 200) {
-                setSpectators(res.data.data);
+                setSpectators(res.data.data || []);
             }
         } catch (error) {
             console.error('获取观演人列表失败', error);
         }
     };
 
-    // 监听预约弹窗打开
     useEffect(() => {
         if (reservationModalVisible) {
             fetchSpectators();
         }
     }, [reservationModalVisible]);
 
+    // 拉取详情、同合集演出列表。详情接口需要后端返回 sessions，每个 session 下包含 tickets。
     useEffect(() => {
-        const fetchRealTimeStock = async () => {
-            try {
-                const stockRes = await axios.get(`/api/event/stock/${id}`);
-                if (stockRes.data.code === 200) {
-                    const stockMap = stockRes.data.data;
-                    setEvent(prevEvent => {
-                        if (!prevEvent) return prevEvent;
-                        const updatedTickets = prevEvent.tickets.map(t => ({
-                            ...t,
-                            remainingStock: stockMap[t.id] !== undefined ? stockMap[t.id] : t.remainingStock
-                        }));
-                        return { ...prevEvent, tickets: updatedTickets };
-                    });
-                }
-            } catch (err) {
-                console.log('拉取实时库存失败', err);
-            }
-        };
-
         const fetchDetail = async () => {
+            setLoading(true);
+            setEvent(null);
+            setSelectedSessionId(null);
+            setSelectedTicket(null);
+            setReservedData(null);
+            hasAutoFilled.current = false;
+
             try {
                 const res = await axios.get(`/api/event/detail/${id}`, {
-                    params: {
-                        viewToken: getEventViewToken(id)
-                    }
+                    params: { viewToken: getEventViewToken(id) }
                 });
-                if (res.data.code === 200) {
-                    const eventData = res.data.data;
-                    setEvent(eventData);
 
-                    // 🚨 新增：同步后端返回的统计数据（后端需在 detail 接口中补充这三个字段返回）
+                if (res.data.code === 200) {
+                    const eventData = res.data.data || {};
+                    const normalizedSessions = normalizeSessions(eventData);
+                    const nextEvent = { ...eventData, sessions: normalizedSessions };
+
+                    setEvent(nextEvent);
                     setWantCount(eventData.wantCount || 0);
                     setIsWanted(eventData.hasWanted || false);
                     setPageViews(eventData.pageViews || 0);
 
+                    const firstSession = normalizedSessions[0] || null;
+                    setSelectedSessionId(firstSession?.id ?? null);
+
+                    const firstAvailable = sortTicketsByPriceAsc(firstSession?.tickets || [])
+                        .find(t => Number(t.remainingStock ?? 0) > 0);
+                    setSelectedTicket(firstAvailable || null);
+
                     if (eventData.collectionId) {
                         try {
                             const collectionRes = await axios.get(`/api/event/collection/${eventData.collectionId}/events`);
-                            if (collectionRes.data.code === 200) {
-                                setCollectionEvents(collectionRes.data.data || []);
-                            } else {
-                                setCollectionEvents([]);
-                            }
+                            setCollectionEvents(collectionRes.data.code === 200 ? (collectionRes.data.data || []) : []);
                         } catch (e) {
                             console.error('加载同合集演出失败', e);
                             setCollectionEvents([]);
@@ -203,13 +218,8 @@ const EventDetail = () => {
                     } else {
                         setCollectionEvents([]);
                     }
-
-                    const firstAvailable = sortTicketsByPriceAsc(eventData.tickets || [])
-                        .find(t => t.remainingStock > 0);
-                    if (firstAvailable) setSelectedTicket(firstAvailable);
-                    fetchRealTimeStock();
                 } else {
-                    message.error(res.data.message);
+                    message.error(res.data.message || '演出不存在或已下架');
                     navigate('/');
                 }
             } catch (err) {
@@ -219,43 +229,103 @@ const EventDetail = () => {
             }
         };
 
-        // 🚨 异步拉取云端预约预填信息
+        fetchDetail();
+        window.scrollTo(0, 0);
+    }, [id, navigate]);
+
+    // 切换具体时间场次时，重置票档、数量，并按 eventId + sessionId 拉取当前用户的预约配置。
+    useEffect(() => {
+        if (!event || !selectedSession) return;
+
+        hasAutoFilled.current = false;
+        setQuantity(1);
+
+        const firstAvailable = sortTicketsByPriceAsc(selectedSession.tickets || [])
+            .find(t => Number(t.remainingStock ?? 0) > 0);
+        setSelectedTicket(firstAvailable || null);
+
         const fetchCloudReservation = async () => {
             const token = localStorage.getItem('token');
-            if (!token) return;
+            if (!token || !selectedSession.id) {
+                setReservedData(null);
+                return;
+            }
+
             try {
-                const res = await axios.get(`/api/reservation/get/${id}`);
+                const res = await axios.get('/api/reservation/get', {
+                    params: {
+                        eventId: Number(id),
+                        sessionId: selectedSession.id
+                    }
+                });
+
                 if (res.data.code === 200 && res.data.data) {
                     setReservedData(res.data.data);
+                } else {
+                    setReservedData(null);
                 }
             } catch (err) {
-                console.error("拉取云端预约信息失败", err);
+                console.error('拉取云端预约信息失败', err);
+                setReservedData(null);
             }
         };
 
-        fetchDetail();
         fetchCloudReservation();
-        window.scrollTo(0, 0);
+    }, [id, event?.id, selectedSessionId]);
 
-        const timer = setInterval(() => {
-            fetchRealTimeStock();
-        }, 3000);
+    // 按当前 session 轮询库存，不再按 eventId 拉取全部票档库存。
+    useEffect(() => {
+        if (!selectedSession?.id) return;
+
+        const fetchRealTimeStock = async () => {
+            try {
+                const stockRes = await axios.get(`/api/event/session/stock/${selectedSession.id}`);
+                if (stockRes.data.code === 200) {
+                    const stockMap = stockRes.data.data || {};
+
+                    setEvent(prevEvent => {
+                        if (!prevEvent || !Array.isArray(prevEvent.sessions)) return prevEvent;
+
+                        const updatedSessions = prevEvent.sessions.map(session => {
+                            if (String(session.id) !== String(selectedSession.id)) return session;
+
+                            const updatedTickets = (session.tickets || []).map(t => ({
+                                ...t,
+                                remainingStock: stockMap[t.id] !== undefined ? stockMap[t.id] : t.remainingStock
+                            }));
+
+                            return { ...session, tickets: updatedTickets };
+                        });
+
+                        return { ...prevEvent, sessions: updatedSessions };
+                    });
+                }
+            } catch (err) {
+                console.log('拉取实时库存失败', err);
+            }
+        };
+
+        fetchRealTimeStock();
+        const timer = setInterval(fetchRealTimeStock, 3000);
 
         return () => clearInterval(timer);
-    }, [id, navigate]);
+    }, [selectedSessionId]);
 
+    // 倒计时以当前选择的 session 为准。
     useEffect(() => {
-        if (!event || event.status !== 1) {
+        if (!event || activeStatus !== 1) {
             setSaleAvailable(false);
             return;
         }
 
-        if (!event.saleTime || dayjs().isAfter(dayjs(event.saleTime)) || dayjs().isSame(dayjs(event.saleTime))) {
+        if (!activeSaleTime || dayjs().isAfter(dayjs(activeSaleTime)) || dayjs().isSame(dayjs(activeSaleTime))) {
             setSaleAvailable(true);
+            setCountdown({ days: 0, hours: '00', minutes: '00', seconds: '00' });
             return;
         }
 
-        const targetTime = dayjs(event.saleTime);
+        const targetTime = dayjs(activeSaleTime);
+        let timerId;
         setSaleAvailable(false);
 
         const updateCountdown = () => {
@@ -265,28 +335,41 @@ const EventDetail = () => {
             if (diffMs <= 0) {
                 setCountdown({ days: 0, hours: '00', minutes: '00', seconds: '00' });
                 setSaleAvailable(true);
-                clearInterval(timer);
-            } else {
-                const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
-
-                setCountdown({
-                    days,
-                    hours: hours.toString().padStart(2, '0'),
-                    minutes: minutes.toString().padStart(2, '0'),
-                    seconds: seconds.toString().padStart(2, '0')
-                });
-                setSaleAvailable(false);
+                if (timerId) clearInterval(timerId);
+                return;
             }
+
+            const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+
+            setCountdown({
+                days,
+                hours: hours.toString().padStart(2, '0'),
+                minutes: minutes.toString().padStart(2, '0'),
+                seconds: seconds.toString().padStart(2, '0')
+            });
+            setSaleAvailable(false);
         };
 
         updateCountdown();
-        const timer = setInterval(updateCountdown, 1000);
+        timerId = setInterval(updateCountdown, 1000);
 
-        return () => clearInterval(timer);
-    }, [event]);
+        return () => clearInterval(timerId);
+    }, [event, selectedSessionId, activeStatus, activeSaleTime]);
+
+    // 正式开售时，如果用户已配置当前 session 的预约，自动带入票档和数量。
+    useEffect(() => {
+        if (saleAvailable && reservedData && selectedSession?.tickets && !hasAutoFilled.current) {
+            const matchedTicket = selectedSession.tickets.find(t => Number(t.id) === Number(reservedData.ticketId));
+            if (matchedTicket) {
+                setSelectedTicket(matchedTicket);
+                setQuantity(reservedData.spectatorIds?.length || 1);
+                hasAutoFilled.current = true;
+            }
+        }
+    }, [saleAvailable, reservedData, selectedSessionId, event]);
 
     const handleAddSpectator = async () => {
         try {
@@ -305,22 +388,27 @@ const EventDetail = () => {
         }
     };
 
-    // 🚨 提交同步预填数据至后端数据库
     const handleSaveReservation = async () => {
+        if (!selectedSession?.id) return message.warning('请选择演出时间场次');
         if (!tempTicketId) return message.warning('请选择要预约的票档');
         if (tempSpectatorIds.length === 0) return message.warning('请至少选择一位观演人');
 
-        const token = localStorage.getItem('token');
         try {
             const res = await axios.post('/api/reservation/save', {
                 eventId: Number(id),
+                sessionId: selectedSession.id,
                 ticketId: tempTicketId,
                 spectatorIds: tempSpectatorIds
             });
 
             if (res.data.code === 200) {
                 hasAutoFilled.current = false;
-                setReservedData({ ticketId: tempTicketId, spectatorIds: tempSpectatorIds });
+                setReservedData({
+                    eventId: Number(id),
+                    sessionId: selectedSession.id,
+                    ticketId: tempTicketId,
+                    spectatorIds: tempSpectatorIds
+                });
                 setReservationModalVisible(false);
                 message.success('预约抢票配置已成功！');
             } else {
@@ -353,24 +441,31 @@ const EventDetail = () => {
         });
     };
 
-    const totalPrice = selectedTicket ? (selectedTicket.price * quantity).toFixed(2) : '0.00';
-
     const handleBuy = async () => {
+        if (isNoSession) {
+            message.info('演出时间待定，暂未开放预约或购票');
+            return;
+        }
+
         if (isStatus3Future) {
             message.info('演出暂未开放购票，敬请期待');
             return;
         }
 
-        // 🚨 预约拦截：唤起云端排期选单
         if (isPresale) {
             const token = localStorage.getItem('token');
             if (!token) {
                 message.info('请先登录再进行预约');
                 return navigate('/auth');
             }
+            if (!selectedSession?.id) {
+                message.warning('请选择演出时间场次');
+                return;
+            }
+
             if (reservedData) {
                 setTempTicketId(reservedData.ticketId);
-                setTempSpectatorIds(reservedData.spectatorIds);
+                setTempSpectatorIds(reservedData.spectatorIds || []);
             } else {
                 setTempTicketId(null);
                 setTempSpectatorIds([]);
@@ -379,10 +474,11 @@ const EventDetail = () => {
             return;
         }
 
+        if (!selectedSession?.id) return message.warning('请选择演出时间场次');
         if (!selectedTicket) return message.warning('请先选择票档');
 
-        const currentTicketInfo = event.tickets?.find(t => t.id === selectedTicket.id);
-        if (currentTicketInfo && currentTicketInfo.remainingStock <= 0) {
+        const currentTicketInfo = selectedSession.tickets?.find(t => Number(t.id) === Number(selectedTicket.id));
+        if (currentTicketInfo && Number(currentTicketInfo.remainingStock ?? 0) <= 0) {
             return message.error('抱歉，您选中的票档刚刚被抢空了，请选择其他票档！');
         }
 
@@ -396,35 +492,38 @@ const EventDetail = () => {
 
         try {
             const res = await axios.post('/api/order/pre-check', {
-                eventId: event.id
+                eventId: event.id,
+                sessionId: selectedSession.id
             });
 
             hideLoading();
             if (res.data.code === 200) {
-                // 🚨 核心逻辑：智能校验预填信息是否被用户手动篡改
                 let finalPrefilledSpectators = [];
                 if (reservedData) {
-                    const isSameTicket = selectedTicket.id === reservedData.ticketId;
+                    const isSameSession = String(selectedSession.id) === String(reservedData.sessionId);
+                    const isSameTicket = Number(selectedTicket.id) === Number(reservedData.ticketId);
                     const isSameQuantity = quantity === (reservedData.spectatorIds?.length || 1);
 
-                    // 只有当“票档”和“数量”都和预案完全一致时，才沿用预选观演人
-                    if (isSameTicket && isSameQuantity) {
+                    if (isSameSession && isSameTicket && isSameQuantity) {
                         finalPrefilledSpectators = reservedData.spectatorIds;
                     }
                 }
 
                 navigate('/order/confirm', {
                     state: {
-                        event: event,
-                        selectedTicket: selectedTicket,
-                        quantity: quantity,
+                        event,
+                        selectedSession,
+                        sessionId: selectedSession.id,
+                        selectedTicket,
+                        quantity,
                         submitToken: res.data.data,
-                        // 🚨 如果被修改过，这里将下发空数组，确认页会强制用户重新勾选观演人
                         prefilledSpectators: finalPrefilledSpectators
                     }
                 });
             } else if (res.data.code === 2001) {
                 message.warning(res.data.message || '您点击太快了，请稍后再试');
+            } else {
+                message.error(res.data.message || '预检失败');
             }
         } catch (error) {
             hideLoading();
@@ -433,8 +532,26 @@ const EventDetail = () => {
     };
 
     if (loading) {
-        return <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}><Spin size="large" /></div>;
+        return (
+            <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                <Spin size="large" />
+            </div>
+        );
     }
+
+    const actionButtonDisabled = isNoSession || activeStatus !== 1;
+
+    const actionButtonText = isNoSession
+        ? '敬请期待'
+        : activeStatus === 1
+            ? (!saleAvailable
+                ? (reservedData ? '已预约' : '立即预约')
+                : '立即购票')
+            : isStatus3Future
+                ? '敬请期待'
+                : isStatus3Past
+                    ? '已结束'
+                    : '已停售';
 
     if (!event) return null;
 
@@ -442,9 +559,15 @@ const EventDetail = () => {
         <div className="detail-page-container">
             <div className="hero-blurred-bg" style={{ backgroundImage: `url(${event.posterUrl})` }} />
             <PublicHeader />
+
             <div className="content-wrapper">
                 <div style={{ display: 'flex' }}>
-                    <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)} style={{ marginBottom: 20, color: '#fff', fontSize: 16 }}>
+                    <Button
+                        type="text"
+                        icon={<ArrowLeftOutlined />}
+                        onClick={() => navigate(-1)}
+                        style={{ marginBottom: 20, color: '#fff', fontSize: 16 }}
+                    >
                         返回
                     </Button>
                 </div>
@@ -461,10 +584,9 @@ const EventDetail = () => {
                             <span>{formatStatNumber(pageViews)} 次浏览</span>
                         </div>
 
-
                         <div className="info-row">
                             <CalendarOutlined className="info-icon" />
-                            <span>演出时间：{event.showTime || '时间待定'}</span>
+                            <span>演出时间：{activeShowTime || '时间待定'}</span>
                             {event.runningTime && (
                                 <>
                                     <span style={{ margin: '0 12px', color: '#e0e0e0' }}>|</span>
@@ -473,6 +595,7 @@ const EventDetail = () => {
                                 </>
                             )}
                         </div>
+
                         <div className="info-row">
                             <TagsOutlined className="info-icon" />
                             <span>风格：{event.style || '暂未设置'}</span>
@@ -486,7 +609,64 @@ const EventDetail = () => {
                             <span>详细地址：{event.address || '地址待定'}</span>
                         </div>
 
-                        {/* 想看模块 */}
+                        {collectionEvents.length > 1 && (
+                            <div className="collection-switch-section">
+                                <div className="collection-switch-title-row">选择巡演站点</div>
+
+                                <div className="collection-segment-wrap">
+                                    {collectionEvents.map(item => {
+                                        const isCurrent = Number(item.id) === Number(event.id);
+
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={item.id}
+                                                className={`collection-segment-item ${isCurrent ? 'active' : ''}`}
+                                                onClick={() => {
+                                                    if (!isCurrent) navigate(`/event/${item.id}`);
+                                                }}
+                                                title={item.title}
+                                            >
+                                                <span className="collection-segment-name">
+                                                    {getCollectionEventName(item)}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {sessions.length > 1 && (
+                            <div className="session-switch-section">
+                                <div className="session-switch-title-row">选择时间</div>
+
+                                <div className="session-segment-wrap">
+                                    {sessions.map((session, index) => {
+                                        const isCurrent = String(session.id) === String(selectedSessionId);
+
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={session.id ?? index}
+                                                className={`session-segment-item ${isCurrent ? 'active' : ''}`}
+                                                onClick={() => {
+                                                    if (!isCurrent) {
+                                                        setSelectedSessionId(session.id ?? null);
+                                                    }
+                                                }}
+                                                title={getSessionDisplayName(session, index)}
+                                            >
+                        <span className="session-segment-name">
+                            {getSessionDisplayName(session, index)}
+                        </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
                         <div className="event-want-card">
                             <div className="event-want-content">
                                 <div className="event-want-brand">
@@ -500,7 +680,6 @@ const EventDetail = () => {
                                 </div>
 
                                 <div className="event-want-subtitle">{getWantSubtitle()}</div>
-
                             </div>
 
                             <Button
@@ -512,7 +691,7 @@ const EventDetail = () => {
                             </Button>
                         </div>
 
-                        {event.status === 1 && !saleAvailable && (
+                        {activeStatus === 1 && !saleAvailable && (
                             <div className="presale-countdown-card">
                                 <div className="countdown-top-line">
                                     <span className="countdown-prefix">距离正式开抢还剩</span>
@@ -537,46 +716,18 @@ const EventDetail = () => {
                                     </div>
                                 </div>
                                 <div className="countdown-sale-time">
-                                    {event.saleTime ? dayjs(event.saleTime).format('MM月DD日 HH:mm开抢') : '即将开抢'}
+                                    {activeSaleTime ? dayjs(activeSaleTime).format('MM月DD日 HH:mm开抢') : '即将开抢'}
                                 </div>
                             </div>
                         )}
 
-                        {collectionEvents.length > 1 && (
-                            <div className="collection-switch-section">
-                                <div className="collection-switch-title-row">选择场次</div>
-
-                                <div className="tickets-container collection-ticket-container">
-                                    {collectionEvents.map(item => {
-                                        const isCurrent = Number(item.id) === Number(event.id);
-
-                                        return (
-                                            <button
-                                                type="button"
-                                                key={item.id}
-                                                className={`ticket-pill collection-ticket-pill ${isCurrent ? 'active' : ''}`}
-                                                onClick={() => {
-                                                    if (!isCurrent) navigate(`/event/${item.id}`);
-                                                }}
-                                            >
-                                                <span className="ticket-name collection-ticket-name">
-                                                    {getCollectionEventName(item)}
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* 🚨 仅在正式在售状态下展示基础选票组件 */}
                         {showPurchaseOptions && (
                             <div style={{ marginTop: '24px', textAlign: 'left' }}>
                                 <div style={{ fontWeight: 'bold', color: '#333', marginBottom: 8 }}>选择票档</div>
                                 <div className="tickets-container">
                                     {sortedTickets.map(ticket => {
-                                        const isSoldOut = ticket.remainingStock <= 0;
-                                        const isActive = selectedTicket?.id === ticket.id;
+                                        const isSoldOut = Number(ticket.remainingStock ?? 0) <= 0;
+                                        const isActive = Number(selectedTicket?.id) === Number(ticket.id);
                                         return (
                                             <div
                                                 key={ticket.id}
@@ -596,37 +747,41 @@ const EventDetail = () => {
                             <div style={{ marginTop: '24px', marginBottom: '40px', textAlign: 'left' }}>
                                 <div style={{ fontWeight: 'bold', color: '#333', marginBottom: 10 }}>购买数量</div>
                                 <div style={{ display: 'flex', alignItems: 'center' }}>
-                                    <InputNumber min={1} max={6} value={quantity} onChange={setQuantity} size="large" disabled={!selectedTicket} />
+                                    <InputNumber
+                                        min={1}
+                                        max={6}
+                                        value={quantity}
+                                        onChange={(value) => setQuantity(value || 1)}
+                                        size="large"
+                                        disabled={!selectedTicket}
+                                    />
                                     <span style={{ marginLeft: 12, color: '#999', fontSize: 13 }}>每笔订单限购 6 张</span>
                                 </div>
                             </div>
                         )}
 
                         <div className="action-bar">
-                            {!hidePurchaseOptions && !isPresale && (
+                            {!isNoSession && !hidePurchaseOptions && !isPresale && (
                                 <div>
                                     <span style={{ color: '#666', marginRight: 8 }}>总计:</span>
                                     <span style={{ color: '#FF8899', fontSize: 20 }}>¥</span>
                                     <span className="total-price">{totalPrice}</span>
                                 </div>
                             )}
+
                             <Button
                                 type="primary"
                                 className="action-buy-btn"
                                 onClick={handleBuy}
+                                disabled={actionButtonDisabled}
                                 style={{
-                                    background: event.status !== 1 ? '#ccc' : 'linear-gradient(135deg, #FF8899, #ff6b80)',
-                                    boxShadow: event.status !== 1 ? 'none' : '0 4px 12px rgba(255, 136, 153, 0.4)',
+                                    background: actionButtonDisabled ? '#ccc' : 'linear-gradient(135deg, #FF8899, #ff6b80)',
+                                    boxShadow: actionButtonDisabled ? 'none' : '0 4px 12px rgba(255, 136, 153, 0.4)',
                                     border: 'none',
-                                    marginLeft: hidePurchaseOptions || isPresale ? 'auto' : 0,
-                                    pointerEvents: event.status !== 1 ? 'none' : 'auto'
+                                    marginLeft: hidePurchaseOptions || isPresale || isNoSession ? 'auto' : 0
                                 }}
                             >
-                                {event.status === 1
-                                    ? (!saleAvailable
-                                        ? (reservedData ? '已预约' : '立即预约')
-                                        : '立即购票')
-                                    : isStatus3Future ? '敬请期待' : isStatus3Past ? '已结束' : '已停售'}
+                                {actionButtonText}
                             </Button>
                         </div>
                     </div>
@@ -640,8 +795,8 @@ const EventDetail = () => {
                                 <Col xs={24} sm={12} md={8} key={idx}>
                                     <div
                                         className="artist-card"
-                                        style={{ cursor: 'pointer', transition: 'all 0.3s' }} // 🚨 增加鼠标指针手型
-                                        onClick={() => artist.id && navigate(`/artist/${artist.id}`)} // 🚨 增加点击跳转逻辑
+                                        style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                                        onClick={() => artist.id && navigate(`/artist/${artist.id}`)}
                                     >
                                         <Avatar src={artist.avatarUrl} size={54} icon={<UserOutlined />} />
                                         <div>
@@ -665,7 +820,6 @@ const EventDetail = () => {
                 </div>
             </div>
 
-            {/* ================= 云端预约抢票选单弹窗 ================= */}
             <Modal
                 className="reservation-prefill-modal"
                 title={
@@ -683,7 +837,6 @@ const EventDetail = () => {
                 okButtonProps={{ className: 'reservation-modal-ok-btn' }}
             >
                 <div className="reservation-panel">
-
                     <div className="reservation-step-card">
                         <div className="reservation-step-header">
                             <div className="reservation-step-title">
@@ -702,14 +855,14 @@ const EventDetail = () => {
                             {sortedTickets.length > 0 ? sortedTickets.map(ticket => (
                                 <div
                                     key={ticket.id}
-                                    className={`ticket-pill reservation-ticket-pill ${tempTicketId === ticket.id ? 'active' : ''}`}
+                                    className={`ticket-pill reservation-ticket-pill ${Number(tempTicketId) === Number(ticket.id) ? 'active' : ''}`}
                                     onClick={() => setTempTicketId(ticket.id)}
                                 >
                                     <span className="ticket-name">{ticket.name}</span>
                                     <span className="ticket-price">¥ {ticket.price}</span>
                                 </div>
                             )) : (
-                                <div className="reservation-empty-line">该演出暂未设置票档</div>
+                                <div className="reservation-empty-line">该场次暂未设置票档</div>
                             )}
                         </div>
                     </div>
@@ -775,12 +928,14 @@ const EventDetail = () => {
                 </div>
             </Modal>
 
-            {/* 新增观演人通用子组件 */}
             <Modal
                 title="新增常用购票人"
                 open={spectatorModalVisible}
                 onOk={handleAddSpectator}
-                onCancel={() => { setSpectatorModalVisible(false); spectatorForm.resetFields(); }}
+                onCancel={() => {
+                    setSpectatorModalVisible(false);
+                    spectatorForm.resetFields();
+                }}
                 okText="保存"
                 cancelText="取消"
                 okButtonProps={{ style: { backgroundColor: '#FF8899', border: 'none' } }}
@@ -797,17 +952,21 @@ const EventDetail = () => {
                         </Select>
                     </Form.Item>
                     <Form.Item
-                        label="证件号码" name="idCard" dependencies={['idType']}
+                        label="证件号码"
+                        name="idCard"
+                        dependencies={['idType']}
                         rules={[
                             { required: true, message: '请输入证件号码' },
                             ({ getFieldValue }) => ({
                                 validator(_, value) {
                                     if (!value) return Promise.resolve();
                                     const type = getFieldValue('idType');
-                                    if (type === 1 && !/^[1-9]\d{5}(18|19|20)\d{2}((0[1-9])|(1[0-2]))(([0-2][1-9])|10|20|30|31)\d{3}[0-9Xx]$/.test(value)) return Promise.reject(new Error('身份证格式不正确'));
+                                    if (type === 1 && !/^[1-9]\d{5}(18|19|20)\d{2}((0[1-9])|(1[0-2]))(([0-2][1-9])|10|20|30|31)\d{3}[0-9Xx]$/.test(value)) {
+                                        return Promise.reject(new Error('身份证格式不正确'));
+                                    }
                                     return Promise.resolve();
-                                },
-                            }),
+                                }
+                            })
                         ]}
                     >
                         <Input placeholder="请输入证件号码" maxLength={18} />

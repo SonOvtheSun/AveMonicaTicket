@@ -47,6 +47,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private StringRedisTemplate redisTemplate;
 
     @Autowired
+    private EventSessionMapper eventSessionMapper;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @Autowired
@@ -63,41 +66,75 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Order createTicketOrder(Order order, List<Long> spectatorIds) {
+        if (order == null) {
+            throw new RuntimeException("订单参数不能为空");
+        }
+        if (order.getEventId() == null) {
+            throw new RuntimeException("缺少演出信息");
+        }
+        if (order.getSessionId() == null) {
+            throw new RuntimeException("缺少演出场次信息");
+        }
+        if (order.getTicketId() == null) {
+            throw new RuntimeException("缺少票档信息");
+        }
+        if (order.getQuantity() == null || order.getQuantity() <= 0) {
+            throw new RuntimeException("购票数量不正确");
+        }
+        if (spectatorIds == null || spectatorIds.size() != order.getQuantity()) {
+            throw new RuntimeException("实名观演人数量与购票数量不一致");
+        }
+
         TicketCategory ticket = ticketMapper.selectById(order.getTicketId());
         if (ticket == null) {
             throw new RuntimeException("该票档不存在或已下架");
         }
 
-        int updateRows = ticketMapper.deductStock(order.getTicketId(), order.getQuantity());
-        if(updateRows == 0){
-            throw new RuntimeException("手慢了，该票档库存不足！");
+        /*
+         * 多场次模型核心校验：
+         * 票档必须同时属于当前 eventId 和 sessionId。
+         * 这样可以防止用户绕过前端，拿 A 场次的票档 ID 去买 B 场次。
+         */
+        if (!Objects.equals(ticket.getEventId(), order.getEventId())
+                || !Objects.equals(ticket.getSessionId(), order.getSessionId())) {
+            throw new RuntimeException("票档不属于当前演出场次");
         }
 
+        EventSession session = eventSessionMapper.selectById(order.getSessionId());
+        if (session == null || !Objects.equals(session.getEventId(), order.getEventId())) {
+            throw new RuntimeException("演出场次不存在或不属于当前演出");
+        }
+
+        /*
+         * 库存扣减必须放在所有归属校验之后。
+         * 否则如果先扣库存再发现 sessionId 不合法，会导致库存被错误扣减。
+         */
+        int updateRows = ticketMapper.deductStock(order.getTicketId(), order.getQuantity());
+        if (updateRows == 0) {
+            throw new RuntimeException("手慢了，该票档库存不足！");
+        }
 
         BigDecimal payPrice = ticket.getPrice().multiply(new BigDecimal(order.getQuantity()));
         order.setPayPrice(payPrice);
         order.setStatus(1);
         order.setOrderNo(IdWorker.getIdStr());
         order.setCreateTime(LocalDateTime.now());
+
         this.save(order);
 
-        // ==========================================
-        // 3. 🚨 核心改造：废弃原有的 Redis 暂存观演人逻辑
-        // 立即将订单与观演人的绑定关系落入 tb_order_spectator 表
-        // ==========================================
+        /*
+         * 立即将订单与观演人的绑定关系落入 tb_order_spectator。
+         * 这里必须写 sessionId，否则同一个演出下的下午场/晚场会互相冲突。
+         */
         for (Long specId : spectatorIds) {
             OrderSpectator os = new OrderSpectator();
             os.setOrderId(order.getId());
             os.setEventId(order.getEventId());
+            os.setSessionId(order.getSessionId());
             os.setSpectatorId(specId);
-            os.setDeleteToken(0L); // 0 代表当前正处于活跃状态（待支付/已支付）
-
-            // 🚨 触发点：如果 Redis 预检漏过了并发请求，这里的 insert 会触发
-            // uk_event_spectator 唯一索引冲突，直接抛出 DuplicateKeyException 异常，
-            // 阻断本次写库，并将异常抛给上一层的 Kafka 消费者进行“出票失败”的善后处理。
+            os.setDeleteToken(0L);
             orderSpectatorMapper.insert(os);
         }
-
 
         return order;
     }
@@ -135,7 +172,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             orderSpectatorMapper.updateById(os);
 
             // 收集需要删除的 Redis 短锁 Key
-            redisLockKeys.add("event:spectator:lock:" + order.getEventId() + ":" + os.getSpectatorId());
+            redisLockKeys.add("event:spectator:lock:" + order.getEventId() + ":" + order.getSessionId() + ":" + os.getSpectatorId());
         }
 
         // 5. 🚨 核心 2：立刻删除 Redis 短锁，让这些观演人马上重获购票资格！
@@ -176,13 +213,27 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
             // 2.1 组装演出信息
             Event event = eventMapper.selectById(order.getEventId());
+            EventSession session = null;
+            if (order.getSessionId() != null) {
+                session = eventSessionMapper.selectById(order.getSessionId());
+            }
+
             OrderVO.EventVO eventVO = new OrderVO.EventVO();
             if (event != null) {
                 eventVO.setName(event.getTitle());
                 eventVO.setPoster(event.getPosterUrl());
                 eventVO.setCity(event.getCity());
                 eventVO.setVenue(event.getVenue());
-                eventVO.setTime(event.getShowTime() != null ? event.getShowTime().format(formatter) : "时间待定");
+
+                /*
+                 * 多场次模型下，订单展示时间必须优先使用 tb_event_session.show_time。
+                 * 如果是旧订单或旧数据没有 sessionId，则回退到 tb_event.show_time。
+                 */
+                LocalDateTime displayShowTime = session != null && session.getShowTime() != null
+                        ? session.getShowTime()
+                        : event.getShowTime();
+
+                eventVO.setTime(displayShowTime != null ? displayShowTime.format(formatter) : "时间待定");
                 eventVO.setRunningTime(event.getRunningTime());
             }
             vo.setEvent(eventVO);

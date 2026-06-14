@@ -63,6 +63,29 @@ const AuditManager = () => {
         }).join('\n');
     };
 
+    const formatSessionTime = (time) => {
+        if (!time) return '时间待定';
+        const value = dayjs(time);
+        return value.isValid() ? value.format('YYYY-MM-DD HH:mm:ss') : String(time).replace('T', ' ');
+    };
+
+    const formatSessions = (sessions = []) => {
+        if (!sessions || sessions.length === 0) return '暂未设置时间场次';
+
+        return sessions.map((session, index) => {
+            const sessionName = session.sessionName || `场次${index + 1}`;
+            const showTime = formatSessionTime(session.showTime);
+            const saleTime = session.saleTime ? formatSessionTime(session.saleTime) : '未设置开票时间';
+            const ticketsText = formatTickets(session.tickets || []);
+
+            return `${sessionName}
+                演出时间：${showTime}
+                开票时间：${saleTime}
+                票档：
+                ${ticketsText}`;
+        }).join('\n\n');
+    };
+
     const formatArtists = (artists = []) => {
         if (!artists || artists.length === 0) return '暂无艺人';
 
@@ -80,16 +103,17 @@ const AuditManager = () => {
     };
 
     const buildEventExtraDiffRows = (record, pending) => {
+
         const rows = [];
 
-        const oldTickets = formatTickets(record.tickets || []);
-        const newTickets = formatTickets(pending.tickets || []);
+        const oldSessions = formatSessions(record.sessions || []);
+        const newSessions = formatSessions(pending.sessions || []);
 
-        if (oldTickets !== newTickets) {
+        if (oldSessions !== newSessions) {
             rows.push({
-                label: '票务档位',
-                oldText: oldTickets,
-                newText: newTickets,
+                label: '时间场次与票档',
+                oldText: oldSessions,
+                newText: newSessions,
                 changed: true
             });
         }
@@ -330,10 +354,12 @@ const AuditManager = () => {
                 ...record,
                 ...pending,
 
-                // EventAddDTO 里票档字段一般是 tickets
+                // 多场次模型优先展示 pending.sessions
+                sessions: pending.sessions || record.sessions || [],
+
+                // 兼容旧字段
                 tickets: pending.tickets || record.tickets || [],
 
-                // EventAddDTO 里艺人通常是 artistIds，不是 artists
                 artists: record.pendingArtists && record.pendingArtists.length > 0
                     ? record.pendingArtists
                     : (
@@ -675,21 +701,67 @@ const AuditManager = () => {
                         </Descriptions.Item>
 
                         {/* 🚨 新增：票务档位策略查看 */}
-                        <Descriptions.Item label="票务档位" span={2}>
-                            {displayRecord.tickets && displayRecord.tickets.length > 0 ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    {displayRecord.tickets.map((ticket, idx) => (
-                                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#fff0f3', padding: '6px 12px', borderRadius: '6px', border: '1px solid #ffe6e8' }}>
-                                            <Tag color="#FF8899" style={{ margin: 0 }}>{ticket.name}</Tag>
-                                            <span style={{ color: '#e60026', fontWeight: 'bold', width: '80px' }}>¥ {ticket.price}</span>
-                                            <span style={{ color: '#666', fontSize: '13px' }}>
-                                                初始库存: <b>{ticket.totalStock || ticket.stock || 0}</b> 张
-                                            </span>
+                        <Descriptions.Item label="时间场次" span={2}>
+                            {displayRecord.sessions && displayRecord.sessions.length > 0 ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                    {displayRecord.sessions.map((session, idx) => (
+                                        <div
+                                            key={session.id || idx}
+                                            style={{
+                                                padding: '12px 14px',
+                                                borderRadius: 10,
+                                                background: '#f6fffe',
+                                                border: '1px solid rgba(23, 185, 185, 0.18)'
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                                <Tag color="cyan" style={{ margin: 0 }}>
+                                                    {session.sessionName || `场次${idx + 1}`}
+                                                </Tag>
+                                                <span style={{ color: '#333', fontWeight: 700 }}>
+                            {session.showTime ? dayjs(session.showTime).format('YYYY-MM-DD HH:mm:ss') : '时间待定'}
+                        </span>
+                                            </div>
+
+                                            <div style={{ color: '#999', fontSize: 12, marginBottom: 8 }}>
+                                                开票时间：
+                                                {session.saleTime ? dayjs(session.saleTime).format('YYYY-MM-DD HH:mm:ss') : '未设置'}
+                                            </div>
+
+                                            {session.tickets && session.tickets.length > 0 ? (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                    {session.tickets.map((ticket, ticketIdx) => (
+                                                        <div
+                                                            key={ticket.id || ticketIdx}
+                                                            style={{
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: 12,
+                                                                padding: '6px 10px',
+                                                                borderRadius: 6,
+                                                                background: '#fff'
+                                                            }}
+                                                        >
+                                                            <Tag color="#FF8899" style={{ margin: 0 }}>
+                                                                {ticket.name || '未命名票档'}
+                                                            </Tag>
+                                                            <span style={{ color: '#e60026', fontWeight: 800 }}>
+                                        ¥ {ticket.price ?? '未设置'}
+                                    </span>
+                                                            <span style={{ color: '#666', fontSize: 12 }}>
+                                        库存：{ticket.stock ?? ticket.totalStock ?? 0}
+                                    </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span style={{ color: '#999', fontSize: 12 }}>该场次暂未设置票档</span>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
                             ) : (
-                                <span style={{ color: '#999', fontSize: 12 }}>暂未设置票档</span>
+                                <span style={{ color: '#999', fontSize: 12 }}>暂未设置时间场次</span>
                             )}
                         </Descriptions.Item>
 

@@ -22,4 +22,5 @@ public class OrderTicket {
     private String seatInfo;
     private String qrCode;
     private Integer checkStatus;
+    private Long sessionId;
 }

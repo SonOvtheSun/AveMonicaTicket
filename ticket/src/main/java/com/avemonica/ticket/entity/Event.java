@@ -94,6 +94,9 @@ public class Event {
     @TableField(exist = false)
     private List<TicketCategory> tickets;
 
+    @TableField(exist = false)
+    private List<EventSession> sessions;
+
     /**
      * 绑定的参演艺人列表（非数据库字段，仅用于向前端返回嵌套数据）
      */

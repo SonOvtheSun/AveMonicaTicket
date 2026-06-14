@@ -322,7 +322,7 @@ const ArtistLibrary = () => {
                         )}
 
                         {/* 下架 / 恢复 / 删除：只给 artist:manage 或超管 */}
-                        {(canManageArtist || permissions.includes("artist:view")) && record.auditStatus === 1 && (
+                        {(canManageArtist) && record.auditStatus === 1 && (
                             <Popconfirm
                                 title="确定要下架该艺人吗？"
                                 onConfirm={() => handleStatusChange(record.id, 0)}

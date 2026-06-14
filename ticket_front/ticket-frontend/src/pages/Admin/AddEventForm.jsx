@@ -179,9 +179,6 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
 
     useEffect(() => {
         if (editingRecord) {
-            const parsedShowTime = editingRecord.showTime ? dayjs(editingRecord.showTime) : null;
-            const parsedSaleTime = editingRecord.saleTime ? dayjs(editingRecord.saleTime) : null;
-
             const initPoster = editingRecord.posterUrl ? [{ uid: '-1', name: 'poster.png', status: 'done', url: editingRecord.posterUrl }] : [];
             const initDetails = editingRecord.detailsUrl ? [{ uid: '-2', name: 'details.png', status: 'done', url: editingRecord.detailsUrl }] : [];
 
@@ -200,11 +197,23 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 }
             }
 
-            const mappedTickets = editingRecord.tickets && editingRecord.tickets.length > 0
-                ? editingRecord.tickets.map(t => ({
-                    name: t.name,
-                    price: t.price,
-                    stock: t.totalStock ?? t.stock ?? t.remainingStock
+            const mapTickets = (tickets = []) => tickets.map(t => ({
+                id: t.id,
+                name: t.name,
+                price: t.price,
+                stock: t.totalStock ?? t.stock ?? t.remainingStock
+            }));
+
+            // 新模型：优先回显 sessions；旧数据没有 sessions 时，用 Event 上的 showTime/saleTime/tickets 生成一个默认场次
+            const mappedSessions = editingRecord.sessions && editingRecord.sessions.length > 0
+                ? editingRecord.sessions.map((session, index) => ({
+                    id: session.id,
+                    sessionName: session.sessionName || `场次${index + 1}`,
+                    showTime: session.showTime ? dayjs(session.showTime) : null,
+                    saleTime: session.saleTime ? dayjs(session.saleTime) : null,
+                    status: session.status ?? editingRecord.status ?? 1,
+                    sortOrder: session.sortOrder ?? index,
+                    tickets: mapTickets(session.tickets || [])
                 }))
                 : [];
 
@@ -221,9 +230,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             form.setFieldsValue({
                 ...editingRecord,
                 cityCascade: initialCityCascade,
-                showTime: parsedShowTime,
-                saleTime: parsedSaleTime,
-                tickets: mappedTickets,
+                sessions: mappedSessions,
                 artistIds: artistIds,
                 style: editingRecord.style ? [editingRecord.style] : [],
                 collectionId: editingRecord.collectionId,
@@ -235,7 +242,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             form.setFieldsValue({
                 status: 1,
                 style: [],
-                tickets: []
+                sessions: []
             });
             setPosterFileList([]);
             setDetailsFileList([]);
@@ -354,26 +361,53 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         }
         const styleStr = Array.isArray(values.style) && values.style.length > 0 ? values.style[0] : '';
 
-        const finalTickets = (values.tickets || [])
-            .filter(t => t && (t.name || t.price != null || t.stock != null))
-            .map(t => ({
-                name: t.name,
-                price: t.price,
-                stock: t.stock
-            }));
+        const formatDateTime = (value) => {
+            if (!value) return null;
+            return value.format ? value.format('YYYY-MM-DD HH:mm:ss') : value;
+        };
+
+        const finalSessions = (values.sessions || [])
+            .filter(session => session && session.showTime)
+            .map((session, index) => {
+                const sessionTickets = (session.tickets || [])
+                    .filter(t => t && (t.name || t.price != null || t.stock != null))
+                    .map(t => ({
+                        id: t.id,
+                        name: t.name,
+                        price: t.price,
+                        stock: t.stock
+                    }));
+
+                return {
+                    id: session.id,
+                    sessionName: session.sessionName || `场次${index + 1}`,
+                    showTime: formatDateTime(session.showTime),
+                    saleTime: formatDateTime(session.saleTime),
+                    status: session.status ?? values.status,
+                    sortOrder: session.sortOrder ?? index,
+                    tickets: sessionTickets
+                };
+            });
+
+        const firstSession = finalSessions.length > 0 ? finalSessions[0] : null;
 
         setLoading(true);
         try {
             const payload = {
                 title: values.title,
-                showTime: values.showTime && values.showTime.format ? values.showTime.format('YYYY-MM-DD HH:mm:ss') : values.showTime,
-                saleTime: values.saleTime && values.saleTime.format ? values.saleTime.format('YYYY-MM-DD HH:mm:ss') : values.saleTime,
+                // 兼容旧列表与旧接口：Event 主表仍保存第一个场次作为默认展示时间
+                showTime: firstSession ? firstSession.showTime : null,
+                saleTime: firstSession ? firstSession.saleTime : null,
                 city: finalCity,
                 venue: values.venue,
                 address: values.address,
                 status: values.status,
                 artistIds: values.artistIds,
-                tickets: finalTickets,
+                // 兼容旧后端字段；新后端应优先读取 sessions
+                tickets: firstSession ? (firstSession.tickets || []) : [],
+                sessions: finalSessions,
+                collectionId: values.collectionId || null,
+                collectionAlias: values.collectionAlias || '',
                 posterUrl: finalPosterUrl,
                 style: styleStr,
                 runningTime: values.runningTime,
@@ -411,12 +445,6 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
 
             <Row gutter={16}>
                 <Col span={12}>
-                    <Form.Item name="showTime" label="定档演出时间" rules={[{ required: true, message: '请选择确切的演出执行时间' }]}>
-                        <DatePicker placeholder="选择时间" showTime format="YYYY-MM-DD HH:mm" size="large" style={{ width: '100%' }} />
-                    </Form.Item>
-                </Col>
-                <Col span={8}>
-                    {/* 🚨 新增：演出时长输入框 */}
                     <Form.Item name="runningTime" label="演出时长 (分钟)" rules={[{ required: true, message: '请输入演出时长' }]}>
                         <InputNumber min={1} placeholder="如：120" size="large" style={{ width: '100%' }} />
                     </Form.Item>
@@ -431,35 +459,6 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                     </Form.Item>
                 </Col>
             </Row>
-
-            <Form.Item
-                name="saleTime"
-                label="预开票时间"
-                dependencies={['status', 'showTime']}
-                rules={[
-                    ({ getFieldValue }) => ({
-                        validator(_, value) {
-                            const currentStatus = Number(getFieldValue('status'));
-                            const showTimeValue = getFieldValue('showTime');
-
-                            if (currentStatus === 1 && !value) {
-                                return Promise.reject(new Error('演出设置为“上架”状态时，必须设定开票时间！'));
-                            }
-                            if (value && showTimeValue) {
-                                const saleDate = dayjs(value);
-                                const showDate = dayjs(showTimeValue);
-                                const limitTime = showDate.subtract(24, 'hour');
-                                if (saleDate.isAfter(limitTime)) {
-                                    return Promise.reject(new Error('开票时间必须早于演出时间至少 24 小时！'));
-                                }
-                            }
-                            return Promise.resolve();
-                        },
-                    }),
-                ]}
-            >
-                <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" style={{ width: '100%' }} size="large" placeholder="上架状态必填，且早于演出前24小时" />
-            </Form.Item>
 
             {/* 🚨 演出风格平铺标签区 */}
             <Form.Item label="演出风格" tooltip="点击下方快捷标签一键填入，或在框内手动输入后敲回车添加">
@@ -583,51 +582,205 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 </Col>
             </Row>
 
-            <Divider orientation="left" style={{ borderColor: '#FF8899', color: '#FF8899' }}>票务档位策略配置</Divider>
+            <Divider orientation="left" style={{ borderColor: '#FF8899', color: '#FF8899' }}>时间场次与票务配置</Divider>
 
-            <Form.List name="tickets">
-                {(fields, { add, remove }) => (
+            <Form.List name="sessions">
+                {(sessionFields, { add: addSession, remove: removeSession }) => (
                     <>
-                        {fields.length === 0 && (
+                        {sessionFields.length === 0 && (
                             <div style={{
                                 marginBottom: 12,
                                 padding: '10px 12px',
                                 borderRadius: 8,
-                                background: '#fff7e6',
-                                border: '1px solid #ffe7ba',
-                                color: '#8c6d1f',
+                                background: '#f6fffe',
+                                border: '1px solid rgba(23, 185, 185, 0.22)',
+                                color: '#178b8b',
                                 fontSize: 13
                             }}>
-                                当前未设置票档
+                                {sessionFields.length === 0 && (
+                                    <div style={{
+                                        marginBottom: 12,
+                                        padding: '10px 12px',
+                                        borderRadius: 8,
+                                        background: '#f6fffe',
+                                        border: '1px solid rgba(23, 185, 185, 0.22)',
+                                        color: '#178b8b',
+                                        fontSize: 13
+                                    }}>
+                                        当前未配置具体时间场次
+                                    </div>
+                                )}
                             </div>
                         )}
 
-                        {fields.map(({ key, name, ...restField }) => (
-                            <Space key={key} style={{ display: 'flex', marginBottom: 12 }} align="baseline">
-                                <Form.Item {...restField} name={[name, 'name']} rules={[{ required: true, message: '请规范输入票档标识' }]}>
-                                    <Input placeholder="档位名称（如：VIP票）" size="large" style={{ width: '220px' }} />
+                        {sessionFields.map(({ key, name, ...restField }, sessionIndex) => (
+                            <div
+                                key={key}
+                                style={{
+                                    marginBottom: 18,
+                                    padding: 16,
+                                    borderRadius: 14,
+                                    background: '#fff8fa',
+                                    border: '1px solid rgba(255, 136, 153, 0.22)'
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                                    <strong style={{ color: '#FF6B80' }}>场次 {sessionIndex + 1}</strong>
+                                    <Button
+                                        type="link"
+                                        danger
+                                        size="small"
+                                        icon={<MinusCircleOutlined />}
+                                        onClick={() => removeSession(name)}
+                                    >
+                                        删除场次
+                                    </Button>
+                                </div>
+
+                                <Row gutter={12}>
+                                    <Col span={8}>
+                                        <Form.Item
+                                            {...restField}
+                                            name={[name, 'sessionName']}
+                                            label="场次名称"
+                                        >
+                                            <Input placeholder="如：下午场 / 晚场 / Day 1" size="large" />
+                                        </Form.Item>
+                                    </Col>
+
+                                    <Col span={8}>
+                                        <Form.Item
+                                            {...restField}
+                                            name={[name, 'showTime']}
+                                            label="演出时间"
+                                        >
+                                            <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" placeholder="选择演出时间" size="large" style={{ width: '100%' }} />
+                                        </Form.Item>
+                                    </Col>
+
+                                    <Col span={8}>
+                                        <Form.Item
+                                            {...restField}
+                                            name={[name, 'saleTime']}
+                                            label="开票时间"
+                                            dependencies={[['sessions', name, 'showTime']]}
+                                            rules={[
+                                                ({ getFieldValue }) => ({
+                                                    validator(_, value) {
+                                                        const currentStatus = Number(getFieldValue('status'));
+                                                        const showTimeValue = getFieldValue(['sessions', name, 'showTime']);
+
+                                                        // 没有演出时间，说明这个场次不算有效场次，不校验开票时间
+                                                        if (!showTimeValue) {
+                                                            return Promise.resolve();
+                                                        }
+
+                                                        // 有演出时间，并且项目上架，才要求开票时间
+                                                        if (currentStatus === 1 && !value) {
+                                                            return Promise.reject(new Error('上架状态下每个有效场次都必须设置开票时间'));
+                                                        }
+
+                                                        if (value && showTimeValue) {
+                                                            const saleDate = dayjs(value);
+                                                            const showDate = dayjs(showTimeValue);
+                                                            const limitTime = showDate.subtract(24, 'hour');
+                                                            if (saleDate.isAfter(limitTime)) {
+                                                                return Promise.reject(new Error('开票时间必须早于该场次演出时间至少 24 小时'));
+                                                            }
+                                                        }
+
+                                                        return Promise.resolve();
+                                                    }
+                                                })
+                                            ]}
+                                        >
+                                            <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" placeholder="选择开票时间" size="large" style={{ width: '100%' }} />
+                                        </Form.Item>
+                                    </Col>
+                                </Row>
+
+                                <Form.Item {...restField} name={[name, 'status']} label="场次状态" initialValue={1} style={{ maxWidth: 260 }}>
+                                    <Select size="large" options={[
+                                        { label: '上架（含预售/在售）', value: 1 },
+                                        { label: '已停售', value: 3 },
+                                        { label: '隐藏', value: 4 },
+                                    ]} />
                                 </Form.Item>
 
-                                <Form.Item {...restField} name={[name, 'price']} rules={[{ required: true, message: '请输入定价' }]}>
-                                    <InputNumber placeholder="票价 (¥)" min={0} precision={2} size="large" style={{ width: '130px' }} />
-                                </Form.Item>
+                                <div style={{ margin: '8px 0 10px', fontWeight: 600, color: '#333' }}>本场次票档</div>
 
-                                <Form.Item {...restField} name={[name, 'stock']} rules={[{ required: true, message: '请输入初始库存' }]}>
-                                    <InputNumber placeholder="总发行库存 (张)" min={1} precision={0} size="large" style={{ width: '140px' }} />
-                                </Form.Item>
+                                <Form.List name={[name, 'tickets']}>
+                                    {(ticketFields, { add: addTicket, remove: removeTicket }) => (
+                                        <>
+                                            {ticketFields.length === 0 && (
+                                                <div style={{
+                                                    marginBottom: 12,
+                                                    padding: '9px 12px',
+                                                    borderRadius: 8,
+                                                    background: '#fff7e6',
+                                                    border: '1px solid #ffe7ba',
+                                                    color: '#8c6d1f',
+                                                    fontSize: 13
+                                                }}>
+                                                    当前场次未设置票档
+                                                </div>
+                                            )}
 
-                                <MinusCircleOutlined
-                                    onClick={() => remove(name)}
-                                    title="删除该票档"
-                                    style={{ color: '#ff4d4f', fontSize: '18px', marginLeft: '12px', cursor: 'pointer' }}
-                                />
-                            </Space>
+                                            {ticketFields.map(({ key: ticketKey, name: ticketName, ...ticketRestField }) => (
+                                                <Space key={ticketKey} style={{ display: 'flex', marginBottom: 12 }} align="baseline">
+                                                    <Form.Item {...ticketRestField} name={[ticketName, 'name']} rules={[{ required: true, message: '请输入票档名称' }]}>
+                                                        <Input placeholder="档位名称（如：VIP票）" size="large" style={{ width: 220 }} />
+                                                    </Form.Item>
+
+                                                    <Form.Item {...ticketRestField} name={[ticketName, 'price']} rules={[{ required: true, message: '请输入定价' }]}>
+                                                        <InputNumber placeholder="票价 (¥)" min={0} precision={2} size="large" style={{ width: 130 }} />
+                                                    </Form.Item>
+
+                                                    <Form.Item {...ticketRestField} name={[ticketName, 'stock']} rules={[{ required: true, message: '请输入库存' }]}>
+                                                        <InputNumber placeholder="库存 (张)" min={1} precision={0} size="large" style={{ width: 140 }} />
+                                                    </Form.Item>
+
+                                                    <MinusCircleOutlined
+                                                        onClick={() => removeTicket(ticketName)}
+                                                        title="删除该票档"
+                                                        style={{ color: '#ff4d4f', fontSize: 18, marginLeft: 12, cursor: 'pointer' }}
+                                                    />
+                                                </Space>
+                                            ))}
+
+                                            <Button
+                                                type="dashed"
+                                                onClick={() => addTicket({ name: '', price: null, stock: null })}
+                                                block
+                                                icon={<PlusOutlined />}
+                                                size="large"
+                                                style={{ borderColor: '#FF8899', color: '#FF8899', borderRadius: 8 }}
+                                            >
+                                                {ticketFields.length === 0 ? '新增本场次票档' : '追加本场次票档'}
+                                            </Button>
+                                        </>
+                                    )}
+                                </Form.List>
+                            </div>
                         ))}
-                        <Form.Item style={{ marginTop: 8 }}>
-                            <Button type="dashed" onClick={() => add({ name: '', price: null, stock: null })} block icon={<PlusOutlined />} size="large" style={{ borderColor: '#FF8899', color: '#FF8899', borderRadius: 8 }}>
-                                {fields.length === 0 ? '新增票档' : '追加一档票价'}
-                            </Button>
-                        </Form.Item>
+
+                        <Button
+                            type="dashed"
+                            block
+                            icon={<PlusOutlined />}
+                            size="large"
+                            onClick={() => addSession({
+                                sessionName: '',
+                                showTime: null,
+                                saleTime: null,
+                                status: form.getFieldValue('status') || 1,
+                                sortOrder: sessionFields.length,
+                                tickets: []
+                            })}
+                            style={{ borderColor: '#FF8899', color: '#FF8899', borderRadius: 8 }}
+                        >
+                            添加时间场次
+                        </Button>
                     </>
                 )}
             </Form.List>
@@ -677,12 +830,32 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 </Col>
             </Row>
 
+            <div style={{
+                marginTop: -6,
+                marginBottom: 18,
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: '#fff1f0',
+                border: '1px solid #ffccc7',
+                color: '#cf1322',
+                fontSize: 13,
+                lineHeight: 1.7
+            }}>
+                注意：同一合集内的演出命名必须包含公共前缀，例如：
+                “周杰伦2013「摩天伦」世界巡回演唱会 上海站”、
+                “周杰伦2013「摩天伦」世界巡回演唱会 北京站”。
+            </div>
+
             <div style={{ marginTop: 40, textAlign: 'right' }}>
                 <Button
                     size="large"
                     onClick={() => {
                         form.resetFields();
-                        form.setFieldsValue({ status: 1, style: [], tickets: [] });
+                        form.setFieldsValue({
+                            status: 1,
+                            style: [],
+                            sessions: []
+                        });
                         setPosterFileList([]);
                         setDetailsFileList([]);
                     }}

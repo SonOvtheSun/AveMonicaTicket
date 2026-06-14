@@ -11,17 +11,33 @@ const OrderConfirm = () => {
     const navigate = useNavigate();
 
     // 🚨 升级接收载荷：提取上个页面传过来的 prefilledSpectators 预填池
-    const { event, selectedTicket, quantity, prefilledSpectators } = location.state || {
+    const {
+        event,
+        selectedSession,
+        sessionId,
+        selectedTicket,
+        quantity,
+        prefilledSpectators,
+        submitToken
+    } = location.state || {
         event: {
+            id: null,
             title: "测试演出标题：请从详情页正常跳转",
             posterUrl: "https://via.placeholder.com/300x400",
             showTime: "2026-05-21 20:00",
             venue: "测试场馆 LiveHouse"
         },
+        selectedSession: null,
+        sessionId: null,
         selectedTicket: { id: 1, name: "预售票", price: 150 },
         quantity: 1,
-        prefilledSpectators: []
+        prefilledSpectators: [],
+        submitToken: null
     };
+
+    const activeSessionId = sessionId || selectedSession?.id;
+    const activeShowTime = selectedSession?.showTime || event?.showTime;
+    const activeSessionName = selectedSession?.sessionName || '默认场次';
 
     const [spectators, setSpectators] = useState([]);
 
@@ -91,13 +107,19 @@ const OrderConfirm = () => {
 
         setSubmitting(true);
         try {
+            if (!activeSessionId) {
+                message.warning('缺少演出场次信息，请返回详情页重新选择场次');
+                return;
+            }
+
             const res = await axios.post('/api/order/create', {
                 eventId: event.id,
+                sessionId: activeSessionId,
                 ticketId: selectedTicket.id,
                 quantity: quantity,
                 spectatorIds: selectedSpectatorIds,
                 paymentMethod: paymentMethod,
-                submitToken: location.state.submitToken
+                submitToken: submitToken
             });
 
             if (res.data.code === 200) {
@@ -178,7 +200,14 @@ const OrderConfirm = () => {
                                 <h2 style={{ fontSize: 20, margin: 0, fontWeight: 'bold' }}>{event.title}</h2>
                                 <div style={{ color: '#666', marginTop: 10 }}>
                                     <div>{event.venue}</div>
-                                    <div>{event.showTime}</div>
+                                    <div>
+                                        {activeShowTime || '时间待定'}
+                                        {activeSessionName && activeSessionName !== '默认场次' && (
+                                            <Tag color="cyan" style={{ marginLeft: 8 }}>
+                                                {activeSessionName}
+                                            </Tag>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                             <div className="ticket-meta-row">

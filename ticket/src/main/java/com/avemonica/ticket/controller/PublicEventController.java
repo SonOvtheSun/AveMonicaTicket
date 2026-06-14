@@ -3,7 +3,9 @@ package com.avemonica.ticket.controller;
 import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.entity.Banner;
 import com.avemonica.ticket.entity.Event;
+import com.avemonica.ticket.entity.EventSession;
 import com.avemonica.ticket.entity.TicketCategory;
+import com.avemonica.ticket.mapper.EventSessionMapper;
 import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.TicketService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -23,10 +25,12 @@ import java.time.DayOfWeek;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.TemporalAdjusters;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Slf4j
 @RestController
@@ -38,6 +42,9 @@ public class PublicEventController {
 
     @Autowired
     private TicketService ticketService;
+
+    @Autowired
+    private EventSessionMapper eventSessionMapper;
 
     @Autowired
     private com.avemonica.ticket.service.BannerService bannerService;
@@ -132,10 +139,7 @@ public class PublicEventController {
                 }
 
                 // 查票档和艺人信息
-                List<TicketCategory> tickets = ticketService.list(
-                        new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, id)
-                );
-                event.setTickets(tickets);
+                attachSessionsAndTickets(event);
 
                 List<java.util.Map<String, Object>> artists = artistMapper.selectArtistMapsByEventId(id);
                 event.setArtists(artists);
@@ -262,6 +266,23 @@ public class PublicEventController {
         // 将 List 转换为 Map，方便前端直接通过 ID 匹配
         java.util.Map<Long, Integer> stockMap = tickets.stream()
                 .collect(java.util.stream.Collectors.toMap(TicketCategory::getId, TicketCategory::getRemainingStock));
+
+        return Result.success(stockMap);
+    }
+
+    @GetMapping("/session/stock/{sessionId}")
+    public Result<Map<Long, Integer>> getSessionStock(@PathVariable Long sessionId) {
+        List<TicketCategory> tickets = ticketService.list(
+                new LambdaQueryWrapper<TicketCategory>()
+                        .select(TicketCategory::getId, TicketCategory::getRemainingStock)
+                        .eq(TicketCategory::getSessionId, sessionId)
+        );
+
+        Map<Long, Integer> stockMap = tickets.stream()
+                .collect(Collectors.toMap(
+                        TicketCategory::getId,
+                        TicketCategory::getRemainingStock
+                ));
 
         return Result.success(stockMap);
     }
@@ -421,6 +442,40 @@ public class PublicEventController {
             log.error("切换想看状态异常", e);
             return Result.error("系统异常");
         }
+    }
+
+    private void attachSessionsAndTickets(Event event) {
+        if (event == null || event.getId() == null) {
+            return;
+        }
+
+        Long eventId = event.getId();
+
+        List<EventSession> sessions = eventSessionMapper.selectList(
+                new LambdaQueryWrapper<EventSession>()
+                        .eq(EventSession::getEventId, eventId)
+                        .ne(EventSession::getStatus, 4)
+                        .orderByAsc(EventSession::getSortOrder)
+                        .orderByAsc(EventSession::getShowTime)
+        );
+
+        List<TicketCategory> tickets = ticketService.list(
+                new LambdaQueryWrapper<TicketCategory>()
+                        .eq(TicketCategory::getEventId, eventId)
+        );
+
+        Map<Long, List<TicketCategory>> ticketMapBySessionId = tickets.stream()
+                .filter(t -> t.getSessionId() != null)
+                .collect(Collectors.groupingBy(TicketCategory::getSessionId));
+
+        for (EventSession session : sessions) {
+            session.setTickets(ticketMapBySessionId.getOrDefault(session.getId(), new ArrayList<>()));
+        }
+
+        event.setSessions(sessions);
+
+        // 兼容旧前端：event.tickets 仍然返回全部票档
+        event.setTickets(tickets);
     }
 
 }

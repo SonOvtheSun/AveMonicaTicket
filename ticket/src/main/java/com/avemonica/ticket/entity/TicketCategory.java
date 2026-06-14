@@ -30,4 +30,6 @@ public class TicketCategory {
 
     // 剩余库存
     private Integer remainingStock;
+
+    private Long sessionId;
 }

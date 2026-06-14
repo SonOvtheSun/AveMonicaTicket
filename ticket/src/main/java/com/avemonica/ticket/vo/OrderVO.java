@@ -15,6 +15,7 @@ public class OrderVO {
     private String eventId;         // 🚨 新增：用于前端点击跳转
     private String payTime;         // 🚨 新增：支付时间
     private String paymentMethod;   // 🚨 新增：支付方式 (如：支付宝支付)
+    private String sessionName;
 
     @Data
     public static class EventVO {
@@ -24,6 +25,7 @@ public class OrderVO {
         private String venue;
         private String time;
         private Integer runningTime;
+        private String sessionName;
     }
 
     @Data

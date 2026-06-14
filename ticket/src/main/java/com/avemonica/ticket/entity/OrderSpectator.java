@@ -13,4 +13,5 @@ public class OrderSpectator {
     private Long eventId;
     private Long spectatorId;
     private Long deleteToken;
+    private Long sessionId;
 }

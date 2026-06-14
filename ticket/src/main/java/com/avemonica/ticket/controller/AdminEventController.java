@@ -3,15 +3,15 @@ package com.avemonica.ticket.controller;
 import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.config.AuthExp;
 import com.avemonica.ticket.dto.EventAddDTO;
-import com.avemonica.ticket.entity.Artist;
+import com.avemonica.ticket.entity.*;
 import com.avemonica.ticket.exception.BusinessException;
 import com.avemonica.ticket.mapper.ArtistMapper;
+import com.avemonica.ticket.mapper.EventSessionMapper;
 import com.avemonica.ticket.service.ArtistService;
 import com.avemonica.ticket.service.EventService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.avemonica.ticket.entity.Event;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.github.benmanes.caffeine.cache.Cache;
 import lombok.extern.slf4j.Slf4j;
@@ -21,9 +21,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
-import com.avemonica.ticket.entity.TicketCategory;
 import com.avemonica.ticket.service.TicketService;
-import com.avemonica.ticket.entity.EventArtist;
 import com.avemonica.ticket.service.EventArtistService;
 import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -58,6 +56,9 @@ public class AdminEventController {
 
     @Autowired
     private StringRedisTemplate redisTemplate;
+
+    @Autowired
+    private EventSessionMapper eventSessionMapper;
 
     @Autowired
     @Qualifier("eventLocalCache")
@@ -110,17 +111,31 @@ public class AdminEventController {
 
         // 🚨 核心逻辑：使用 Map 来接收并组装
         for (Event event : pageData.getRecords()) {
-            // 当前已生效的参演艺人
             List<Map<String, Object>> artists = artistMapper.selectArtistMapsByEventId(event.getId());
             event.setArtists(artists);
 
-            // 当前已生效的票档
+            List<EventSession> sessions = eventSessionMapper.selectList(
+                    new LambdaQueryWrapper<EventSession>()
+                            .eq(EventSession::getEventId, event.getId())
+                            .orderByAsc(EventSession::getSortOrder)
+                            .orderByAsc(EventSession::getShowTime)
+            );
+
             List<TicketCategory> tickets = ticketService.list(
                     new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, event.getId())
             );
+
+            Map<Long, List<TicketCategory>> ticketMapBySessionId = tickets.stream()
+                    .filter(t -> t.getSessionId() != null)
+                    .collect(java.util.stream.Collectors.groupingBy(TicketCategory::getSessionId));
+
+            for (EventSession session : sessions) {
+                session.setTickets(ticketMapBySessionId.getOrDefault(session.getId(), new java.util.ArrayList<>()));
+            }
+
+            event.setSessions(sessions);
             event.setTickets(tickets);
 
-            // 如果是修改审核，则额外组装“修改后的艺人”
             if (Objects.equals(event.getEditAuditStatus(), Event.EDIT_AUDIT_PENDING)) {
                 event.setPendingArtists(buildPendingArtists(event.getPendingPayload()));
             }
@@ -176,18 +191,46 @@ public class AdminEventController {
         }
 
         // 2. 新增审核
+        // 2. 新增审核
         if (Objects.equals(event.getAuditStatus(), Event.AUDIT_PENDING)) {
             if (isPass) {
-                event.setAuditStatus(Event.AUDIT_APPROVED);
+                Integer submittedStatus = event.getStatus();
+
+                // 新增审核通过时，恢复提交者当初选择的状态
+                if (event.getPendingPayload() != null && !event.getPendingPayload().trim().isEmpty()) {
+                    try {
+                        EventAddDTO dto = objectMapper.readValue(event.getPendingPayload(), EventAddDTO.class);
+                        if (dto.getStatus() != null) {
+                            submittedStatus = dto.getStatus();
+                        }
+                    } catch (Exception e) {
+                        throw new BusinessException("解析新增审核提交状态失败");
+                    }
+                }
+
+                eventService.update(
+                        new LambdaUpdateWrapper<Event>()
+                                .eq(Event::getId, id)
+                                .set(Event::getAuditStatus, Event.AUDIT_APPROVED)
+                                .set(Event::getStatus, submittedStatus)
+                                .set(Event::getPendingPayload, null)
+                                .set(Event::getAuditSubmitTime, LocalDateTime.now())
+                );
+
+                evictEventDetailCache(id);
+                return Result.success("演出项目已审核通过，状态已恢复为提交者选择的状态");
             } else {
-                event.setAuditStatus(Event.AUDIT_REJECTED);
-                event.setStatus(4);
+                eventService.update(
+                        new LambdaUpdateWrapper<Event>()
+                                .eq(Event::getId, id)
+                                .set(Event::getAuditStatus, Event.AUDIT_REJECTED)
+                                .set(Event::getStatus, 4)
+                                .set(Event::getAuditSubmitTime, LocalDateTime.now())
+                );
+
+                evictEventDetailCache(id);
+                return Result.success("已驳回该演出项目");
             }
-
-            eventService.updateById(event);
-            evictEventDetailCache(id);
-
-            return Result.success(isPass ? "演出项目已审核通过" : "已驳回该演出项目");
         }
 
         throw new BusinessException("当前演出没有待审核申请");
@@ -279,19 +322,23 @@ public class AdminEventController {
 
     @DeleteMapping("/{id}")
     @PreAuthorize(AuthExp.EVENT_EDIT)
-    @Transactional(rollbackFor = Exception.class) // 🚨 加上事务，防止删了票档但演出没删掉的情况发生
+    @Transactional(rollbackFor = Exception.class)
     public Result<String> deleteEvent(@PathVariable Long id) {
         ticketService.remove(
                 new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, id)
         );
+
+        eventSessionMapper.delete(
+                new LambdaQueryWrapper<EventSession>().eq(EventSession::getEventId, id)
+        );
+
         eventArtistService.remove(
                 new LambdaQueryWrapper<EventArtist>().eq(EventArtist::getEventId, id)
         );
 
-
-        // 实际工业项目中推荐“逻辑删除”（将 status 设为 0），此处为物理删除演示
         eventService.removeById(id);
         evictEventDetailCache(id);
+
         return Result.success("演出已删除", null);
     }
 
@@ -316,6 +363,33 @@ public class AdminEventController {
         );
 
         return Result.success("已确认修改驳回结果");
+    }
+
+    @PutMapping("/confirm-new-reject/{id}")
+    @PreAuthorize(AuthExp.EVENT_EDIT)
+    public Result<String> confirmEventNewReject(@PathVariable Long id) {
+        Event event = eventService.getById(id);
+        if (event == null) {
+            throw new BusinessException("演出不存在");
+        }
+
+        if (!Objects.equals(event.getAuditStatus(), Event.AUDIT_REJECTED)) {
+            throw new BusinessException("当前演出没有待确认的审核驳回状态");
+        }
+
+        eventService.update(
+                new LambdaUpdateWrapper<Event>()
+                        .eq(Event::getId, id)
+                        // 审核未通过确认后，回到“未审核/未提交审核”状态
+                        .set(Event::getAuditStatus, Event.AUDIT_REVOKED)
+                        .set(Event::getStatus, Event.STATUS_HIDDEN)
+                        .set(Event::getPendingPayload, null)
+                        .set(Event::getAuditSubmitTime, LocalDateTime.now())
+        );
+
+        evictEventDetailCache(id);
+
+        return Result.success("已确认审核未通过，演出已回到未审核状态");
     }
 
     private List<Map<String, Object>> buildPendingArtists(String pendingPayload) {

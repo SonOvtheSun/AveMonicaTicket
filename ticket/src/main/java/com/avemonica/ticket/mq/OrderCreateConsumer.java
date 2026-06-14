@@ -35,6 +35,7 @@ public class OrderCreateConsumer {
             Order order = new Order();
             order.setUserId(msg.getUserId());
             order.setEventId(msg.getEventId());
+            order.setSessionId(msg.getSessionId());
             order.setTicketId(msg.getTicketId());
             order.setQuantity(msg.getQuantity());
 

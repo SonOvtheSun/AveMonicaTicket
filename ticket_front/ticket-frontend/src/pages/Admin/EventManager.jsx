@@ -167,6 +167,13 @@ const EventManager = () => {
         return truncateText(getAvailableEventOptionFullLabel(event), 32);
     };
 
+    const handleShowEventDetailRecord = (record) => {
+        if (!record) return;
+        setCollectionEventDetail(record);
+        setCollectionEventDetailLoading(false);
+        setCollectionEventDetailVisible(true);
+    };
+
     const handleShowCollectionEventDetail = async (eventId) => {
         if (!eventId) return;
         setCollectionEventDetailVisible(true);
@@ -185,6 +192,157 @@ const EventManager = () => {
         } finally {
             setCollectionEventDetailLoading(false);
         }
+    };
+
+    const formatDateTime = (time) => {
+        if (!time) return '待定';
+        const parsed = dayjs(time);
+        return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : String(time).replace('T', ' ');
+    };
+
+    const renderTicketList = (tickets = []) => {
+        if (!tickets || tickets.length === 0) {
+            return <span style={{ color: '#999', fontSize: 12 }}>暂未设置票档</span>;
+        }
+
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {tickets.map((ticket, idx) => (
+                    <div
+                        key={ticket.id || idx}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 12,
+                            background: '#fff0f3',
+                            padding: '6px 12px',
+                            borderRadius: 6,
+                            border: '1px solid #ffe6e8'
+                        }}
+                    >
+                        <Tag color="#FF8899" style={{ margin: 0 }}>
+                            {ticket.name || '未命名票档'}
+                        </Tag>
+                        <span style={{ color: '#e60026', fontWeight: 'bold', width: 90 }}>
+                            ¥ {ticket.price ?? '未设置'}
+                        </span>
+                        <span style={{ color: '#666', fontSize: 13 }}>
+                            库存：<b>{ticket.totalStock ?? ticket.stock ?? ticket.remainingStock ?? 0}</b> 张
+                        </span>
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
+    const renderSessionList = (detail) => {
+        const sessions = detail?.sessions || [];
+        if (!sessions || sessions.length === 0) {
+            return <span style={{ color: '#999', fontSize: 12 }}>暂未配置时间场次</span>;
+        }
+
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {sessions.map((session, idx) => (
+                    <div
+                        key={session.id || idx}
+                        style={{
+                            padding: '10px 12px',
+                            borderRadius: 10,
+                            background: '#f6fffe',
+                            border: '1px solid rgba(23, 185, 185, 0.18)'
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                            <Tag color="cyan" style={{ margin: 0 }}>
+                                {session.sessionName || `场次${idx + 1}`}
+                            </Tag>
+                            <span style={{ color: '#333', fontWeight: 700 }}>
+                                {formatDateTime(session.showTime)}
+                            </span>
+                            <span style={{ color: '#999', fontSize: 12 }}>
+                                开票：{formatDateTime(session.saleTime)}
+                            </span>
+                        </div>
+                        {renderTicketList(session.tickets || [])}
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
+    const renderEventDetailDescriptions = (detail) => {
+        if (!detail) return null;
+
+        const statusText = statusConfig[detail.status]?.text || '未知';
+        const statusColor = statusConfig[detail.status]?.color || 'default';
+
+        return (
+            <Descriptions column={2} bordered size="small">
+                <Descriptions.Item label="演出标题" span={2}>{detail.title || '未设置'}</Descriptions.Item>
+
+                <Descriptions.Item label="当前状态">
+                    <Tag color={statusColor}>{statusText}</Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="演出风格">
+                    {detail.style ? <Tag color="purple">{detail.style}</Tag> : <span style={{ color: '#999' }}>暂无风格</span>}
+                </Descriptions.Item>
+
+                <Descriptions.Item label="演出城市">
+                    <Tag color="blue">{detail.city || '未指定'}</Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="场馆">{detail.venue || '未设置'}</Descriptions.Item>
+
+                <Descriptions.Item label="演出时间">{formatDateTime(detail.showTime)}</Descriptions.Item>
+                <Descriptions.Item label="预开票时间">
+                    {detail.saleTime ? (
+                        <span style={{ color: '#e60026', fontWeight: 'bold' }}>{formatDateTime(detail.saleTime)}</span>
+                    ) : (
+                        <span style={{ color: '#999' }}>待定</span>
+                    )}
+                </Descriptions.Item>
+
+                <Descriptions.Item label="演出时长">
+                    {detail.runningTime ? `约 ${detail.runningTime} 分钟` : '未设置'}
+                </Descriptions.Item>
+                <Descriptions.Item label="合集别名">
+                    {detail.collectionAlias ? <Tag color="#FF8899">{detail.collectionAlias}</Tag> : <span style={{ color: '#999' }}>未设置</span>}
+                </Descriptions.Item>
+
+                <Descriptions.Item label="详细地址" span={2}>{detail.address || '未设置'}</Descriptions.Item>
+
+                <Descriptions.Item label="参演音乐人" span={2}>
+                    {detail.artists && detail.artists.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {detail.artists.map((artist, idx) => (
+                                <Tag key={idx} color={artist.auditStatus === 0 ? '#FF8899' : 'cyan'} style={{ margin: 0, borderRadius: 4 }}>
+                                    {artist.name || `艺人ID：${artist.id}`}(ID：{artist.id})
+                                </Tag>
+                            ))}
+                        </div>
+                    ) : (
+                        <span style={{ color: '#999', fontSize: 12 }}>暂无配置音乐人</span>
+                    )}
+                </Descriptions.Item>
+
+                <Descriptions.Item label="时间场次" span={2}>
+                    {renderSessionList(detail)}
+                </Descriptions.Item>
+
+                {(!detail.sessions || detail.sessions.length === 0) && (
+                    <Descriptions.Item label="票务档位" span={2}>
+                        {renderTicketList(detail.tickets || [])}
+                    </Descriptions.Item>
+                )}
+
+                <Descriptions.Item label="主海报" span={2}>
+                    {detail.posterUrl ? <Image src={detail.posterUrl} width={100} style={{ borderRadius: 4 }} /> : '无'}
+                </Descriptions.Item>
+                <Descriptions.Item label="详情长图" span={2}>
+                    {detail.detailsUrl ? <Image src={detail.detailsUrl} width={100} style={{ borderRadius: 4 }} /> : '无'}
+                </Descriptions.Item>
+            </Descriptions>
+        );
     };
 
     // 🚨 提交合集数据：支持动态添加/删除演出，同时支持为每个演出设置合集别名
@@ -241,56 +399,61 @@ const EventManager = () => {
         {
             title: '包含演出场次',
             key: 'events',
+            width: 130,
             render: (_, record) => {
                 const subEvents = record.events || [];
-                if (subEvents.length === 0) return <span style={{ color: '#999', fontSize: 13 }}>暂无包含场次</span>;
+
+                if (subEvents.length === 0) {
+                    return <span style={{ color: '#999', fontSize: 13 }}>暂无包含场次</span>;
+                }
 
                 const popContent = (
-                    <div style={{ maxHeight: 360, overflowY: 'auto', padding: '4px', minWidth: 360 }}>
+                    <div style={{ maxHeight: 380, overflowY: 'auto', padding: 4, minWidth: 420 }}>
                         {subEvents.map((e, i) => (
                             <div
                                 key={e.id}
-                                onClick={() => handleShowCollectionEventDetail(e.id)}
                                 style={{
                                     marginBottom: i === subEvents.length - 1 ? 0 : 8,
                                     borderBottom: i === subEvents.length - 1 ? 'none' : '1px dashed #f0f0f0',
                                     padding: '8px 6px',
-                                    borderRadius: 8,
-                                    cursor: 'pointer',
-                                    transition: 'background 0.2s'
+                                    borderRadius: 8
                                 }}
                             >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                                     <Tag color="blue" style={{ margin: 0 }}>ID:{e.id}</Tag>
                                     <Tag color="#FF8899" style={{ margin: 0 }}>
                                         {e.collectionAlias || '未设别名'}
                                     </Tag>
+                                    <Button
+                                        type="link"
+                                        size="small"
+                                        style={{ padding: 0, marginLeft: 'auto' }}
+                                        onClick={() => handleShowCollectionEventDetail(e.id)}
+                                    >
+                                        查看
+                                    </Button>
                                 </div>
-                                <div style={{ color: '#333', fontWeight: 600, lineHeight: 1.4 }}>{e.title}</div>
-                                <div style={{ color: '#888', fontSize: 12, marginTop: 3 }}>{e.city || '城市待定'}</div>
+                                <div style={{ color: '#333', fontWeight: 600, lineHeight: 1.4 }}>
+                                    {e.title}
+                                </div>
+                                <div style={{ color: '#888', fontSize: 12, marginTop: 3 }}>
+                                    {e.city || '城市待定'}
+                                </div>
                             </div>
                         ))}
                     </div>
                 );
 
                 return (
-                    <Popover content={popContent} title={`合集包含演出明细（共 ${subEvents.length} 场，点击可查看详情）`} trigger="hover" placement="bottomLeft">
-                        <div style={{ cursor: 'pointer' }}>
-                            {subEvents.slice(0, 1).map((e) => (
-                                <Tag
-                                    color="purple"
-                                    key={e.id}
-                                    style={{ borderRadius: 4, cursor: 'pointer' }}
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        handleShowCollectionEventDetail(e.id);
-                                    }}
-                                >
-                                    {e.collectionAlias || '未命名'}·{e.city}
-                                </Tag>
-                            ))}
-                            {subEvents.length > 2 && <span style={{ color: '#17b9b9', fontSize: 13 }}>    等共 {subEvents.length} 场场次...</span>}
-                        </div>
+                    <Popover
+                        content={popContent}
+                        title={`合集包含演出明细（共 ${subEvents.length} 场）`}
+                        trigger="click"
+                        placement="bottomLeft"
+                    >
+                        <Button type="link" size="small" style={{ padding: 0, color: '#17b9b9' }}>
+                            查看详情
+                        </Button>
                     </Popover>
                 );
             }
@@ -364,13 +527,36 @@ const EventManager = () => {
         try {
             const res = await axios.put(`/api/admin/event/confirm-edit-reject/${id}`);
             if (res.data.code === 200) {
-                message.success(res.data.message || '已确认修改驳回结果');
+                message.success(res.data.message || '已确认修改审核未通过');
                 fetchEvents(pagination.current, pagination.pageSize);
             } else {
-                message.error(error.response?.data?.message || '确认修改驳回失败');
+                message.error(res.data.message || '确认修改审核未通过失败');
             }
         } catch (error) {
-            message.error('确认修改驳回失败');
+            message.error(
+                error.response?.data?.message ||
+                error.response?.data?.msg ||
+                '确认修改审核未通过失败'
+            );
+        }
+    };
+
+    const handleConfirmNewReject = async (id) => {
+        try {
+            const res = await axios.put(`/api/admin/event/confirm-new-reject/${id}`);
+
+            if (res.data.code === 200) {
+                message.success(res.data.message || '已确认审核未通过');
+                fetchEvents(pagination.current, pagination.pageSize);
+            } else {
+                message.error(res.data.message || '确认失败');
+            }
+        } catch (error) {
+            message.error(
+                error.response?.data?.message ||
+                error.response?.data?.msg ||
+                '确认审核未通过失败'
+            );
         }
     };
 
@@ -413,13 +599,13 @@ const EventManager = () => {
             title: '演出标题及艺人',
             key: 'titleAndArtists',
             render: (_, record) => (
-                <div style={{ wordBreak: 'break-all', whiteSpace: 'pre-wrap', minWidth: 200 }}>
+                <div style={{ wordBreak: 'break-all', whiteSpace: 'pre-wrap', minWidth: 240 }}>
                     <div style={{ fontWeight: 600, color: '#333', fontSize: 14, display: 'flex', alignItems: 'center' }}>
                         <span>{record.title}</span>
                         {record.status === 4 && <span style={{ color: '#faad14', marginLeft: 8, fontSize: 13, fontWeight: 500 }}>(已隐藏)</span>}
                     </div>
                     {record.artists && record.artists.length > 0 && (
-                        <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                             {record.artists.map((artist, idx) => (
                                 <Tag key={idx} color={artist.auditStatus === 0 ? '#FF8899' : 'cyan'} style={{ margin: 0, borderRadius: 4 }}>
                                     {artist.name}{artist.auditStatus === 0 ? ' (待审)' : ''}（ID:{artist.id}）
@@ -431,6 +617,27 @@ const EventManager = () => {
             )
         },
         {
+            title: '场馆与地址',
+            key: 'location',
+            render: (_, record) => (
+                <div style={{ wordBreak: 'break-all', whiteSpace: 'pre-wrap', minWidth: 160 }}>
+                    <div style={{ color: '#333' }}>{record.venue || '未设置'}</div>
+                    <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{record.address || '未设置'}</div>
+                </div>
+            )
+        },
+        {
+            title: '演出时间',
+            dataIndex: 'showTime',
+            key: 'showTime',
+            width: 150,
+            render: (showTime) => showTime ? (
+                <span style={{ color: '#666', fontSize: 13 }}>{formatDateTime(showTime)}</span>
+            ) : (
+                <span style={{ color: '#999', fontSize: 12 }}>时间待定</span>
+            )
+        },
+        {
             title: '详图',
             dataIndex: 'detailsUrl',
             key: 'detailsUrl',
@@ -439,40 +646,20 @@ const EventManager = () => {
                 <Button type="link" size="small" style={{ padding: 0, color: '#17b9b9' }} onClick={() => { setPreviewImageUrl(url); setPreviewVisible(true); }}>查看详图</Button>
             ) : <span style={{ color: '#999', fontSize: 12 }}>无</span>
         },
-        { title: '演出城市', dataIndex: 'city', key: 'city', width: 100 },
         {
-            title: '场馆与地址',
-            key: 'location',
-            render: (_, record) => (
-                <div style={{ wordBreak: 'break-all', whiteSpace: 'pre-wrap', minWidth: 140 }}>
-                    <div style={{ color: '#333' }}>{record.venue}</div>
-                    <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{record.address}</div>
-                </div>
-            )
-        },
-        { title: '开票时间', dataIndex: 'saleTime', key: 'saleTime', width: 150, render: (saleTime) => saleTime ? <span style={{ color: '#666', fontSize: 13 }}>{String(saleTime).replace('T', ' ').slice(0, 16)}</span> : <span style={{ color: '#999', fontSize: 12 }}>未设置</span> },
-        { title: '演出时间', dataIndex: 'showTime', key: 'showTime', width: 140 },
-        {
-            title: '票务策略',
-            key: 'tickets',
+            title: '查看详情',
+            key: 'detail',
             width: 90,
-            render: (_, record) => {
-                const tickets = record.tickets || [];
-                if (tickets.length === 0) return <span style={{ color: '#999', fontSize: 12 }}>暂未设置票档</span>;
-                return (
-                    <Popover title="票档明细" trigger="hover" placement="left" content={
-                        <div style={{ minWidth: 200 }}>
-                            {tickets.map((t, i) => (
-                                <div key={i} style={{ marginBottom: 6, borderBottom: '1px solid #f0f0f0', paddingBottom: 4 }}>
-                                    <Tag color="#FF8899">{t.name}</Tag> <strong>¥{t.price}</strong> (余 {t.remainingStock ?? 0} 张)
-                                </div>
-                            ))}
-                        </div>
-                    }>
-                        <Button type="link" size="small" style={{ color: '#17b9b9', padding: 0 }}>查看票档</Button>
-                    </Popover>
-                );
-            }
+            render: (_, record) => (
+                <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0, color: '#17b9b9' }}
+                    onClick={() => handleShowEventDetailRecord(record)}
+                >
+                    查看详情
+                </Button>
+            )
         },
         {
             title: '当前状态',
@@ -480,9 +667,26 @@ const EventManager = () => {
             key: 'status',
             width: 90,
             render: (_, record) => {
-                if (record.editAuditStatus === 0) return <Tag color="processing">修改待审核</Tag>;
-                if (record.editAuditStatus === 2) return <Tag color="red">修改被驳回</Tag>;
-                if (record.auditStatus === 0) return <Tag color="orange">新增待审核</Tag>;
+                if (record.editAuditStatus === 0) {
+                    return <Tag color="processing">修改待审核</Tag>;
+                }
+
+                if (record.editAuditStatus === 2) {
+                    return <Tag color="red">修改审核未通过</Tag>;
+                }
+
+                if (record.auditStatus === 0) {
+                    return <Tag color="orange">新增待审核</Tag>;
+                }
+
+                if (record.auditStatus === 2) {
+                    return <Tag color="red">审核未通过</Tag>;
+                }
+
+                if (record.auditStatus === 3) {
+                    return <Tag color="default">未审核</Tag>;
+                }
+
                 const config = statusConfig[record.status] || { color: 'default', text: '未知' };
                 return <Tag color={config.color}>{config.text}</Tag>;
             }
@@ -503,8 +707,32 @@ const EventManager = () => {
                     <Space size="middle">
                         {hasPublishPerm && (
                             <>
+                                {record.auditStatus === 2 && (
+                                    <Popconfirm
+                                        title="确认审核未通过？"
+                                        description="确认后，该演出将回到未审核状态，可重新编辑后再次提交审核。"
+                                        onConfirm={() => handleConfirmNewReject(record.id)}
+                                        okText="确定"
+                                        cancelText="取消"
+                                    >
+                                        <Button type="text" style={{ color: '#52c41a', padding: 0 }}>
+                                            确定
+                                        </Button>
+                                    </Popconfirm>
+                                )}
+
                                 {record.editAuditStatus === 2 && (
-                                    <Button type="text" style={{ color: '#52c41a', padding: 0 }} onClick={() => handleConfirmEditReject(record.id)}>确认</Button>
+                                    <Popconfirm
+                                        title="确认修改审核未通过？"
+                                        description="确认后，将清除本次修改审核结果，演出回到原已生效状态。"
+                                        onConfirm={() => handleConfirmEditReject(record.id)}
+                                        okText="确定"
+                                        cancelText="取消"
+                                    >
+                                        <Button type="text" style={{ color: '#52c41a', padding: 0 }}>
+                                            确定
+                                        </Button>
+                                    </Popconfirm>
                                 )}
                                 <Button type="text" icon={<Edit size={14} />} disabled={!canEdit} style={{ color: canEdit ? '#1890ff' : '#999', padding: 0 }} onClick={() => handleEditClick(record)}>编辑</Button>
                                 {record.status !== 4 ? (
@@ -749,84 +977,7 @@ const EventManager = () => {
                 {collectionEventDetailLoading ? (
                     <div style={{ padding: '36px 0', textAlign: 'center', color: '#999' }}>加载中...</div>
                 ) : collectionEventDetail ? (
-                    <Descriptions column={2} bordered size="small">
-                        <Descriptions.Item label="演出标题" span={2}>{collectionEventDetail.title}</Descriptions.Item>
-
-                        <Descriptions.Item label="合集别名" span={2}>
-                            {collectionEventDetail.collectionAlias ? (
-                                <Tag color="#FF8899">{collectionEventDetail.collectionAlias}</Tag>
-                            ) : (
-                                <span style={{ color: '#999' }}>未设置</span>
-                            )}
-                        </Descriptions.Item>
-
-                        <Descriptions.Item label="演出风格" span={2}>
-                            {collectionEventDetail.style ? (
-                                <Tag color="purple">{collectionEventDetail.style}</Tag>
-                            ) : (
-                                <span style={{ color: '#999' }}>暂无风格</span>
-                            )}
-                        </Descriptions.Item>
-
-                        <Descriptions.Item label="演出城市">
-                            <Tag color="blue">{collectionEventDetail.city || '未指定'}</Tag>
-                        </Descriptions.Item>
-                        <Descriptions.Item label="场馆">{collectionEventDetail.venue || '未设置'}</Descriptions.Item>
-
-                        <Descriptions.Item label="演出时间">
-                            {collectionEventDetail.showTime ? dayjs(collectionEventDetail.showTime).format('YYYY-MM-DD HH:mm:ss') : '待定'}
-                        </Descriptions.Item>
-                        <Descriptions.Item label="预开票时间">
-                            {collectionEventDetail.saleTime ? (
-                                <span style={{ color: '#e60026', fontWeight: 'bold' }}>
-                                    {dayjs(collectionEventDetail.saleTime).format('YYYY-MM-DD HH:mm:ss')}
-                                </span>
-                            ) : (
-                                <span style={{ color: '#999' }}>待定</span>
-                            )}
-                        </Descriptions.Item>
-
-                        <Descriptions.Item label="详细地址" span={2}>{collectionEventDetail.address || '未设置'}</Descriptions.Item>
-
-                        <Descriptions.Item label="参演音乐人" span={2}>
-                            {collectionEventDetail.artists && collectionEventDetail.artists.length > 0 ? (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                    {collectionEventDetail.artists.map((artist, idx) => (
-                                        <Tag key={idx} color={artist.auditStatus === 0 ? '#FF8899' : 'cyan'} style={{ margin: 0, borderRadius: 4 }}>
-                                            {artist.name || `艺人ID：${artist.id}`}
-                                        </Tag>
-                                    ))}
-                                </div>
-                            ) : (
-                                <span style={{ color: '#999', fontSize: 12 }}>暂无配置音乐人</span>
-                            )}
-                        </Descriptions.Item>
-
-                        <Descriptions.Item label="票务档位" span={2}>
-                            {collectionEventDetail.tickets && collectionEventDetail.tickets.length > 0 ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    {collectionEventDetail.tickets.map((ticket, idx) => (
-                                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#fff0f3', padding: '6px 12px', borderRadius: '6px', border: '1px solid #ffe6e8' }}>
-                                            <Tag color="#FF8899" style={{ margin: 0 }}>{ticket.name}</Tag>
-                                            <span style={{ color: '#e60026', fontWeight: 'bold', width: '80px' }}>¥ {ticket.price}</span>
-                                            <span style={{ color: '#666', fontSize: '13px' }}>
-                                                初始库存: <b>{ticket.totalStock || ticket.stock || 0}</b> 张
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <span style={{ color: '#999', fontSize: 12 }}>暂未设置票档</span>
-                            )}
-                        </Descriptions.Item>
-
-                        <Descriptions.Item label="主海报" span={2}>
-                            <Image src={collectionEventDetail.posterUrl} width={100} style={{ borderRadius: 4 }} />
-                        </Descriptions.Item>
-                        <Descriptions.Item label="详情长图" span={2}>
-                            {collectionEventDetail.detailsUrl ? <Image src={collectionEventDetail.detailsUrl} width={100} style={{ borderRadius: 4 }} /> : '无'}
-                        </Descriptions.Item>
-                    </Descriptions>
+                    renderEventDetailDescriptions(collectionEventDetail)
                 ) : (
                     <div style={{ padding: '36px 0', textAlign: 'center', color: '#999' }}>暂无详情</div>
                 )}

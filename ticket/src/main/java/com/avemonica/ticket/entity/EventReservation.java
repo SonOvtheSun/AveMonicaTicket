@@ -17,4 +17,5 @@ public class EventReservation {
     private String spectatorIds; // 存入数据库的逗号分隔字符串
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
+    private Long sessionId;
 }
