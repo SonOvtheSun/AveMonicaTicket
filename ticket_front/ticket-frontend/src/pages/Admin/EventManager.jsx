@@ -76,6 +76,7 @@ const EventManager = () => {
     const isSuperAdmin = userRole === 1;
     const hasPublishPerm = isSuperAdmin || userPerms.includes('event:publish') || userPerms.includes("event:edit");
     const hasAuditPerm = isSuperAdmin || userPerms.includes('audit:manage');
+    const hasEditPerm = isSuperAdmin || userPerms.includes('event:edit');
 
     const handleTableChange = (newPagination) => fetchEvents(newPagination.current, newPagination.pageSize);
 
@@ -743,7 +744,7 @@ const EventManager = () => {
                                 <Button type="text" icon={<Trash2 size={14} />} onClick={() => handleDelete(record.id)} style={{ color: '#ff4d4f', padding: 0 }}>删除</Button>
                             </>
                         )}
-                        {(hasAuditPerm || isSuperAdmin) && (
+                        {(hasAuditPerm || hasEditPerm || isSuperAdmin) && (
                             <Button type="text" icon={<ShieldOff size={14} />} onClick={() => handleTakeDown(record.id)} style={{ color: '#ff4d4f', padding: 0 }} disabled={record.auditStatus === 0}>下架</Button>
                         )}
                     </Space>
