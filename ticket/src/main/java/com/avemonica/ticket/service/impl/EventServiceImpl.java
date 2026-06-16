@@ -1,55 +1,50 @@
-
 package com.avemonica.ticket.service.impl;
 
 import com.avemonica.ticket.dto.EventAddDTO;
 import com.avemonica.ticket.dto.EventSessionDTO;
 import com.avemonica.ticket.dto.TicketCategoryDTO;
-import com.avemonica.ticket.entity.Artist;
-import com.avemonica.ticket.entity.Event;
-import com.avemonica.ticket.entity.EventArtist;
-import com.avemonica.ticket.entity.EventSession;
-import com.avemonica.ticket.entity.TicketCategory;
-import com.avemonica.ticket.entity.User;
+import com.avemonica.ticket.entity.*;
 import com.avemonica.ticket.exception.BusinessException;
-import com.avemonica.ticket.mapper.ArtistMapper;
-import com.avemonica.ticket.mapper.EventMapper;
-import com.avemonica.ticket.mapper.EventSessionMapper;
-import com.avemonica.ticket.mapper.TicketCategoryMapper;
-import com.avemonica.ticket.mapper.UserMapper;
+import com.avemonica.ticket.mapper.*;
 import com.avemonica.ticket.service.EventArtistService;
 import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
+
+import org.springframework.security.core.context.SecurityContextHolder;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.springframework.util.StringUtils;
 
 @Service
 public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements EventService {
 
+    /**
+     * 演出 ID 规则：10 位随机数字。
+     * 范围：1000000000 ~ 9999999999。
+     *
+     * 保持 Long / BIGINT 类型，不需要改全项目 ID 类型。
+     */
+    private static final long EVENT_ID_MIN = 1_000_000_000L;
+    private static final long EVENT_ID_RANGE = 9_000_000_000L;
+    private static final int EVENT_ID_MAX_RETRY = 50;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     @Autowired
     private UserService userService;
-
     @Autowired
     private UserMapper userMapper;
 
@@ -57,74 +52,71 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
     private EventSessionMapper eventSessionMapper;
 
     @Autowired
-    private TicketCategoryMapper ticketCategoryMapper;
+    private ObjectMapper objectMapper;
 
+    @Autowired
+    private TicketCategoryMapper ticketCategoryMapper;
     @Autowired
     private EventArtistService eventArtistService;
 
     @Autowired
-    private ArtistMapper artistMapper;
-
-    @Autowired
-    private ObjectMapper objectMapper;
+    private ArtistMapper artistMapper; // 注入艺人的 Mapper
 
     @Autowired
     private StringRedisTemplate redisTemplate;
 
+    // 记录某演出浏览量的 Key (String 类型: event:views:1)
     public static final String EVENT_VIEWS_KEY = "event:views:";
+
+    // 记录某演出想看用户的 Key (Set 类型: event:want:1，内部存 userId)
     public static final String EVENT_WANT_KEY = "event:want:";
 
-    private static final int EVENT_STATUS_ONLINE = 1;
-    private static final int EVENT_STATUS_HIDDEN = 4;
-    private static final int SESSION_STATUS_HIDDEN = 4;
-
     /**
-     * C 端“想看”切换。
-     *
-     * Redis Set 结构：
-     * key: event:want:{eventId}
-     * value: userId
+     * 1. 切换“想看”状态
      */
     @Override
     public boolean toggleWant(Long eventId, Long userId) {
         String wantKey = EVENT_WANT_KEY + eventId;
-        String userIdText = String.valueOf(userId);
 
-        Boolean isMember = redisTemplate.opsForSet().isMember(wantKey, userIdText);
+        // 判断当前用户是否在 Set 中
+        Boolean isMember = redisTemplate.opsForSet().isMember(wantKey, userId.toString());
+
         if (Boolean.TRUE.equals(isMember)) {
-            redisTemplate.opsForSet().remove(wantKey, userIdText);
-            return false;
+            // 如果已经在里面，说明是取消想看 -> 从 Set 中移除
+            redisTemplate.opsForSet().remove(wantKey, userId.toString());
+            return false; // 返回当前状态：未想看
+        } else {
+            // 如果不在里面，说明是点击想看 -> 加入 Set
+            redisTemplate.opsForSet().add(wantKey, userId.toString());
+            return true; // 返回当前状态：已想看
         }
-
-        redisTemplate.opsForSet().add(wantKey, userIdText);
-        return true;
     }
 
     /**
-     * 带实时统计数据的详情读取。
-     *
-     * 当前公共详情接口已在 Controller 中做多级缓存与实时数据注入；
-     * 该方法保留给 Service 接口调用方使用。
+     * 2. 获取详情时：注入实时 Redis 数据并自增浏览量
      */
     @Override
     public Event getEventDetailWithRealTimeStats(Long eventId, Long currentUserId) {
-        Event event = getById(eventId);
-        if (event == null) {
-            return null;
-        }
+        // 先从数据库或本地缓存查出基础 Event 信息
+        Event event = this.getById(eventId);
+        if (event == null) return null;
 
-        Long currentViews = redisTemplate.opsForValue().increment(EVENT_VIEWS_KEY + eventId);
-        event.setPageViews((event.getPageViews() != null ? event.getPageViews() : 0) + currentViews.intValue());
-
+        String viewsKey = EVENT_VIEWS_KEY + eventId;
         String wantKey = EVENT_WANT_KEY + eventId;
-        Long wantCount = redisTemplate.opsForSet().size(wantKey);
-        if (wantCount != null && wantCount > 0) {
-            event.setWantCount(wantCount.intValue());
-        }
 
+        // 🚨 核心1：每次被访问，Redis 浏览量 +1
+        Long currentViews = redisTemplate.opsForValue().increment(viewsKey);
+        event.setPageViews(event.getPageViews() + currentViews.intValue()); // DB 基础值 + Redis 新增值
+
+        // 🚨 核心2：获取实时想看总人数
+        Long wantCount = redisTemplate.opsForSet().size(wantKey);
+        // 如果 Redis 里没数据，说明还没人点过或者 Redis 刚清空，兜底用 DB 里的数据；否则用 Redis 的
+        event.setWantCount(wantCount != null && wantCount > 0 ? wantCount.intValue() : event.getWantCount());
+
+        // 🚨 核心3：判断当前用户是否点过想看
         if (currentUserId != null) {
-            Boolean hasWanted = redisTemplate.opsForSet().isMember(wantKey, String.valueOf(currentUserId));
-            event.setHasWanted(Boolean.TRUE.equals(hasWanted));
+            Boolean hasWanted = redisTemplate.opsForSet().isMember(wantKey, currentUserId.toString());
+            event.setHasWanted(hasWanted != null ? hasWanted : false);
         } else {
             event.setHasWanted(false);
         }
@@ -132,58 +124,101 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         return event;
     }
 
-    /**
-     * 新增演出。
-     *
-     * 新数据结构约定：
-     * 1. 场次只从 dto.sessions 读取；
-     * 2. 票档只存在于 sessions[*].tickets；
-     * 3. 不再从 dto.showTime / dto.saleTime / dto.tickets 生成默认场次；
-     * 4. 允许 sessions 为空，表示“演出时间待定”。
-     */
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void saveEventWithTicketsAndArtists(EventAddDTO dto) {
         User currentUser = getCurrentUser();
-        boolean superAdmin = isSuperAdmin(currentUser);
+        boolean isSuperAdmin = currentUser.getId() == 1L;
 
         List<EventSessionDTO> sessions = normalizeSessions(dto);
         validateEventSessions(dto, sessions);
-        dto.setSessions(sessions);
 
         Event event = new Event();
         BeanUtils.copyProperties(dto, event);
-        event.setCreateBy(currentUser.getId());
-        fillEventSummaryTime(event, sessions);
 
-        if (superAdmin) {
+        /*
+         * 演出主键 ID 使用 MyBatis-Plus 雪花算法生成。
+         * Event.id 需要配置为 @TableId(type = IdType.ASSIGN_ID)。
+         */
+        event.setCreateBy(currentUser.getId());
+
+        // 用第一个场次回填 tb_event.show_time / sale_time，兼容列表排序和旧代码
+        fillEventDefaultTime(event, sessions);
+
+        if (isSuperAdmin) {
             event.setAuditStatus(Event.AUDIT_APPROVED);
             if (event.getStatus() == null) {
-                event.setStatus(EVENT_STATUS_ONLINE);
+                event.setStatus(1);
             }
         } else {
-            event.setPendingPayload(toJson(dto, "保存新增审核快照失败"));
+            // 普通提交人：先记录他选择的完整提交内容
+            try {
+                event.setPendingPayload(objectMapper.writeValueAsString(dto));
+            } catch (Exception e) {
+                throw new BusinessException("保存新增审核快照失败");
+            }
+
+            // 待审核期间不能直接按提交状态展示，否则 C 端可能提前可见
             event.setAuditStatus(Event.AUDIT_PENDING);
-            event.setStatus(EVENT_STATUS_HIDDEN);
+            event.setStatus(4);
         }
 
         event.setAuditSubmitTime(LocalDateTime.now());
 
-        save(event);
+        this.save(event);
 
-        syncSessionsAndTickets(event.getId(), sessions);
-        syncEventArtists(event.getId(), dto.getArtistIds());
+        // 新模型：保存 sessions 和每个 session 下的票档
+        syncEventSessionsAndTickets(event.getId(), sessions);
+
+        // 保存艺人关联
+        if (dto.getArtistIds() != null && !dto.getArtistIds().isEmpty()) {
+            List<EventArtist> relations = dto.getArtistIds().stream().map(artistId -> {
+                EventArtist ea = new EventArtist();
+                ea.setEventId(event.getId());
+                ea.setArtistId(artistId);
+                return ea;
+            }).collect(Collectors.toList());
+            eventArtistService.saveBatch(relations);
+        }
     }
 
     /**
-     * 修改演出。
+     * 生成唯一演出 ID：10 位随机数字。
      *
-     * 超管：直接生效；
-     * 普通管理员：
-     * 1. 已通过演出 -> 写入 pendingPayload，等待修改审核；
-     * 2. 新增待审核或修改待审核 -> 不允许重复提交；
-     * 3. 已驳回/已撤销 -> 作为新增审核重新提交。
+     * 随机 ID 存在极低概率碰撞，所以必须查库确认。
+     * 如果 tb_event.id 已经加了主键/唯一约束，数据库也会做最终兜底。
      */
+    private Long generateUniqueEventId() {
+        for (int i = 0; i < EVENT_ID_MAX_RETRY; i++) {
+            Long eventId = nextTenDigitEventId();
+
+            long count = this.count(
+                    new LambdaQueryWrapper<Event>()
+                            .eq(Event::getId, eventId)
+            );
+
+            if (count == 0) {
+                return eventId;
+            }
+        }
+
+        throw new BusinessException("演出ID生成失败，请稍后重试");
+    }
+
+    /**
+     * 生成 1000000000 ~ 9999999999 之间的 10 位数字。
+     * 首位不为 0，因此展示时永远是 10 位。
+     */
+    private Long nextTenDigitEventId() {
+        return EVENT_ID_MIN + Math.floorMod(SECURE_RANDOM.nextLong(), EVENT_ID_RANGE);
+    }
+
+    private User getCurrentUser() {
+        String userId = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userService.getOne(new LambdaQueryWrapper<User>().eq(User::getId, Long.valueOf(userId)));
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateEventWithTicketsAndArtists(Long id, EventAddDTO dto) {
@@ -193,37 +228,56 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         }
 
         User currentUser = getCurrentUser();
-        boolean superAdmin = isSuperAdmin(currentUser);
+        boolean isSuperAdmin = currentUser.getId() == 1L;
 
+        /*
+         * 多场次模型校验：
+         * 1. 如果 dto.sessions 有值，用 sessions 校验
+         * 2. 如果 dto.sessions 为空，则兼容旧字段 showTime / saleTime / tickets，生成一个默认场次
+         */
         List<EventSessionDTO> sessions = normalizeSessions(dto);
         validateEventSessions(dto, sessions);
+
+        /*
+         * 关键：把规范化后的 sessions 回写进 dto。
+         * 这样普通管理员提交修改审核时，pendingPayload 里也会带上 sessions。
+         */
         dto.setSessions(sessions);
 
-        if (superAdmin) {
+        // 1. 超管：免审，直接覆盖主表、场次、票档、艺人关系
+        if (isSuperAdmin) {
             Integer finalStatus = dto.getStatus() != null ? dto.getStatus() : oldEvent.getStatus();
             applyEventMainData(id, dto, Event.AUDIT_APPROVED, finalStatus);
             return;
         }
 
+        // 2. 普通管理员：新增待审核中，不允许直接改
         if (Objects.equals(oldEvent.getAuditStatus(), Event.AUDIT_PENDING)) {
             throw new BusinessException("该演出正在审核中，如需修改，请先撤销审核申请");
         }
 
+        // 3. 普通管理员：修改待审核中，不允许再次改
         if (Objects.equals(oldEvent.getEditAuditStatus(), Event.EDIT_AUDIT_PENDING)) {
             throw new BusinessException("该演出的修改正在审核中，如需再次修改，请先撤销审核申请");
         }
 
+        // 4. 普通管理员编辑已审核通过演出：只保存修改快照，不影响客户端旧数据
         if (Objects.equals(oldEvent.getAuditStatus(), Event.AUDIT_APPROVED)) {
-            oldEvent.setPendingPayload(toJson(dto, "保存修改审核快照失败"));
-            oldEvent.setEditAuditStatus(Event.EDIT_AUDIT_PENDING);
-            oldEvent.setAuditSubmitTime(LocalDateTime.now());
-            updateById(oldEvent);
-            return;
+            try {
+                oldEvent.setPendingPayload(objectMapper.writeValueAsString(dto));
+                oldEvent.setEditAuditStatus(Event.EDIT_AUDIT_PENDING);
+                oldEvent.setAuditSubmitTime(LocalDateTime.now());
+                updateById(oldEvent);
+                return;
+            } catch (Exception e) {
+                throw new BusinessException("保存修改审核快照失败");
+            }
         }
 
+        // 5. 普通管理员编辑已撤销/已驳回演出：允许重新提交新增审核
         if (Objects.equals(oldEvent.getAuditStatus(), Event.AUDIT_REJECTED)
                 || Objects.equals(oldEvent.getAuditStatus(), Event.AUDIT_REVOKED)) {
-            applyEventMainData(id, dto, Event.AUDIT_PENDING, EVENT_STATUS_HIDDEN);
+            applyEventMainData(id, dto, Event.AUDIT_PENDING, Event.STATUS_OFFLINE);
             return;
         }
 
@@ -231,34 +285,50 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
     }
 
     /**
-     * 后台演出分页列表。
-     *
-     * 数据隔离：
-     * 1. 超管、审核员、event:view_all 可看全部；
-     * 2. 普通发布者只能看自己创建的演出。
-     *
-     * 返回结构：
-     * 1. sessions[*].tickets 为唯一票务结构；
-     * 2. artists 为后台表格展示用；
-     * 3. 不再填充根级 event.tickets。
+     * 1. 核心改造：获取管理后台的演出列表 (带数据隔离)
      */
     @Override
     public IPage<Event> listAdminEvents(int current, int size, String keyword) {
         User currentUser = getCurrentUser();
-        boolean canViewAllEvents = canViewAllEvents(currentUser);
+        boolean isSuperAdmin = (currentUser.getId() == 1L);
+
+        List<String> permissions = userMapper.selectPermissionsByUserId(currentUser.getId());
+        boolean canViewAllEvents =
+                isSuperAdmin ||
+                        permissions.contains("audit:manage") ||
+                        permissions.contains("event:view_all");
 
         LambdaQueryWrapper<Event> wrapper = new LambdaQueryWrapper<>();
         if (!canViewAllEvents) {
             wrapper.eq(Event::getCreateBy, currentUser.getId());
         }
-
-        if (StringUtils.hasText(keyword)) {
-            applyAdminKeywordFilter(wrapper, keyword);
-        }
-
         wrapper.orderByDesc(Event::getCreateTime);
 
-        IPage<Event> pageData = page(new Page<>(current, size), wrapper);
+        if (StringUtils.hasText(keyword)) {
+            boolean isNumeric = keyword.matches("\\d+");
+
+            wrapper.and(w -> {
+                w.like(Event::getTitle, keyword)
+                        .or()
+                        .like(Event::getVenue, keyword)
+                        // 👇 跨表子查询魔法：根据艺人名字反查出所有的演出 ID
+                        // ⚠️ 请确保以下 SQL 中的表名 (tb_event_artist 和 tb_artist) 与你数据库里的真实表名完全一致！
+                        .or()
+                        .inSql(Event::getId,
+                                "SELECT event_id FROM tb_event_artist WHERE artist_id IN " +
+                                        "(SELECT id FROM tb_artist WHERE name LIKE '%" + keyword + "%')"
+
+                        );
+                if (isNumeric) {
+                    w.or().eq(Event::getId, Long.valueOf(keyword));
+                }
+            });
+
+
+        }
+
+        // 1. 查基础演出
+        IPage<Event> pageData = this.page(new Page<>(current, size), wrapper);
         List<Event> records = pageData.getRecords();
         if (records == null || records.isEmpty()) {
             return pageData;
@@ -266,25 +336,84 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
         List<Long> eventIds = records.stream().map(Event::getId).collect(Collectors.toList());
 
-        Map<Long, List<EventSession>> sessionMap = buildSessionMap(eventIds);
-        Map<Long, List<Map<String, Object>>> artistMap = buildArtistMap(eventIds);
+        // ======================= 补丁 1：装配场次 + 票档 =======================
+        List<EventSession> allSessions = eventSessionMapper.selectList(
+                new LambdaQueryWrapper<EventSession>()
+                        .in(EventSession::getEventId, eventIds)
+                        .orderByAsc(EventSession::getSortOrder)
+                        .orderByAsc(EventSession::getShowTime)
+        );
 
-        for (Event event : records) {
-            event.setSessions(sessionMap.getOrDefault(event.getId(), new ArrayList<>()));
-            event.setArtists(artistMap.getOrDefault(event.getId(), new ArrayList<>()));
+        List<TicketCategory> allTickets = ticketCategoryMapper.selectList(
+                new LambdaQueryWrapper<TicketCategory>().in(TicketCategory::getEventId, eventIds)
+        );
+
+        Map<Long, List<TicketCategory>> ticketMapByEventId = allTickets.stream()
+                .collect(Collectors.groupingBy(TicketCategory::getEventId));
+
+        Map<Long, List<TicketCategory>> ticketMapBySessionId = allTickets.stream()
+                .filter(t -> t.getSessionId() != null)
+                .collect(Collectors.groupingBy(TicketCategory::getSessionId));
+
+        for (EventSession session : allSessions) {
+            session.setTickets(ticketMapBySessionId.getOrDefault(session.getId(), new ArrayList<>()));
         }
+
+        Map<Long, List<EventSession>> sessionMapByEventId = allSessions.stream()
+                .collect(Collectors.groupingBy(EventSession::getEventId));
+
+        // ======================= 补丁 2：装配艺人 =======================
+        // 2.1 查关系表 tb_event_artist
+        List<EventArtist> eventArtists = eventArtistService.list(
+                new LambdaQueryWrapper<EventArtist>().in(EventArtist::getEventId, eventIds)
+        );
+
+        // 2.2 取出所有不重复的艺人 ID 并查出艺人详情
+        Map<Long, Artist> artistMap = new HashMap<>();
+        if (!eventArtists.isEmpty()) {
+            List<Long> artistIds = eventArtists.stream().map(EventArtist::getArtistId).distinct().collect(Collectors.toList());
+            if (!artistIds.isEmpty()) {
+                // 根据 ID 批量查出艺人
+                List<Artist> artistsList = artistMapper.selectBatchIds(artistIds);
+                artistMap = artistsList.stream().collect(Collectors.toMap(Artist::getId, a -> a));
+            }
+        }
+
+        // 2.3 将艺人组装成方便前端解析的 Map 结构并按 event_id 分组
+        Map<Long, List<Map<String, Object>>> eventArtistMap = new HashMap<>();
+        for (EventArtist ea : eventArtists) {
+            Map<String, Object> artistInfo = new HashMap<>();
+            Artist artist = artistMap.get(ea.getArtistId());
+
+            if (artist == null) {
+                // 情况 1：艺人被删了或者数据库找不到
+                artistInfo.put("id", ea.getArtistId());
+                artistInfo.put("name", "未知艺人 (ID:" + ea.getArtistId() + ")");
+                artistInfo.put("notFound", true);
+            } else {
+                // 情况 2：正常找到艺人
+                artistInfo.put("id", artist.getId());
+                artistInfo.put("name", artist.getName());
+                artistInfo.put("auditStatus", artist.getAuditStatus()); // 假设 0 是待审核
+                artistInfo.put("notFound", false);
+            }
+            eventArtistMap.computeIfAbsent(ea.getEventId(), k -> new ArrayList<>()).add(artistInfo);
+        }
+
+        // ======================= 统一赋值 =======================
+        records.forEach(event -> {
+            event.setSessions(sessionMapByEventId.getOrDefault(event.getId(), new ArrayList<>()));
+
+            // 兼容旧表格的“票务策略”展示：这里给全部票档
+            event.setTickets(ticketMapByEventId.getOrDefault(event.getId(), new ArrayList<>()));
+
+            event.setArtists(eventArtistMap.getOrDefault(event.getId(), new ArrayList<>()));
+        });
 
         return pageData;
     }
 
-    /**
-     * 将审核快照真正落库。
-     *
-     * 使用场景：
-     * 1. 审核通过新增演出；
-     * 2. 审核通过修改演出；
-     * 3. 超管直接修改演出。
-     */
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void applyEventMainData(Long id, EventAddDTO dto, Integer auditStatus, Integer status) {
@@ -295,7 +424,6 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
         List<EventSessionDTO> sessions = normalizeSessions(dto);
         validateEventSessions(dto, sessions);
-        dto.setSessions(sessions);
 
         Event newEvent = new Event();
         BeanUtils.copyProperties(dto, newEvent);
@@ -306,100 +434,108 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         newEvent.setEditAuditStatus(null);
         newEvent.setPendingPayload(null);
         newEvent.setAuditSubmitTime(LocalDateTime.now());
-        fillEventSummaryTime(newEvent, sessions);
+
+        // 用第一个场次回填旧字段
+        fillEventDefaultTime(newEvent, sessions);
 
         updateById(newEvent);
 
-        /*
-         * updateById 对 null 字段的处理可能受 MyBatis-Plus 策略影响。
-         * 这里显式清理修改审核字段，保证状态收敛。
-         */
-        update(new LambdaUpdateWrapper<Event>()
-                .eq(Event::getId, id)
-                .set(Event::getEditAuditStatus, null)
-                .set(Event::getPendingPayload, null)
+        this.update(
+                new LambdaUpdateWrapper<Event>()
+                        .eq(Event::getId, id)
+                        .set(Event::getEditAuditStatus, null)
+                        .set(Event::getPendingPayload, null)
         );
 
-        syncEventArtists(id, dto.getArtistIds());
-        syncSessionsAndTickets(id, sessions);
-    }
+        eventArtistService.remove(
+                new LambdaQueryWrapper<EventArtist>().eq(EventArtist::getEventId, id)
+        );
 
-    /**
-     * 获取当前登录用户。
-     */
-    private User getCurrentUser() {
-        String userId = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userService.getOne(new LambdaQueryWrapper<User>().eq(User::getId, Long.valueOf(userId)));
-    }
-
-    private boolean isSuperAdmin(User user) {
-        return user != null && Objects.equals(user.getId(), 1L);
-    }
-
-    /**
-     * 管理端查看权限判断。
-     */
-    private boolean canViewAllEvents(User user) {
-        if (isSuperAdmin(user)) {
-            return true;
+        if (dto.getArtistIds() != null && !dto.getArtistIds().isEmpty()) {
+            List<EventArtist> relations = dto.getArtistIds().stream().map(artistId -> {
+                EventArtist ea = new EventArtist();
+                ea.setEventId(id);
+                ea.setArtistId(artistId);
+                return ea;
+            }).collect(Collectors.toList());
+            eventArtistService.saveBatch(relations);
         }
 
-        List<String> permissions = userMapper.selectPermissionsByUserId(user.getId());
-        return permissions.contains("audit:manage") || permissions.contains("event:view_all");
+        // 新模型：同步场次和每场票档
+        syncEventSessionsAndTickets(id, sessions);
     }
 
-    /**
-     * 后台关键词搜索：支持标题、场馆、艺人名、数字 ID。
-     */
-    private void applyAdminKeywordFilter(LambdaQueryWrapper<Event> wrapper, String keyword) {
-        boolean numeric = keyword.matches("\\d+");
+    private void syncTicketCategories(Long eventId, Long sessionId, List<TicketCategoryDTO> tickets) {
+        List<TicketCategory> oldTickets = ticketCategoryMapper.selectList(
+                new LambdaQueryWrapper<TicketCategory>()
+                        .eq(TicketCategory::getEventId, eventId)
+                        .eq(TicketCategory::getSessionId, sessionId)
+        );
 
-        wrapper.and(w -> {
-            w.like(Event::getTitle, keyword)
-                    .or()
-                    .like(Event::getVenue, keyword)
-                    .or()
-                    .apply(
-                            "EXISTS (" +
-                                    "SELECT 1 FROM tb_event_artist ea " +
-                                    "INNER JOIN tb_artist a ON ea.artist_id = a.id " +
-                                    "WHERE ea.event_id = tb_event.id " +
-                                    "AND a.name LIKE CONCAT('%', {0}, '%')" +
-                                    ")",
-                            keyword
-                    );
+        if (tickets == null || tickets.isEmpty()) {
+            oldTickets.forEach(t -> ticketCategoryMapper.deleteById(t.getId()));
+            return;
+        }
 
-            if (numeric) {
-                w.or().eq(Event::getId, Long.valueOf(keyword));
+        Set<Long> keepTicketIds = new HashSet<>();
+
+        for (TicketCategoryDTO t : tickets) {
+            if (!StringUtils.hasText(t.getName())) {
+                continue;
             }
-        });
-    }
 
-    /**
-     * 标准化 sessions。
-     *
-     * 规则：
-     * 1. null 或空数组表示“时间待定”；
-     * 2. 没有 showTime 的 session 不算有效场次；
-     * 3. 不从根级 showTime / saleTime / tickets 创建默认场次。
-     */
-    private List<EventSessionDTO> normalizeSessions(EventAddDTO dto) {
-        if (dto.getSessions() == null || dto.getSessions().isEmpty()) {
-            return new ArrayList<>();
+            TicketCategory existingTicket = null;
+
+            if (t.getId() != null) {
+                existingTicket = oldTickets.stream()
+                        .filter(ot -> Objects.equals(ot.getId(), t.getId()))
+                        .findFirst()
+                        .orElse(null);
+            }
+
+            if (existingTicket == null) {
+                existingTicket = oldTickets.stream()
+                        .filter(ot -> Objects.equals(ot.getName(), t.getName()))
+                        .findFirst()
+                        .orElse(null);
+            }
+
+            if (existingTicket != null) {
+                int oldTotalStock = existingTicket.getTotalStock() != null ? existingTicket.getTotalStock() : 0;
+                int oldRemainingStock = existingTicket.getRemainingStock() != null ? existingTicket.getRemainingStock() : 0;
+                int newStock = t.getStock() != null ? t.getStock() : 0;
+                int stockDiff = newStock - oldTotalStock;
+
+                existingTicket.setName(t.getName());
+                existingTicket.setPrice(t.getPrice());
+                existingTicket.setTotalStock(newStock);
+                existingTicket.setRemainingStock(Math.max(0, oldRemainingStock + stockDiff));
+                existingTicket.setEventId(eventId);
+                existingTicket.setSessionId(sessionId);
+
+                ticketCategoryMapper.updateById(existingTicket);
+                keepTicketIds.add(existingTicket.getId());
+            } else {
+                TicketCategory category = new TicketCategory();
+                category.setEventId(eventId);
+                category.setSessionId(sessionId);
+                category.setName(t.getName());
+                category.setPrice(t.getPrice());
+                category.setTotalStock(t.getStock());
+                category.setRemainingStock(t.getStock());
+
+                ticketCategoryMapper.insert(category);
+                keepTicketIds.add(category.getId());
+            }
         }
 
-        return dto.getSessions().stream()
-                .filter(session -> session != null && session.getShowTime() != null)
-                .collect(Collectors.toList());
+        for (TicketCategory oldTicket : oldTickets) {
+            if (!keepTicketIds.contains(oldTicket.getId())) {
+                ticketCategoryMapper.deleteById(oldTicket.getId());
+            }
+        }
     }
 
-    /**
-     * 校验有效场次。
-     *
-     * 当前约束：
-     * 1. 上架场次必须设置 saleTime；
-     * 2. saleTime 必须早于 showTime 至少 24 小时。
-     */
     private void validateEventSessions(EventAddDTO dto, List<EventSessionDTO> sessions) {
         if (sessions == null || sessions.isEmpty()) {
             return;
@@ -413,28 +549,33 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
                 throw new BusinessException(prefix + "：请选择演出时间");
             }
 
-            Integer sessionStatus = session.getStatus() != null ? session.getStatus() : dto.getStatus();
+            Integer sessionStatus = session.getStatus() != null
+                    ? session.getStatus()
+                    : dto.getStatus();
 
-            if (Objects.equals(sessionStatus, EVENT_STATUS_ONLINE) && session.getSaleTime() == null) {
+            if (sessionStatus != null && sessionStatus == 1 && session.getSaleTime() == null) {
                 throw new BusinessException(prefix + "：上架状态必须设置开票时间");
             }
 
             if (session.getSaleTime() != null
+                    && session.getShowTime() != null
                     && session.getSaleTime().isAfter(session.getShowTime().minusHours(24))) {
                 throw new BusinessException(prefix + "：开票时间必须早于演出时间至少 24 小时");
             }
         }
     }
 
-    /**
-     * 回填 Event 主表的摘要时间字段。
-     *
-     * 说明：
-     * 1. event.showTime / saleTime 只用于列表排序、摘要展示；
-     * 2. 购票业务以 tb_event_session 为准；
-     * 3. 无有效场次时，摘要时间置空。
-     */
-    private void fillEventSummaryTime(Event event, List<EventSessionDTO> sessions) {
+    private List<EventSessionDTO> normalizeSessions(EventAddDTO dto) {
+        if (dto.getSessions() == null || dto.getSessions().isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        return dto.getSessions().stream()
+                .filter(session -> session != null && session.getShowTime() != null)
+                .collect(Collectors.toList());
+    }
+
+    private void fillEventDefaultTime(Event event, List<EventSessionDTO> sessions) {
         if (sessions == null || sessions.isEmpty()) {
             event.setShowTime(null);
             event.setSaleTime(null);
@@ -442,6 +583,7 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         }
 
         EventSessionDTO first = sessions.stream()
+                .filter(s -> s.getShowTime() != null)
                 .min(Comparator.comparing(EventSessionDTO::getShowTime))
                 .orElse(null);
 
@@ -455,36 +597,18 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         event.setSaleTime(first.getSaleTime());
     }
 
-    /**
-     * 同步演出艺人关系。
-     */
-    private void syncEventArtists(Long eventId, List<Long> artistIds) {
-        eventArtistService.remove(new LambdaQueryWrapper<EventArtist>().eq(EventArtist::getEventId, eventId));
-
-        if (artistIds == null || artistIds.isEmpty()) {
-            return;
-        }
-
-        List<EventArtist> relations = artistIds.stream()
-                .map(artistId -> {
-                    EventArtist relation = new EventArtist();
-                    relation.setEventId(eventId);
-                    relation.setArtistId(artistId);
-                    return relation;
-                })
-                .collect(Collectors.toList());
-
-        eventArtistService.saveBatch(relations);
-    }
-
-    /**
-     * 同步场次与场次票档。
-     *
-     * sessions 为空表示清空所有时间场次和票档，前台展示“演出时间待定”。
-     */
-    private void syncSessionsAndTickets(Long eventId, List<EventSessionDTO> sessions) {
+    private void syncEventSessionsAndTickets(Long eventId, List<EventSessionDTO> sessions) {
         if (sessions == null || sessions.isEmpty()) {
-            deleteAllSessionsAndTickets(eventId);
+            ticketCategoryMapper.delete(
+                    new LambdaQueryWrapper<TicketCategory>()
+                            .eq(TicketCategory::getEventId, eventId)
+            );
+
+            eventSessionMapper.delete(
+                    new LambdaQueryWrapper<EventSession>()
+                            .eq(EventSession::getEventId, eventId)
+            );
+
             return;
         }
 
@@ -496,7 +620,15 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
         for (int i = 0; i < sessions.size(); i++) {
             EventSessionDTO dto = sessions.get(i);
-            EventSession session = findExistingSession(oldSessions, dto.getId());
+
+            EventSession session = null;
+
+            if (dto.getId() != null) {
+                session = oldSessions.stream()
+                        .filter(s -> Objects.equals(s.getId(), dto.getId()))
+                        .findFirst()
+                        .orElse(null);
+            }
 
             if (session == null) {
                 session = new EventSession();
@@ -504,10 +636,10 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
                 session.setCreateTime(LocalDateTime.now());
             }
 
-            session.setSessionName(StringUtils.hasText(dto.getSessionName()) ? dto.getSessionName() : "场次" + (i + 1));
+            session.setSessionName(StringUtils.hasText(dto.getSessionName()) ? dto.getSessionName() : "默认场次");
             session.setShowTime(dto.getShowTime());
             session.setSaleTime(dto.getSaleTime());
-            session.setStatus(dto.getStatus() != null ? dto.getStatus() : EVENT_STATUS_ONLINE);
+            session.setStatus(dto.getStatus() != null ? dto.getStatus() : 1);
             session.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : i);
             session.setUpdateTime(LocalDateTime.now());
 
@@ -518,29 +650,11 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
             }
 
             keepSessionIds.add(session.getId());
-            syncSessionTickets(eventId, session.getId(), dto.getTickets());
+
+            syncTicketCategories(eventId, session.getId(), dto.getTickets());
         }
 
-        deleteRemovedSessions(oldSessions, keepSessionIds);
-    }
-
-    private EventSession findExistingSession(List<EventSession> oldSessions, Long sessionId) {
-        if (sessionId == null) {
-            return null;
-        }
-
-        return oldSessions.stream()
-                .filter(session -> Objects.equals(session.getId(), sessionId))
-                .findFirst()
-                .orElse(null);
-    }
-
-    private void deleteAllSessionsAndTickets(Long eventId) {
-        ticketCategoryMapper.delete(new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, eventId));
-        eventSessionMapper.delete(new LambdaQueryWrapper<EventSession>().eq(EventSession::getEventId, eventId));
-    }
-
-    private void deleteRemovedSessions(List<EventSession> oldSessions, Set<Long> keepSessionIds) {
+        // 删除已经被前端移除的场次，并删除其票档
         for (EventSession oldSession : oldSessions) {
             if (!keepSessionIds.contains(oldSession.getId())) {
                 ticketCategoryMapper.delete(
@@ -552,167 +666,4 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         }
     }
 
-    /**
-     * 同步单个场次下的票档。
-     *
-     * 新数据结构要求：
-     * 1. 新增票档 id 为空；
-     * 2. 修改票档必须带 id；
-     * 3. 不再使用票档名称匹配旧记录。
-     */
-    private void syncSessionTickets(Long eventId, Long sessionId, List<TicketCategoryDTO> tickets) {
-        List<TicketCategory> oldTickets = ticketCategoryMapper.selectList(
-                new LambdaQueryWrapper<TicketCategory>()
-                        .eq(TicketCategory::getEventId, eventId)
-                        .eq(TicketCategory::getSessionId, sessionId)
-        );
-
-        if (tickets == null || tickets.isEmpty()) {
-            for (TicketCategory oldTicket : oldTickets) {
-                ticketCategoryMapper.deleteById(oldTicket.getId());
-            }
-            return;
-        }
-
-        Set<Long> keepTicketIds = new HashSet<>();
-
-        for (TicketCategoryDTO dto : tickets) {
-            if (!StringUtils.hasText(dto.getName())) {
-                continue;
-            }
-
-            TicketCategory ticket = dto.getId() == null ? null : findExistingTicket(oldTickets, dto.getId());
-
-            if (ticket == null) {
-                ticket = new TicketCategory();
-                ticket.setEventId(eventId);
-                ticket.setSessionId(sessionId);
-                ticket.setName(dto.getName());
-                ticket.setPrice(dto.getPrice());
-                ticket.setTotalStock(dto.getStock());
-                ticket.setRemainingStock(dto.getStock());
-                ticketCategoryMapper.insert(ticket);
-            } else {
-                updateExistingTicket(ticket, dto);
-                ticketCategoryMapper.updateById(ticket);
-            }
-
-            keepTicketIds.add(ticket.getId());
-        }
-
-        for (TicketCategory oldTicket : oldTickets) {
-            if (!keepTicketIds.contains(oldTicket.getId())) {
-                ticketCategoryMapper.deleteById(oldTicket.getId());
-            }
-        }
-    }
-
-    private TicketCategory findExistingTicket(List<TicketCategory> oldTickets, Long ticketId) {
-        return oldTickets.stream()
-                .filter(ticket -> Objects.equals(ticket.getId(), ticketId))
-                .findFirst()
-                .orElse(null);
-    }
-
-    /**
-     * 修改已有票档时保留已售数量。
-     *
-     * remainingStock 调整规则：
-     * 新剩余库存 = 旧剩余库存 + 新总库存 - 旧总库存。
-     */
-    private void updateExistingTicket(TicketCategory ticket, TicketCategoryDTO dto) {
-        int oldTotalStock = ticket.getTotalStock() != null ? ticket.getTotalStock() : 0;
-        int oldRemainingStock = ticket.getRemainingStock() != null ? ticket.getRemainingStock() : 0;
-        int newStock = dto.getStock() != null ? dto.getStock() : 0;
-        int stockDiff = newStock - oldTotalStock;
-
-        ticket.setName(dto.getName());
-        ticket.setPrice(dto.getPrice());
-        ticket.setTotalStock(newStock);
-        ticket.setRemainingStock(Math.max(0, oldRemainingStock + stockDiff));
-    }
-
-    /**
-     * 批量装配场次与票档。
-     */
-    private Map<Long, List<EventSession>> buildSessionMap(List<Long> eventIds) {
-        List<EventSession> sessions = eventSessionMapper.selectList(
-                new LambdaQueryWrapper<EventSession>()
-                        .in(EventSession::getEventId, eventIds)
-                        .ne(EventSession::getStatus, SESSION_STATUS_HIDDEN)
-                        .orderByAsc(EventSession::getSortOrder)
-                        .orderByAsc(EventSession::getShowTime)
-        );
-
-        if (sessions.isEmpty()) {
-            return new HashMap<>();
-        }
-
-        List<Long> sessionIds = sessions.stream().map(EventSession::getId).collect(Collectors.toList());
-
-        List<TicketCategory> tickets = ticketCategoryMapper.selectList(
-                new LambdaQueryWrapper<TicketCategory>().in(TicketCategory::getSessionId, sessionIds)
-        );
-
-        Map<Long, List<TicketCategory>> ticketMap = tickets.stream()
-                .collect(Collectors.groupingBy(TicketCategory::getSessionId));
-
-        for (EventSession session : sessions) {
-            session.setTickets(ticketMap.getOrDefault(session.getId(), new ArrayList<>()));
-        }
-
-        return sessions.stream().collect(Collectors.groupingBy(EventSession::getEventId));
-    }
-
-    /**
-     * 批量装配艺人信息。
-     */
-    private Map<Long, List<Map<String, Object>>> buildArtistMap(List<Long> eventIds) {
-        List<EventArtist> relations = eventArtistService.list(
-                new LambdaQueryWrapper<EventArtist>().in(EventArtist::getEventId, eventIds)
-        );
-
-        if (relations.isEmpty()) {
-            return new HashMap<>();
-        }
-
-        List<Long> artistIds = relations.stream()
-                .map(EventArtist::getArtistId)
-                .distinct()
-                .collect(Collectors.toList());
-
-        Map<Long, Artist> artistEntityMap = artistMapper.selectBatchIds(artistIds)
-                .stream()
-                .collect(Collectors.toMap(Artist::getId, artist -> artist));
-
-        Map<Long, List<Map<String, Object>>> result = new HashMap<>();
-
-        for (EventArtist relation : relations) {
-            Artist artist = artistEntityMap.get(relation.getArtistId());
-            Map<String, Object> artistInfo = new HashMap<>();
-            artistInfo.put("id", relation.getArtistId());
-
-            if (artist == null) {
-                artistInfo.put("name", "未知艺人");
-                artistInfo.put("notFound", true);
-                artistInfo.put("auditStatus", null);
-            } else {
-                artistInfo.put("name", artist.getName());
-                artistInfo.put("auditStatus", artist.getAuditStatus());
-                artistInfo.put("notFound", false);
-            }
-
-            result.computeIfAbsent(relation.getEventId(), key -> new ArrayList<>()).add(artistInfo);
-        }
-
-        return result;
-    }
-
-    private String toJson(Object data, String errorMessage) {
-        try {
-            return objectMapper.writeValueAsString(data);
-        } catch (Exception e) {
-            throw new BusinessException(errorMessage);
-        }
-    }
 }

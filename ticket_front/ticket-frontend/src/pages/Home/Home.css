@@ -489,3 +489,45 @@
         gap: 18px 14px;
     }
 }
+
+/* 追加到 src/pages/Home/Home.css 底部
+   首页 Banner 原图显示补丁：去掉滤镜/遮罩，直接展示高质量原图
+*/
+
+.home-banner-image-frame {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    cursor: pointer;
+    background: #fff;
+}
+
+.home-banner-original-img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    object-position: center;
+    filter: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+}
+
+/* 兜底覆盖旧 Banner 滤镜、遮罩、伪元素 */
+.home-banner-section .home-banner-slide::before,
+.home-banner-section .home-banner-slide::after,
+.home-banner-section .home-banner-image-frame::before,
+.home-banner-section .home-banner-image-frame::after,
+.home-banner-section .home-banner-img::before,
+.home-banner-section .home-banner-img::after {
+    display: none !important;
+    content: none !important;
+}
+
+.home-banner-section .home-banner-img,
+.home-banner-section .home-banner-original-img {
+    filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+

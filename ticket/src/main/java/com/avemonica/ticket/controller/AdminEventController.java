@@ -9,6 +9,7 @@ import com.avemonica.ticket.mapper.ArtistMapper;
 import com.avemonica.ticket.mapper.EventSessionMapper;
 import com.avemonica.ticket.service.ArtistService;
 import com.avemonica.ticket.service.EventService;
+import com.avemonica.ticket.service.UploadFileService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -19,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import com.avemonica.ticket.service.TicketService;
@@ -28,6 +30,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.HashSet;
+import java.util.Set;
 
 import java.util.List;
 import java.util.Map;
@@ -61,6 +65,9 @@ public class AdminEventController {
     private EventSessionMapper eventSessionMapper;
 
     @Autowired
+    private UploadFileService uploadFileService;
+
+    @Autowired
     @Qualifier("eventLocalCache")
     private Cache<String, String> localCache;
 
@@ -77,6 +84,20 @@ public class AdminEventController {
             log.info("已删除演出详情 L1/L2 缓存，cacheKey={}", cacheKey);
         } catch (Exception e) {
             log.warn("删除演出详情缓存失败，cacheKey={}", cacheKey, e);
+        }
+    }
+
+
+    /**
+     * 当前项目约定：SecurityContext 中的 authentication.name 是用户 ID。
+     * userId = 1 的账号是超管 admin，编辑演出时不走审核，直接生效。
+     */
+    private boolean isSuperAdmin() {
+        try {
+            String userId = SecurityContextHolder.getContext().getAuthentication().getName();
+            return "1".equals(userId);
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -157,6 +178,7 @@ public class AdminEventController {
         if (Objects.equals(event.getEditAuditStatus(), Event.EDIT_AUDIT_PENDING)) {
             if (isPass) {
                 try {
+                    Event oldEvent = eventService.getById(id);
                     EventAddDTO dto = objectMapper.readValue(event.getPendingPayload(), EventAddDTO.class);
                     Integer finalStatus = dto.getStatus() != null ? dto.getStatus() : event.getStatus();
 
@@ -170,6 +192,8 @@ public class AdminEventController {
                                     .set(Event::getAuditSubmitTime, LocalDateTime.now())
                     );
 
+                    Event updatedEvent = eventService.getById(id);
+                    deleteReplacedEventImages(oldEvent, updatedEvent);
 
                     evictEventDetailCache(id);
 
@@ -178,6 +202,9 @@ public class AdminEventController {
                     throw new BusinessException("解析演出修改审核快照失败");
                 }
             } else {
+                // 修改审核被驳回后，pendingPayload 中的新海报/详情图不会被任何演出使用，需要清理。
+                deletePendingEventImages(event);
+
                 eventService.update(
                         new LambdaUpdateWrapper<Event>()
                                 .eq(Event::getId, id)
@@ -255,6 +282,9 @@ public class AdminEventController {
 
         // 撤销修改审核
         if (Objects.equals(event.getEditAuditStatus(), Event.EDIT_AUDIT_PENDING)) {
+            // 撤销后 pendingPayload 中的新海报/详情图不会被使用，需要清理。
+            deletePendingEventImages(event);
+
             eventService.update(
                     new LambdaUpdateWrapper<Event>()
                             .eq(Event::getId, id)
@@ -289,7 +319,26 @@ public class AdminEventController {
     @PutMapping("/{id}")
     @PreAuthorize(AuthExp.EVENT_EDIT)
     public Result<String> updateEvent(@PathVariable Long id, @RequestBody @Validated EventAddDTO dto) {
+        Event oldEvent = eventService.getById(id);
+        if (oldEvent == null) {
+            throw new BusinessException("演出不存在");
+        }
+
         eventService.updateEventWithTicketsAndArtists(id, dto);
+
+        /*
+         * 超管 admin 修改演出时，EventService 会直接覆盖主表，不走修改审核。
+         * 因此这里必须在数据库更新成功后，立刻删除被替换掉的旧海报/旧详情图。
+         *
+         * 普通管理员修改已审核演出时，只会写 pendingPayload 等待审核，
+         * 主表 posterUrl/detailsUrl 不会变化，所以不能在这里删除旧图。
+         * 普通管理员的旧图删除放在 auditEvent() 修改审核通过后处理。
+         */
+        if (isSuperAdmin()) {
+            Event updatedEvent = eventService.getById(id);
+            deleteReplacedEventImages(oldEvent, updatedEvent);
+        }
+
         evictEventDetailCache(id);
         return Result.success("修改成功");
     }
@@ -324,6 +373,11 @@ public class AdminEventController {
     @PreAuthorize(AuthExp.EVENT_EDIT)
     @Transactional(rollbackFor = Exception.class)
     public Result<String> deleteEvent(@PathVariable Long id) {
+        Event event = eventService.getById(id);
+        if (event == null) {
+            throw new BusinessException("演出不存在");
+        }
+
         ticketService.remove(
                 new LambdaQueryWrapper<TicketCategory>().eq(TicketCategory::getEventId, id)
         );
@@ -337,6 +391,10 @@ public class AdminEventController {
         );
 
         eventService.removeById(id);
+
+        // 删除演出本身及 pendingPayload 中已经上传但不会再使用的海报/详情图。
+        deleteAllEventImages(event);
+
         evictEventDetailCache(id);
 
         return Result.success("演出已删除", null);
@@ -390,6 +448,109 @@ public class AdminEventController {
         evictEventDetailCache(id);
 
         return Result.success("已确认审核未通过，演出已回到未审核状态");
+    }
+
+
+    /**
+     * 删除被新图片替换掉的旧海报和旧详情图。
+     *
+     * 触发时机：
+     * 1. 超管直接修改演出；
+     * 2. 修改审核通过后真正覆盖主表。
+     *
+     * 注意：
+     * 只有数据库已经成功更新后才会执行删除，避免“更新失败但旧图已删”的问题。
+     */
+    private void deleteReplacedEventImages(Event oldEvent, Event updatedEvent) {
+        if (oldEvent == null || updatedEvent == null) {
+            return;
+        }
+
+        deleteIfReplaced(oldEvent.getPosterUrl(), updatedEvent.getPosterUrl());
+        deleteIfReplaced(oldEvent.getDetailsUrl(), updatedEvent.getDetailsUrl());
+    }
+
+    /**
+     * 修改审核被驳回或撤销时，pendingPayload 中的新图不会被使用，需要删除。
+     */
+    private void deletePendingEventImages(Event event) {
+        if (event == null || event.getPendingPayload() == null || event.getPendingPayload().trim().isEmpty()) {
+            return;
+        }
+
+        try {
+            EventAddDTO dto = objectMapper.readValue(event.getPendingPayload(), EventAddDTO.class);
+
+            deleteIfReplaced(dto.getPosterUrl(), event.getPosterUrl());
+            deleteIfReplaced(dto.getDetailsUrl(), event.getDetailsUrl());
+        } catch (Exception e) {
+            log.warn("解析 pendingPayload 中的演出图片失败，eventId={}", event.getId(), e);
+        }
+    }
+
+    /**
+     * 删除演出时，清理当前主表图片，以及 pendingPayload 中可能存在的新图。
+     */
+    private void deleteAllEventImages(Event event) {
+        if (event == null) {
+            return;
+        }
+
+        Set<String> urls = new HashSet<>();
+        collectEventImageUrl(urls, event.getPosterUrl());
+        collectEventImageUrl(urls, event.getDetailsUrl());
+
+        if (event.getPendingPayload() != null && !event.getPendingPayload().trim().isEmpty()) {
+            try {
+                EventAddDTO dto = objectMapper.readValue(event.getPendingPayload(), EventAddDTO.class);
+                collectEventImageUrl(urls, dto.getPosterUrl());
+                collectEventImageUrl(urls, dto.getDetailsUrl());
+            } catch (Exception e) {
+                log.warn("解析待删除演出的 pendingPayload 图片失败，eventId={}", event.getId(), e);
+            }
+        }
+
+        urls.forEach(this::deleteEventImageQuietly);
+    }
+
+    private void deleteIfReplaced(String oldUrl, String newUrl) {
+        if (oldUrl == null || oldUrl.trim().isEmpty()) {
+            return;
+        }
+
+        if (Objects.equals(oldUrl, newUrl)) {
+            return;
+        }
+
+        deleteEventImageQuietly(oldUrl);
+    }
+
+    private void collectEventImageUrl(Set<String> urls, String url) {
+        if (isDeletableEventImage(url)) {
+            urls.add(url);
+        }
+    }
+
+    /**
+     * 只允许删除演出物料目录下的本地上传图片，避免误删头像、系统背景图、外链图片。
+     * 当前 AddEventForm 中海报和详情图都上传到 poster 目录。
+     */
+    private boolean isDeletableEventImage(String url) {
+        return url != null
+                && url.startsWith("/uploads/poster/")
+                && uploadFileService.isLocalUploadUrl(url);
+    }
+
+    private void deleteEventImageQuietly(String url) {
+        if (!isDeletableEventImage(url)) {
+            return;
+        }
+
+        try {
+            uploadFileService.deleteUploadFile(url);
+        } catch (Exception e) {
+            log.warn("删除演出图片失败，url={}", url, e);
+        }
     }
 
     private List<Map<String, Object>> buildPendingArtists(String pendingPayload) {

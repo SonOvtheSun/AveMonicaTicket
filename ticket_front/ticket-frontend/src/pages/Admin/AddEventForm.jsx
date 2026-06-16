@@ -67,6 +67,96 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
     const [detailsFileList, setDetailsFileList] = useState([]);
     const [avatarFileList, setAvatarFileList] = useState([]);
 
+    // 记录已经上传成功，但还没有被“确认发布 / 确认修改 / 艺人提交”正式使用的图片
+    const uncommittedUploadUrlsRef = useRef(new Set());
+
+// 表单是否已经成功提交
+    const submitSuccessRef = useRef(false);
+
+    const parseUploadedUrlFromFile = (file) => {
+        if (!file) return '';
+
+        if (file.response && file.response.code === 200) {
+            return file.response.data;
+        }
+
+        if (file.response && typeof file.response === 'string') {
+            return file.response;
+        }
+
+        if (file.url) {
+            return file.url;
+        }
+
+        if (file.status === 'done' && file.xhr?.responseText) {
+            try {
+                const resObj = JSON.parse(file.xhr.responseText);
+                return resObj.data || resObj;
+            } catch (e) {
+                return '';
+            }
+        }
+
+        return '';
+    };
+
+    const addUncommittedUploadUrl = (url) => {
+        if (url && url.startsWith('/uploads/')) {
+            uncommittedUploadUrlsRef.current.add(url);
+        }
+    };
+
+    const markUploadCommitted = (url) => {
+        if (url) {
+            uncommittedUploadUrlsRef.current.delete(url);
+        }
+    };
+
+    const deleteUploadedUrl = async (url) => {
+        if (!url || !url.startsWith('/uploads/')) return;
+
+        try {
+            await axios.post(
+                '/api/common/delete-upload',
+                { url },
+                {
+                    headers: {
+                        Authorization: `Bearer ${localStorage.getItem('token')}`
+                    }
+                }
+            );
+        } catch (e) {
+            console.warn('删除未确认上传图片失败：', url, e);
+        }
+    };
+
+    const cleanupUncommittedUploads = async () => {
+        const urls = Array.from(uncommittedUploadUrlsRef.current);
+
+        if (urls.length === 0) {
+            return;
+        }
+
+        uncommittedUploadUrlsRef.current.clear();
+
+        await Promise.allSettled(
+            urls.map(url => deleteUploadedUrl(url))
+        );
+    };
+
+    const handleRemoveUploadedFile = async (file) => {
+        const url = parseUploadedUrlFromFile(file);
+
+        // 只删除本次页面中新上传、尚未提交的图片；
+        // 编辑时原本已经存在的 posterUrl/detailsUrl 不在这个 Set 里，不会被误删。
+        if (url && uncommittedUploadUrlsRef.current.has(url)) {
+            uncommittedUploadUrlsRef.current.delete(url);
+            await deleteUploadedUrl(url);
+        }
+
+        return true;
+    };
+
     const getImageCompressOption = (scene) => {
         const baseOption = {
             preview: {
@@ -103,6 +193,9 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                     width: 800,
                     height: undefined,
                 },
+                png: {
+                    quality: 0.90
+                }
             };
         }
 
@@ -115,11 +208,12 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                     height: undefined,
                 },
                 jpeg: {
-                    quality: 0.76,
+                    quality: 0.90,
                 },
                 png: {
                     colors: 96,
                     dithering: 0,
+                    quality: 0.90
                 },
             };
         }
@@ -133,11 +227,12 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 height: undefined,
             },
             jpeg: {
-                quality: 0.75,
+                quality: 0.90,
             },
             png: {
                 colors: 96,
                 dithering: 0,
+                quality: 0.90
             },
         };
     };
@@ -291,6 +386,11 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             });
 
             if (res.data.code === 200) {
+                const uploadedUrl = res.data.data;
+
+                // 上传成功但还没点“确认发布/修改”，先登记为临时图片
+                addUncommittedUploadUrl(uploadedUrl);
+
                 onSuccess(res.data);
             } else {
                 onError(new Error(res.data.message || '上传失败'));
@@ -399,6 +499,14 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         }
     }, [editingRecord, form]);
 
+    useEffect(() => {
+        return () => {
+            if (!submitSuccessRef.current) {
+                cleanupUncommittedUploads();
+            }
+        };
+    }, []);
+
     const normFile = (e) => {
         if (Array.isArray(e)) return e;
         return e?.fileList;
@@ -449,9 +557,13 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 style: styleStr
             });
             if (res.data.code === 200) {
+                // 头像已经被艺人使用，不能作为未确认图片删除
+                markUploadCommitted(avatarUrl);
+
                 message.success('艺人提交成功！');
                 setArtistModalVisible(false);
                 artistForm.resetFields();
+                setAvatarFileList([]);
                 fetchArtists();
             } else {
                 message.error(res.data.message || '艺人提交失败');
@@ -461,6 +573,13 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         } finally {
             setSubmittingArtist(false);
         }
+    };
+
+    const closeArtistModal = async () => {
+        await cleanupUncommittedUploads();
+        setAvatarFileList([]);
+        artistForm.resetFields();
+        setArtistModalVisible(false);
     };
 
     const handleArtistStyleTagClick = (style) => {
@@ -572,6 +691,15 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             }
 
             if (res.data.code === 200) {
+                // 这两个 URL 已经被演出正式使用，不能删除
+                markUploadCommitted(finalPosterUrl);
+                markUploadCommitted(finalDetailsUrl);
+
+                // 如果中途替换过图片，旧的临时上传图仍在 Set 里，这里统一删除
+                await cleanupUncommittedUploads();
+
+                submitSuccessRef.current = true;
+
                 message.success(editingRecord ? '演出信息修改成功！' : '全新演出项目发布成功！');
                 form.resetFields();
                 onSuccess();
@@ -707,6 +835,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                                 listType="picture"
                                 maxCount={1}
                                 fileList={posterFileList}
+                                onRemove={handleRemoveUploadedFile}
                                 onChange={({ fileList }) => {
                                     setPosterFileList(fileList);
                                     if(fileList.length > 0 && fileList[0].status === 'done') message.success('主海报上传成功');
@@ -724,6 +853,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                             listType="picture"
                             maxCount={1}
                             fileList={detailsFileList}
+                            onRemove={handleRemoveUploadedFile}
                             onChange={({ fileList }) => setDetailsFileList(fileList)}
                         >
                             <Button icon={<UploadOutlined />} size="large" style={{ width: '100%', borderRadius: 8 }}>上传详情长图</Button>
@@ -999,15 +1129,19 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             <div style={{ marginTop: 40, textAlign: 'right' }}>
                 <Button
                     size="large"
-                    onClick={() => {
+                    onClick={async () => {
+                        await cleanupUncommittedUploads();
+
                         form.resetFields();
                         form.setFieldsValue({
                             status: 1,
                             style: [],
                             sessions: []
                         });
+
                         setPosterFileList([]);
                         setDetailsFileList([]);
+                        setAvatarFileList([]);
                     }}
                     style={{ marginRight: 16, borderRadius: 8 }}
                 >重置清空</Button>
@@ -1020,7 +1154,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
             <Modal
                 title={<span style={{ color: '#FF8899' }}>提交音乐人入驻审核</span>}
                 open={artistModalVisible}
-                onCancel={() => setArtistModalVisible(false)}
+                onCancel={closeArtistModal}
                 footer={null}
                 destroyOnClose
             >
@@ -1043,6 +1177,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                                 maxCount={1}
                                 accept="image/*"
                                 fileList={avatarFileList}
+                                onRemove={handleRemoveUploadedFile}
                                 onChange={(info) => {
                                     setAvatarFileList(info.fileList);
                                     handleUploadChange(info, '艺人头像');

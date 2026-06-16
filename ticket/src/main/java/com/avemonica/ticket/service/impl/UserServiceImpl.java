@@ -12,16 +12,26 @@ import com.avemonica.ticket.mapper.UserMapper;
 import com.avemonica.ticket.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.util.UUID;
+import java.security.SecureRandom;
 
 @Service
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
+
+    /**
+     * 用户 ID 规则：9 位随机数字。
+     * 范围：100000000 ~ 999999999。
+     *
+     * 这样仍然可以继续使用 Long / BIGINT 类型，不需要把全项目用户 ID 改成 String。
+     */
+    private static final long USER_ID_MIN = 100000000L;
+    private static final long USER_ID_RANGE = 900000000L;
+    private static final int USER_ID_MAX_RETRY = 50;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     @Autowired
     private PasswordEncoder passwordEncoder;
 
@@ -33,10 +43,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Autowired
     private StringRedisTemplate redisTemplate;
-
-    public UserServiceImpl(SmsService smsService) {
-        this.smsService = smsService;
-    }
 
     @Override
     public void register(UserRegisterDTO dto) {
@@ -71,12 +77,41 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
 
         User user = new User();
+
+        // 新用户 ID 使用 9 位随机数字，保持 Long / BIGINT 类型不变。
+        user.setId(generateUniqueUserId());
+
         user.setPhone(dto.getPhone());
         user.setUsername(dto.getUsername());
         user.setAvatar("/uploads/avatar/default.png");
         user.setPassword(passwordEncoder.encode(dto.getPassword()));
 
         this.save(user);
+    }
+
+    /**
+     * 生成唯一用户 ID：9 位随机数字。
+     *
+     * 由于随机数字存在极低概率碰撞，所以生成后必须查库确认。
+     */
+    private Long generateUniqueUserId() {
+        for (int i = 0; i < USER_ID_MAX_RETRY; i++) {
+            Long userId = nextNineDigitUserId();
+
+            long count = this.count(new LambdaQueryWrapper<User>().eq(User::getId, userId));
+            if (count == 0) {
+                return userId;
+            }
+        }
+
+        throw new BusinessException("用户ID生成失败，请稍后重试");
+    }
+
+    /**
+     * 生成 100000000 ~ 999999999 之间的 9 位数字。
+     */
+    private Long nextNineDigitUserId() {
+        return USER_ID_MIN + SECURE_RANDOM.nextLong(USER_ID_RANGE);
     }
 
     @Override

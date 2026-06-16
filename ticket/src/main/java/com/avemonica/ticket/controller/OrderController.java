@@ -80,6 +80,9 @@ public class OrderController {
     /** 订单待支付状态。 */
     private static final int ORDER_STATUS_PENDING_PAY = 1;
 
+    /** 已支付但未检票。支付成功后应该进入该状态，而不是 3。 */
+    private static final int ORDER_STATUS_PAID_UNCHECKED = 6;
+
     /** 单笔订单最大购票数量。前端也有限制，后端再兜底一次。 */
     private static final int MAX_TICKET_QUANTITY = 6;
 
@@ -317,7 +320,7 @@ public class OrderController {
         if (order.getStatus() != ORDER_STATUS_PENDING_PAY) return Result.error("订单当前状态无法支付");
         if (order.getSessionId() == null) return Result.error("订单缺少场次信息，无法支付");
 
-        order.setStatus(3);
+        order.setStatus(ORDER_STATUS_PAID_UNCHECKED);
         orderService.updateById(order);
 
         try {
@@ -353,6 +356,33 @@ public class OrderController {
         }
 
         return Result.success("支付成功，正在为您出票");
+    }
+
+    /**
+     * 用户申请退款。
+     *
+     * 请求体：
+     * {
+     *   "orderId": 123,
+     *   "reason": "临时有事无法到场"
+     * }
+     */
+    @PostMapping("/apply-refund")
+    public Result<String> applyRefund(@RequestBody Map<String, Object> params) {
+        Long userId = getCurrentUserId();
+        if (userId == null) {
+            return Result.error(502, "登录已过期，请重新登录");
+        }
+
+        Long orderId = parseLongParam(params, "orderId");
+        String reason = params.get("reason") == null ? null : String.valueOf(params.get("reason"));
+
+        try {
+            orderService.applyRefund(orderId, userId, reason);
+            return Result.success("退款申请已提交，请等待管理员审核");
+        } catch (Exception e) {
+            return Result.error(e.getMessage());
+        }
     }
 
     @GetMapping("/list")

@@ -1,0 +1,236 @@
+/* OrderManager.css - 与 EventManager 管理页风格统一 */
+
+.admin-order-manager-card.ant-card {
+    border-radius: 12px;
+}
+
+.admin-order-manager-card .ant-card-head-title {
+    padding: 16px 0;
+}
+
+.aom-toolbar {
+    margin-bottom: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.aom-filter-form {
+    display: flex;
+    flex: 1;
+    gap: 10px 0;
+}
+
+.aom-keyword-item {
+    flex: 1;
+    max-width: 320px;
+}
+
+.aom-keyword-item .ant-form-item-control-input,
+.aom-keyword-item .ant-form-item-control-input-content {
+    width: 100%;
+}
+
+.aom-keyword-item .ant-input-affix-wrapper {
+    width: 100%;
+}
+
+.aom-action-item {
+    margin-right: 0;
+}
+
+/* 与 EventManager 表头、行 hover 统一 */
+.admin-order-manager-card .ant-table-thead > tr > th {
+    background-color: rgba(255, 136, 153, 0.05) !important;
+    color: #333 !important;
+    font-weight: 600 !important;
+    border-bottom: 2px solid rgba(255, 136, 153, 0.1) !important;
+}
+
+.admin-order-manager-card .ant-table-tbody > tr.ant-table-row:hover > td {
+    background-color: rgba(255, 136, 153, 0.02) !important;
+}
+
+/* 与 EventManager 分页主题色统一 */
+.admin-order-manager-card .ant-pagination-item-active {
+    border-color: #FF8899 !important;
+    background-color: rgba(255, 136, 153, 0.1) !important;
+}
+
+.admin-order-manager-card .ant-pagination-item-active a {
+    color: #FF8899 !important;
+}
+
+.admin-order-manager-card .ant-pagination-item:hover {
+    border-color: #FF8899 !important;
+}
+
+.admin-order-manager-card .ant-pagination-item:hover a {
+    color: #FF8899 !important;
+}
+
+.admin-order-manager-card .ant-pagination-prev:hover .ant-pagination-item-link,
+.admin-order-manager-card .ant-pagination-next:hover .ant-pagination-item-link {
+    color: #FF8899 !important;
+    border-color: #FF8899 !important;
+}
+
+/* 自适应宽度，不显示横向拖拉条 */
+.aom-table .ant-table {
+    table-layout: fixed;
+}
+
+.aom-table .ant-table-cell {
+    overflow: hidden;
+}
+
+.aom-order-id {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    color: #333;
+    font-weight: 600;
+}
+
+.aom-order-id .ant-typography-copy {
+    flex-shrink: 0;
+}
+
+.aom-main-text {
+    max-width: 100%;
+    color: #333;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.aom-sub-text {
+    max-width: 100%;
+    margin-top: 4px;
+    color: #888;
+    font-size: 12px;
+    line-height: 1.4;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.aom-event-cell .aom-main-text {
+    max-width: 100%;
+}
+
+.aom-price {
+    max-width: 100%;
+    color: #333;
+    font-size: 15px;
+    font-weight: 700;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.aom-refund-reason {
+    max-width: 100%;
+    color: #ff6b80;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.aom-table .ant-space {
+    row-gap: 4px;
+}
+
+.aom-table .ant-btn-link,
+.admin-order-manager-card .ant-btn-link {
+    color: #17b9b9;
+}
+
+.aom-detail-loading {
+    padding: 36px 0;
+    color: #999;
+    text-align: center;
+}
+
+.aom-detail .ant-descriptions-title {
+    color: #333;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.aom-detail .ant-descriptions-bordered .ant-descriptions-item-label {
+    background-color: rgba(255, 136, 153, 0.04);
+    color: #555;
+    font-weight: 600;
+}
+
+.aom-detail-section {
+    margin-top: 18px;
+}
+
+.aom-detail-title {
+    margin-bottom: 10px;
+    color: #333;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.admin-order-detail-modal .ant-modal-content,
+.admin-order-refund-modal .ant-modal-content {
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.admin-order-detail-modal .ant-modal-header,
+.admin-order-refund-modal .ant-modal-header {
+    margin-bottom: 12px;
+}
+
+.aom-refund-confirm {
+    color: #4b5563;
+    line-height: 1.7;
+}
+
+.aom-refund-reason-box {
+    margin-top: 14px;
+    padding: 12px;
+    border-radius: 12px;
+    background: #fff7fa;
+    border: 1px solid rgba(255, 136, 153, 0.18);
+    color: #333;
+}
+
+/* 退款拒绝弹窗：避免字数统计和底部按钮重叠 */
+.admin-order-refund-modal .ant-modal-body {
+    padding-bottom: 34px;
+}
+
+.admin-order-refund-modal .ant-input-textarea-show-count::after {
+    position: static;
+    display: block;
+    text-align: right;
+    margin-top: 6px;
+    color: #999;
+    line-height: 20px;
+}
+
+@media (max-width: 1200px) {
+    .aom-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .aom-filter-form {
+        width: 100%;
+    }
+
+    .aom-keyword-item {
+        max-width: none;
+    }
+}

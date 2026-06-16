@@ -82,21 +82,70 @@ const Home = () => {
         </div>
     );
 
-    const getMinPrice = (tickets) => {
-        if (!tickets || tickets.length === 0) return '票档待定';
+    // 新场次模型：票档不再从 event.tickets 读取，而是从 sessions[*].tickets 汇总
+    const getAllSessionTickets = (event) => {
+        if (!event || !Array.isArray(event.sessions)) return [];
+
+        return event.sessions.flatMap(session =>
+            Array.isArray(session.tickets) ? session.tickets : []
+        );
+    };
+
+    const getMinPrice = (event) => {
+        const tickets = getAllSessionTickets(event);
+        if (tickets.length === 0) return '票档待定';
+
         const prices = tickets
             .map(t => Number(t.price))
             .filter(price => Number.isFinite(price));
+
         if (prices.length === 0) return '票档待定';
         return `¥${Math.min(...prices)}起`;
     };
 
-    const getPriceText = (event) => {
-        if (Number(event.status) === 3) {
-            const showTime = event.showTime ? new Date(event.showTime).getTime() : NaN;
-            return Number.isFinite(showTime) && showTime > Date.now() ? '敬请期待' : '已结束';
+    // 首页卡片摘要时间：优先用 event.showTime，没有则从 sessions 中取最早演出时间
+    const getDisplayShowTime = (event) => {
+        if (event?.showTime && dayjs(event.showTime).isValid()) {
+            return event.showTime;
         }
-        return getMinPrice(event.tickets);
+
+        const sessionTimes = Array.isArray(event?.sessions)
+            ? event.sessions
+                .map(session => session.showTime)
+                .filter(time => time && dayjs(time).isValid())
+                .sort((a, b) => dayjs(a).valueOf() - dayjs(b).valueOf())
+            : [];
+
+        return sessionTimes[0] || null;
+    };
+
+    // 首页预售判断：优先用 event.saleTime，没有则从 sessions 中取最早开票时间
+    const getDisplaySaleTime = (event) => {
+        if (event?.saleTime && dayjs(event.saleTime).isValid()) {
+            return event.saleTime;
+        }
+
+        const saleTimes = Array.isArray(event?.sessions)
+            ? event.sessions
+                .map(session => session.saleTime)
+                .filter(time => time && dayjs(time).isValid())
+                .sort((a, b) => dayjs(a).valueOf() - dayjs(b).valueOf())
+            : [];
+
+        return saleTimes[0] || null;
+    };
+
+    const getPriceText = (event) => {
+        const showTime = getDisplayShowTime(event);
+
+        // 没有任何演出时间时，不应判定为“已结束”，统一显示“敬请期待”
+        if (!showTime) return '敬请期待';
+
+        if (Number(event.status) === 3) {
+            return dayjs(showTime).isAfter(dayjs()) ? '敬请期待' : '已结束';
+        }
+
+        return getMinPrice(event);
     };
 
     const getStyleTags = (styleText) => {
@@ -119,13 +168,19 @@ const Home = () => {
                             return (
                                 <div key={banner?.id || `placeholder-${index}`} className="home-banner-slide">
                                     <div
-                                        className="home-banner-img"
+                                        className="home-banner-image-frame"
                                         style={{
-                                            backgroundImage: `url(${banner?.posterUrl || '/uploads/poster/defalut.png'})`,
                                             cursor: banner?.eventId ? 'pointer' : 'default'
                                         }}
                                         onClick={() => banner?.eventId && navigate(`/event/${banner.eventId}`)}
                                     >
+                                        <img
+                                            src={banner?.posterUrl || '/uploads/poster/defalut.png'}
+                                            alt={banner?.title || '首页横幅'}
+                                            className="home-banner-original-img"
+                                            loading={index === 0 ? 'eager' : 'lazy'}
+                                            decoding="async"
+                                        />
                                     </div>
                                 </div>
                             );
@@ -156,7 +211,9 @@ const Home = () => {
                                 const styleTags = getStyleTags(event.style);
                                 const priceText = getPriceText(event);
                                 const isStatusText = priceText === '敬请期待' || priceText === '已结束' || priceText === '票档待定';
-                                const isPresale = Number(event.status) === 1 && event.saleTime && dayjs().isBefore(dayjs(event.saleTime));
+                                const displayShowTime = getDisplayShowTime(event);
+                                const displaySaleTime = getDisplaySaleTime(event);
+                                const isPresale = Number(event.status) === 1 && displaySaleTime && dayjs().isBefore(dayjs(displaySaleTime));
                                 return (
                                     <div
                                         key={event.id}
@@ -205,7 +262,7 @@ const Home = () => {
                                         <div className="home-event-info">
                                             <h3 className="home-event-title" title={event.title}>{event.title}</h3>
                                             <div className="home-event-meta">
-                                                {event.showTime ? event.showTime.substring(0, 16) : '时间待定'}
+                                                {displayShowTime ? dayjs(displayShowTime).format('YYYY-MM-DD HH:mm') : '时间待定'}
                                             </div>
                                             <div className="home-event-meta">
                                                 [{event.city || currentCity || '全国'}] {event.venue || '场馆待定'}

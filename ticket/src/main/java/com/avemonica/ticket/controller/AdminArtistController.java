@@ -3,27 +3,36 @@ package com.avemonica.ticket.controller;
 import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.config.AuthExp;
 import com.avemonica.ticket.entity.Artist;
+import com.avemonica.ticket.entity.EventArtist;
 import com.avemonica.ticket.entity.User;
 import com.avemonica.ticket.exception.BusinessException;
 import com.avemonica.ticket.mapper.ArtistMapper;
 import com.avemonica.ticket.service.ArtistService;
+import com.avemonica.ticket.service.EventArtistService;
 import com.avemonica.ticket.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/admin/artist")
 public class AdminArtistController {
@@ -39,6 +48,29 @@ public class AdminArtistController {
 
     @Autowired
     private ArtistMapper artistMapper;
+
+    @Autowired
+    private EventArtistService eventArtistService;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
+    @Autowired
+    @Qualifier("eventLocalCache")
+    private Cache<String, String> localCache;
+
+    private static final String EVENT_CACHE_KEY_PREFIX = "event:detail:";
+
+    /**
+     * 艺人 ID 规则：8 位随机数字。
+     * 范围：10000000 ~ 99999999。
+     *
+     * 保持 Long / BIGINT 类型不变，不需要把全项目艺人 ID 改成 String。
+     */
+    private static final long ARTIST_ID_MIN = 10000000L;
+    private static final long ARTIST_ID_RANGE = 90000000L;
+    private static final int ARTIST_ID_MAX_RETRY = 50;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private User getCurrentUser() {
         String userId = SecurityContextHolder.getContext().getAuthentication().getName();
@@ -80,6 +112,48 @@ public class AdminArtistController {
         if (!Objects.equals(oldArtist.getCreateBy(), currentUser.getId())) {
             throw new BusinessException("无权操作他人提交的艺人");
         }
+    }
+
+    /**
+     * 清理所有引用该艺人的演出详情缓存。
+     *
+     * 原因：
+     * /api/event/detail/{id} 会把 event.artists 一起写入 L1 Caffeine 和 L2 Redis。
+     * 艺人头像、名称、风格等信息更新后，如果不清理关联演出的 event:detail:{eventId}，
+     * 演出详情页仍会读取旧缓存，导致音乐人头像不刷新。
+     */
+    private void evictArtistRelatedEventDetailCache(Long artistId) {
+        if (artistId == null) {
+            return;
+        }
+
+        List<EventArtist> relations = eventArtistService.list(
+                new LambdaQueryWrapper<EventArtist>()
+                        .select(EventArtist::getEventId, EventArtist::getArtistId)
+                        .eq(EventArtist::getArtistId, artistId)
+        );
+
+        if (relations == null || relations.isEmpty()) {
+            return;
+        }
+
+        List<String> cacheKeys = relations.stream()
+                .map(EventArtist::getEventId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .map(eventId -> EVENT_CACHE_KEY_PREFIX + eventId)
+                .collect(Collectors.toList());
+
+        if (cacheKeys.isEmpty()) {
+            return;
+        }
+
+        for (String cacheKey : cacheKeys) {
+            localCache.invalidate(cacheKey);
+        }
+        redisTemplate.delete(cacheKeys);
+
+        log.info("艺人信息变更，已清理关联演出详情缓存，artistId={}, cacheKeys={}", artistId, cacheKeys);
     }
 
     /**
@@ -158,13 +232,15 @@ public class AdminArtistController {
             throw new BusinessException("头像不能为空！");
         }
 
-        // 超管：直接生效
+        // 超管：直接生效。更新成功后必须清理关联演出的详情缓存。
         if (isSuperAdmin) {
             artist.setAuditStatus(1);
             artist.setEditAuditStatus(null);
             artist.setPendingPayload(null);
             artist.setAuditSubmitTime(LocalDateTime.now());
             artistService.updateById(artist);
+
+            evictArtistRelatedEventDetailCache(artist.getId());
             return Result.success("修改成功");
         }
 
@@ -198,6 +274,7 @@ public class AdminArtistController {
         artist.setAuditSubmitTime(LocalDateTime.now());
         artistService.updateById(artist);
 
+        evictArtistRelatedEventDetailCache(artist.getId());
         return Result.success("艺人已重新提交审核");
     }
 
@@ -210,7 +287,39 @@ public class AdminArtistController {
         // 假设 1 是正常，2 是下架
         artist.setAuditStatus(status);
         artistService.updateById(artist);
+
+        evictArtistRelatedEventDetailCache(id);
         return Result.success("状态更新成功");
+    }
+
+    /**
+     * 生成唯一艺人 ID：8 位随机数字。
+     *
+     * 随机 ID 理论上存在碰撞可能，所以生成后必须查库确认。
+     * 建议数据库对 tb_artist.id 保持主键/唯一约束，形成最终兜底。
+     */
+    private Long generateUniqueArtistId() {
+        for (int i = 0; i < ARTIST_ID_MAX_RETRY; i++) {
+            Long artistId = nextEightDigitArtistId();
+
+            long count = artistService.count(
+                    new LambdaQueryWrapper<Artist>()
+                            .eq(Artist::getId, artistId)
+            );
+
+            if (count == 0) {
+                return artistId;
+            }
+        }
+
+        throw new BusinessException("艺人ID生成失败，请稍后重试");
+    }
+
+    /**
+     * 生成 10000000 ~ 99999999 之间的 8 位数字。
+     */
+    private Long nextEightDigitArtistId() {
+        return ARTIST_ID_MIN + Math.floorMod(SECURE_RANDOM.nextLong(), ARTIST_ID_RANGE);
     }
 
     /**
@@ -226,6 +335,10 @@ public class AdminArtistController {
             throw new BusinessException("头像或介绍不能为空！");
         }
 
+        /*
+         * 新增艺人 ID 使用 MyBatis-Plus 雪花算法生成。
+         * Artist.id 需要配置为 @TableId(type = IdType.ASSIGN_ID)。
+         */
         artist.setCreateBy(currentUser.getId());
 
         // 超管免审，普通管理员强制待审核
@@ -236,16 +349,21 @@ public class AdminArtistController {
         }
 
         artistMapper.insert(artist);
-        System.out.println(artist.getAvatarUrl());
         return Result.success("艺人提交成功");
     }
 
     @DeleteMapping("/delete/{id}")
     @PreAuthorize(AuthExp.ARTIST_MANAGE)
     public Result<String> deleteArtist(@PathVariable Long id) {
-        // 如果你的数据库配置了逻辑删除 (deleted 字段)，这里会自动执行逻辑删除
-        // 如果没有配置，这里就是真实的物理删除
+        Artist artist = artistService.getById(id);
+        if (artist == null) {
+            throw new BusinessException("艺人不存在");
+        }
+
         artistService.removeById(id);
+
+        // 艺人被删除后，关联演出详情中的 artists 也必须刷新。
+        evictArtistRelatedEventDetailCache(id);
         return Result.success("删除成功");
     }
 
@@ -300,6 +418,8 @@ public class AdminArtistController {
                                     .set(Artist::getPendingPayload, null)
                                     .set(Artist::getAuditSubmitTime, LocalDateTime.now())
                     );
+
+                    evictArtistRelatedEventDetailCache(id);
                     return Result.success("艺人修改审核已通过，客户端信息已同步更新");
                 } catch (Exception e) {
                     throw new BusinessException("解析艺人修改审核快照失败");
@@ -320,6 +440,8 @@ public class AdminArtistController {
         if (Objects.equals(artist.getAuditStatus(), 0)) {
             artist.setAuditStatus(isPass ? 1 : 2);
             artistService.updateById(artist);
+
+            evictArtistRelatedEventDetailCache(id);
             return Result.success(isPass ? "艺人已通过审核" : "已驳回该艺人的入驻申请");
         }
 

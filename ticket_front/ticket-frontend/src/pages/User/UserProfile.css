@@ -1,77 +1,527 @@
 .user-profile-container {
-    background-color: #f5f7fa;
     min-height: 100vh;
-    padding-bottom: 40px;
+    padding-bottom: 48px;
+    background:
+            radial-gradient(circle at 12% 8%, rgba(255, 136, 153, 0.16), transparent 30%),
+            radial-gradient(circle at 88% 16%, rgba(23, 185, 185, 0.10), transparent 28%),
+            #f7f8fb;
 }
+
+/* =========================
+   全局防闪烁处理
+   ========================= */
+
+.user-profile-container *,
+.user-profile-container *::before,
+.user-profile-container *::after {
+    box-sizing: border-box;
+}
+
+/* 避免 hover 时触发 transform / backface 抖动 */
+.user-profile-container .ant-btn,
+.user-profile-container .ant-tabs-tab,
+.user-profile-container .ant-list-item,
+.user-profile-container .info-card,
+.user-profile-container .profile-avatar-card,
+.user-profile-container .profile-avatar-upload-btn,
+.user-profile-container .profile-save-btn {
+    backface-visibility: hidden;
+    -webkit-font-smoothing: antialiased;
+    transform: none !important;
+}
+
+/* 图标不参与鼠标命中，避免鼠标移到 svg 时 hover 状态切换导致闪烁 */
+.user-profile-container .ant-btn .anticon,
+.user-profile-container .ant-tabs-tab .anticon,
+.user-profile-container .profile-avatar-upload-btn .anticon,
+.user-profile-container .profile-save-btn .anticon {
+    pointer-events: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.user-profile-container .anticon svg {
+    display: block;
+}
+
+/* 禁用 Ant Design Button wave 动画，避免按钮/图标点击或悬浮附近闪白边 */
+.user-profile-container .ant-btn::before,
+.user-profile-container .ant-btn::after,
+.user-profile-container .ant-btn[ant-click-animating-without-extra-node='true']::after {
+    display: none !important;
+    animation: none !important;
+    box-shadow: none !important;
+    opacity: 0 !important;
+}
+
+/* =========================
+   主容器
+   ========================= */
 
 .profile-content {
     max-width: 1200px;
-    margin: 30px auto;
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+    margin: 32px auto;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(255, 136, 153, 0.12);
+    border-radius: 18px;
+    box-shadow: 0 18px 45px rgba(31, 35, 52, 0.08);
     overflow: hidden;
     display: flex;
-    min-height: 600px;
+    min-height: 640px;
 }
 
-/* 覆盖 Antd 默认的 Tabs 样式 */
+.profile-content .ant-tabs {
+    width: 100%;
+}
+
+/* =========================
+   左侧 Tabs
+   ========================= */
+
 .profile-content .ant-tabs-left > .ant-tabs-nav {
-    width: 220px;
-    background-color: #fafafa;
-    border-right: 1px solid #f0f0f0;
-    padding-top: 20px;
+    width: 230px;
+    background: linear-gradient(180deg, #fff8fa 0%, #ffffff 100%);
+    border-right: 1px solid rgba(255, 136, 153, 0.14);
+    padding: 22px 0;
+}
+
+.profile-content .ant-tabs-nav-list {
+    width: 100%;
 }
 
 .profile-content .ant-tabs-tab {
-    padding: 16px 24px !important;
-    font-size: 16px;
-    margin: 0 !important;
+    padding: 15px 24px !important;
+    margin: 4px 12px !important;
+    border-radius: 12px;
+    font-size: 15px;
+    color: #666;
+    background: transparent;
+    transition:
+            background-color 0.18s ease,
+            color 0.18s ease,
+            box-shadow 0.18s ease;
+    transform: none !important;
+}
+
+.profile-content .ant-tabs-tab:hover {
+    background-color: rgba(255, 136, 153, 0.08);
+    color: #ff6f84;
+    transform: none !important;
 }
 
 .profile-content .ant-tabs-tab-active {
-    background-color: #fff;
-    border-right: 3px solid #FF8899 !important;
+    background: linear-gradient(135deg, rgba(255, 136, 153, 0.16), rgba(255, 240, 243, 0.98));
+    box-shadow: inset 3px 0 0 #FF8899;
 }
 
 .profile-content .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
-    color: #FF8899 !important;
-    font-weight: bold;
+    color: #FF6F84 !important;
+    font-weight: 700;
+}
+
+.profile-content .ant-tabs-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    line-height: 1.2;
+    transition: color 0.18s ease;
+}
+
+.profile-content .ant-tabs-tab-btn:focus,
+.profile-content .ant-tabs-tab-btn:active {
+    color: inherit;
 }
 
 .profile-content .ant-tabs-ink-bar {
-    display: none !important; /* 隐藏默认的蓝条，使用上面的右边框代替 */
+    display: none !important;
 }
 
+.profile-content .ant-tabs-content-holder {
+    background: #fff;
+}
+
+/* =========================
+   内容区域
+   ========================= */
+
 .tab-pane-content {
-    padding: 40px;
+    padding: 42px 48px;
     width: 100%;
 }
 
 .section-header {
+    position: relative;
     font-size: 20px;
-    font-weight: bold;
-    margin-bottom: 30px;
-    color: #333;
-    padding-bottom: 15px;
-    border-bottom: 1px solid #eee;
+    font-weight: 800;
+    margin-bottom: 28px;
+    color: #2f2f3a;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(31, 35, 52, 0.08);
 }
 
-/* 常用购票人/地址 卡片样式 */
-.info-card {
-    border: 1px solid #e8e8e8;
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 16px;
-    transition: all 0.3s;
+.section-header::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    width: 74px;
+    height: 3px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #FF8899, #ffb4c0);
+}
+
+/* =========================
+   基本资料表单
+   ========================= */
+
+.profile-basic-form {
+    max-width: 720px;
+}
+
+.profile-basic-form .ant-form-item-label > label {
+    color: #3d3d48;
+    font-weight: 600;
+}
+
+.profile-basic-form .ant-input,
+.profile-basic-form .ant-picker,
+.profile-basic-form .ant-input-affix-wrapper,
+.profile-basic-form .ant-select-selector {
+    border-radius: 10px !important;
+}
+
+.profile-basic-form .ant-input:hover,
+.profile-basic-form .ant-picker:hover,
+.profile-basic-form .ant-input-affix-wrapper:hover,
+.profile-basic-form .ant-select-selector:hover {
+    border-color: rgba(255, 136, 153, 0.72) !important;
+}
+
+.profile-basic-form .ant-input:focus,
+.profile-basic-form .ant-input-focused,
+.profile-basic-form .ant-picker-focused,
+.profile-basic-form .ant-input-affix-wrapper-focused,
+.profile-basic-form .ant-select-focused .ant-select-selector {
+    border-color: #FF8899 !important;
+    box-shadow: 0 0 0 3px rgba(255, 136, 153, 0.13) !important;
+}
+
+/* =========================
+   头像上传卡片
+   ========================= */
+
+.profile-avatar-card {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    padding: 18px 20px;
+    border: 1px solid rgba(255, 136, 153, 0.18);
+    border-radius: 18px;
+    background:
+            linear-gradient(135deg, rgba(255, 240, 243, 0.86), rgba(255, 255, 255, 0.98)),
+            #fff;
+    box-shadow: 0 10px 24px rgba(255, 136, 153, 0.08);
+    transition:
+            border-color 0.18s ease,
+            box-shadow 0.18s ease;
+    transform: none !important;
+}
+
+.profile-avatar-card:hover {
+    border-color: rgba(255, 136, 153, 0.32);
+    box-shadow: 0 12px 28px rgba(255, 136, 153, 0.12);
+    transform: none !important;
+}
+
+.profile-avatar-preview {
     position: relative;
+    width: 106px;
+    height: 106px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
-.info-card:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+
+.profile-avatar-preview .ant-avatar {
+    border: 4px solid #fff;
+    box-shadow: 0 10px 24px rgba(31, 35, 52, 0.13);
+    background: #fff0f3;
+}
+
+.profile-avatar-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 1px dashed rgba(255, 136, 153, 0.65);
+    pointer-events: none;
+}
+
+.profile-avatar-actions {
+    flex: 1;
+    min-width: 0;
+}
+
+.profile-avatar-title {
+    color: #2f2f3a;
+    font-size: 16px;
+    font-weight: 800;
+    margin-bottom: 6px;
+}
+
+.profile-avatar-desc {
+    color: #888;
+    font-size: 13px;
+    line-height: 1.7;
+    margin-bottom: 12px;
+}
+
+/* =========================
+   按钮统一样式
+   ========================= */
+
+.profile-avatar-upload-btn,
+.profile-save-btn {
+    border: none !important;
+    border-radius: 10px !important;
+    background: linear-gradient(135deg, #FF8899, #ff6f84) !important;
+    box-shadow: 0 8px 18px rgba(255, 136, 153, 0.28);
+    transition:
+            box-shadow 0.18s ease,
+            background-color 0.18s ease,
+            opacity 0.18s ease !important;
+    transform: none !important;
+}
+
+.profile-avatar-upload-btn:hover,
+.profile-avatar-upload-btn:focus,
+.profile-save-btn:hover,
+.profile-save-btn:focus {
+    background: linear-gradient(135deg, #ff7c90, #ff6078) !important;
+    box-shadow: 0 10px 22px rgba(255, 136, 153, 0.34);
+    transform: none !important;
+}
+
+.profile-avatar-upload-btn:active,
+.profile-save-btn:active {
+    transform: none !important;
+    box-shadow: 0 7px 16px rgba(255, 136, 153, 0.26);
+}
+
+.profile-save-btn {
+    min-width: 128px;
+    height: 38px;
+    font-weight: 700;
+}
+
+.user-profile-container .ant-btn {
+    transform: none !important;
+}
+
+.user-profile-container .ant-btn:hover,
+.user-profile-container .ant-btn:focus,
+.user-profile-container .ant-btn:active {
+    transform: none !important;
+}
+
+.user-profile-container .ant-btn-primary {
     border-color: #FF8899;
+    background: #FF8899;
+    transition:
+            background-color 0.18s ease,
+            border-color 0.18s ease,
+            box-shadow 0.18s ease,
+            opacity 0.18s ease;
+    transform: none !important;
 }
+
+.user-profile-container .ant-btn-primary:hover,
+.user-profile-container .ant-btn-primary:focus {
+    border-color: #ff6f84 !important;
+    background: #ff6f84 !important;
+    transform: none !important;
+}
+
+/* =========================
+   账号设置列表
+   ========================= */
+
+.tab-pane-content .ant-list-item {
+    padding: 18px 20px;
+    border-radius: 14px;
+    margin-bottom: 10px;
+    border: 1px solid rgba(31, 35, 52, 0.06);
+    transition:
+            border-color 0.18s ease,
+            box-shadow 0.18s ease,
+            background-color 0.18s ease;
+    transform: none !important;
+    background: #fff;
+}
+
+.tab-pane-content .ant-list-item:hover {
+    border-color: rgba(255, 136, 153, 0.22);
+    box-shadow: 0 8px 20px rgba(31, 35, 52, 0.06);
+    transform: none !important;
+}
+
+/* =========================
+   常用购票人 / 地址卡片
+   ========================= */
+
+.info-card {
+    border: 1px solid rgba(31, 35, 52, 0.08);
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    background: #fff;
+    transition:
+            box-shadow 0.18s ease,
+            border-color 0.18s ease,
+            background-color 0.18s ease;
+    position: relative;
+    box-shadow: 0 4px 14px rgba(31, 35, 52, 0.035);
+    transform: none !important;
+}
+
+.info-card:hover {
+    box-shadow: 0 12px 28px rgba(31, 35, 52, 0.08);
+    border-color: rgba(255, 136, 153, 0.42);
+    transform: none !important;
+}
+
 .info-card-actions {
     position: absolute;
     right: 16px;
-    top: 16px;
+    top: 14px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
+
+.info-card-actions .ant-btn {
+    padding-inline: 4px;
+    transition:
+            color 0.18s ease,
+            opacity 0.18s ease,
+            background-color 0.18s ease;
+    transform: none !important;
+}
+
+.info-card-actions .ant-btn:hover,
+.info-card-actions .ant-btn:focus,
+.info-card-actions .ant-btn:active {
+    transform: none !important;
+}
+
+/* =========================
+   弹窗按钮统一
+   ========================= */
+
+.ant-modal .ant-btn-primary {
+    border-color: #FF8899;
+    background: #FF8899;
+}
+
+.ant-modal .ant-btn-primary:hover,
+.ant-modal .ant-btn-primary:focus {
+    border-color: #ff6f84 !important;
+    background: #ff6f84 !important;
+}
+
+/* =========================
+   响应式
+   ========================= */
+
+@media (max-width: 768px) {
+    .profile-content {
+        margin: 16px;
+        border-radius: 14px;
+    }
+
+    .profile-content .ant-tabs-left {
+        flex-direction: column;
+    }
+
+    .profile-content .ant-tabs-left > .ant-tabs-nav {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 136, 153, 0.14);
+    }
+
+    .tab-pane-content {
+        padding: 26px 20px;
+    }
+
+    .profile-avatar-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .profile-avatar-preview {
+        width: 96px;
+        height: 96px;
+    }
+}
+
+/* 追加到 UserProfile.css 底部：修复头像下方 UID 布局
+   目的：头像圆形区域只显示头像；UID 独立显示在头像下方，不再挤进头像框。
+*/
+
+.profile-avatar-main {
+    width: 118px;
+    flex: 0 0 118px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.profile-avatar-main .profile-avatar-preview {
+    position: relative;
+    width: 104px;
+    height: 104px;
+    flex: 0 0 104px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+}
+
+.profile-avatar-main .profile-avatar-preview .ant-avatar {
+    position: relative;
+    z-index: 2;
+    flex: 0 0 auto;
+}
+
+.profile-avatar-main .profile-avatar-ring {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.profile-user-uid {
+    width: max-content;
+    max-width: 158px;
+    margin-top: 8px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: #fff0f3;
+    color: #ff6b80;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.35;
+    text-align: center;
+    word-break: break-all;
+    user-select: text;
+    box-sizing: border-box;
+}
+
+/* 覆盖之前可能把 UID 放入头像预览区域造成的挤压 */
+.profile-avatar-preview > .profile-user-uid {
+    position: static !important;
+}
+

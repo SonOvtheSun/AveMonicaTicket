@@ -4,6 +4,8 @@ import { Card, Table, Tabs, Button, Modal, Form, Input, DatePicker, Upload, mess
 import { PlusOutlined, UploadOutlined, EditOutlined, DeleteOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons';
 import axios from '../../utils/request';
 import dayjs from 'dayjs';
+import ImgCrop from 'antd-img-crop';
+import { compressImageByShotEasy } from '../../shot-easy/compressImage.jsx';
 
 const BannerManager = () => {
     const [eventOptions, setEventOptions] = useState([]);
@@ -21,6 +23,9 @@ const BannerManager = () => {
     const [form] = Form.useForm();
     const [fileList, setFileList] = useState([]);
 
+    // 记录本页面已上传成功但尚未点击“提交新增/提交修改”正式使用的横幅图片
+    const uncommittedUploadUrlsRef = useRef(new Set());
+
     // 🚨 权限状态管理
     const [userRole, setUserRole] = useState(6);
     const [permissions, setPermissions] = useState([]);
@@ -36,6 +41,212 @@ const BannerManager = () => {
     // 3. 下架权限：只要有审核权或横幅管理权，都可以下架
     const canTakeDown = canManageBanner || canAudit;
 
+    const getBannerCompressOption = () => ({
+        preview: {
+            maxSize: 256,
+        },
+        resize: {
+            method: 'fitWidth',
+            // Banner 是 4:1 横图，保留较高宽度，兼顾清晰度与体积
+            width: 2400,
+            height: undefined,
+        },
+        format: {
+            target: 'webp',
+            transparentFill: '#FFFFFF',
+        },
+        jpeg: {
+            quality: 0.90,
+        },
+        png: {
+            colors: 96,
+            dithering: 0,
+            quality: 0.90,
+        },
+        gif: {
+            colors: 128,
+            dithering: false,
+        },
+        avif: {
+            quality: 55,
+            speed: 8,
+        },
+    });
+
+    const parseUploadedUrlFromFile = (file) => {
+        if (!file) return '';
+
+        if (file.url) {
+            return file.url;
+        }
+
+        if (file.response && file.response.code === 200) {
+            return file.response.data;
+        }
+
+        if (file.response && typeof file.response === 'string') {
+            return file.response;
+        }
+
+        if (file.status === 'done' && file.xhr?.responseText) {
+            try {
+                const resObj = JSON.parse(file.xhr.responseText);
+                return resObj.data || resObj;
+            } catch (e) {
+                return '';
+            }
+        }
+
+        return '';
+    };
+
+    const addUncommittedUploadUrl = (url) => {
+        if (url && url.startsWith('/uploads/')) {
+            uncommittedUploadUrlsRef.current.add(url);
+        }
+    };
+
+    const markUploadCommitted = (url) => {
+        if (url) {
+            uncommittedUploadUrlsRef.current.delete(url);
+        }
+    };
+
+    const deleteUploadedUrl = async (url) => {
+        if (!url || !url.startsWith('/uploads/')) return;
+
+        try {
+            await axios.post('/api/common/delete-upload', { url });
+        } catch (e) {
+            console.warn('删除未确认上传横幅失败：', url, e);
+        }
+    };
+
+    const cleanupUncommittedUploads = async () => {
+        const urls = Array.from(uncommittedUploadUrlsRef.current);
+
+        if (urls.length === 0) {
+            return;
+        }
+
+        uncommittedUploadUrlsRef.current.clear();
+
+        await Promise.allSettled(
+            urls.map(url => deleteUploadedUrl(url))
+        );
+    };
+
+    const handleRemoveUploadedFile = async (file) => {
+        const url = parseUploadedUrlFromFile(file);
+
+        // 只删除本次弹窗中新上传且尚未保存成功的图片。
+        // 编辑已有 Banner 时，原来的 record.posterUrl 不在这个 Set 中，不会被误删。
+        if (url && uncommittedUploadUrlsRef.current.has(url)) {
+            uncommittedUploadUrlsRef.current.delete(url);
+            await deleteUploadedUrl(url);
+        }
+
+        return true;
+    };
+
+    const customBannerUpload = async (options) => {
+        const { file, onSuccess, onError, onProgress } = options;
+
+        let uploadFile = file;
+        const rawSize = file?.size || 0;
+        const compressMessageKey = `banner-compress-${Date.now()}`;
+
+        try {
+            onProgress?.({ percent: 1 });
+
+            if (file && file.type && file.type.startsWith('image/')) {
+                message.open({
+                    key: compressMessageKey,
+                    type: 'loading',
+                    content: '正在压缩横幅图片...',
+                    duration: 0,
+                });
+
+                try {
+                    uploadFile = await compressImageByShotEasy(file, getBannerCompressOption());
+
+                    const compressedSize = uploadFile?.size || 0;
+
+                    if (rawSize > 0 && compressedSize > 0 && compressedSize < rawSize) {
+                        const savedPercent = (((rawSize - compressedSize) / rawSize) * 100).toFixed(1);
+
+                        message.open({
+                            key: compressMessageKey,
+                            type: 'success',
+                            content: `横幅压缩完成，体积减少 ${savedPercent}%`,
+                            duration: 2,
+                        });
+                    } else {
+                        message.open({
+                            key: compressMessageKey,
+                            type: 'info',
+                            content: '横幅已处理，压缩后未小于原图，继续上传',
+                            duration: 2,
+                        });
+                    }
+                } catch (compressError) {
+                    console.error('横幅压缩失败，已使用原图上传：', compressError);
+
+                    message.open({
+                        key: compressMessageKey,
+                        type: 'warning',
+                        content: '横幅压缩失败，已使用原图上传',
+                        duration: 2,
+                    });
+
+                    uploadFile = file;
+                }
+            }
+
+            onProgress?.({ percent: 8 });
+
+            const formData = new FormData();
+            formData.append(
+                'file',
+                uploadFile,
+                uploadFile.name || 'compressed-banner.webp'
+            );
+            // Banner 与 bg/scrollbar 一样存到 scrollbarDir
+            formData.append('type', 'scrollbar');
+
+            const res = await axios.post('/api/common/upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    Authorization: `Bearer ${localStorage.getItem('token')}`,
+                },
+                onUploadProgress: (progressEvent) => {
+                    if (!progressEvent.total) return;
+
+                    const uploadPercent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    const percent = Math.min(100, 8 + Math.round(uploadPercent * 0.92));
+
+                    onProgress?.({ percent });
+                },
+            });
+
+            if (res.data.code === 200) {
+                addUncommittedUploadUrl(res.data.data);
+                onSuccess(res.data);
+            } else {
+                onError(new Error(res.data.message || '上传失败'));
+            }
+        } catch (err) {
+            message.destroy(compressMessageKey);
+            onError(err);
+        }
+    };
+
+    const handleModalCancel = async () => {
+        await cleanupUncommittedUploads();
+        setModalVisible(false);
+        setFileList([]);
+    };
+
     useEffect(() => {
         axios.get('/api/user/info').then(res => {
             if (res.data.code === 200) {
@@ -44,6 +255,12 @@ const BannerManager = () => {
                 setPermissions(res.data.data.permissions || []);
             }
         });
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            cleanupUncommittedUploads();
+        };
     }, []);
 
     const fetchRemoteEvents = async (keyword) => {
@@ -275,7 +492,7 @@ const BannerManager = () => {
                 return message.warning('请上传横幅图片');
             }
 
-            const posterUrl = fileList[0].url || fileList[0].response.data;
+            const posterUrl = parseUploadedUrlFromFile(fileList[0]);
             const payload = {
                 id: editingId,
                 posterUrl,
@@ -287,8 +504,15 @@ const BannerManager = () => {
 
             const res = await axios.post('/api/admin/banner/save', payload);
             if (res.data.code === 200) {
+                // 当前横幅图已经被业务正式使用，不再作为未确认图片删除。
+                markUploadCommitted(posterUrl);
+
+                // 如果本次弹窗中先上传 A 又替换成 B，保存成功后会保留 B、清理 A。
+                await cleanupUncommittedUploads();
+
                 message.success(res.data.message || '操作成功');
                 setModalVisible(false);
+                setFileList([]);
                 fetchBanners();
             } else {
                 message.error(res.data.message || '操作失败');
@@ -383,23 +607,40 @@ const BannerManager = () => {
                 title={editingId ? '编辑横幅' : '新增横幅'}
                 open={modalVisible}
                 onOk={handleOk}
-                onCancel={() => setModalVisible(false)}
+                onCancel={handleModalCancel}
                 width={600}
                 okText={editingId ? '提交修改' : '提交新增'}
                 cancelText="取消"
             >
                 <Form form={form} layout="vertical">
                     <Form.Item label="横幅图片 (推荐比例 4:1)" required>
-                        <Upload
-                            action="/api/common/upload"
-                            listType="picture-card"
-                            maxCount={1}
-                            headers={{ Authorization: `Bearer ${localStorage.getItem('token')}` }}
-                            fileList={fileList}
-                            onChange={({ fileList }) => setFileList(fileList)}
+                        <ImgCrop
+                            rotationSlider
+                            aspect={4}
+                            modalTitle="裁剪横幅图片"
+                            modalOk="确认裁剪"
+                            modalCancel="取消"
                         >
-                            {fileList.length === 0 && <div><UploadOutlined /><div style={{ marginTop: 8 }}>点击上传</div></div>}
-                        </Upload>
+                            <Upload
+                                customRequest={customBannerUpload}
+                                listType="picture-card"
+                                maxCount={1}
+                                accept="image/*"
+                                fileList={fileList}
+                                onRemove={handleRemoveUploadedFile}
+                                onChange={({ file, fileList }) => {
+                                    setFileList(fileList);
+
+                                    if (file.status === 'done' && file.response?.code === 200) {
+                                        message.success('横幅上传成功');
+                                    } else if (file.status === 'error') {
+                                        message.error(file.response?.message || '横幅上传失败');
+                                    }
+                                }}
+                            >
+                                {fileList.length === 0 && <div><UploadOutlined /><div style={{ marginTop: 8 }}>点击上传</div></div>}
+                            </Upload>
+                        </ImgCrop>
                     </Form.Item>
 
                     <Form.Item

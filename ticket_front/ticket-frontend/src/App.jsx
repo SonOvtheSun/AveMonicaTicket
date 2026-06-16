@@ -20,6 +20,7 @@ import ArtistsPage from "./pages/Public/ArtistsPage.jsx";
 import ArtistDetail from "./pages/ArtistDetail/ArtistDetail.jsx";
 import SearchResultPage from "./pages/Search/SearchResultPage.jsx";
 import Favorites from "./pages/User/Favorites.jsx";
+import OrderManager from "./pages/Admin/OrderManager.jsx";
 
 axios.interceptors.request.use(
     (config) => {
@@ -76,6 +77,7 @@ function App() {
                     <Route path="users" element={<UserManager />} />
                     <Route path="artists" element={<ArtistLibrary />} />
                     <Route path="banners" element={<BannerManager />} />
+                    <Route path="orders" element={<OrderManager />} />
                 </Route>
             </Routes>
         </BrowserRouter>

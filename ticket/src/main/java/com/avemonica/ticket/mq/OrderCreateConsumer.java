@@ -32,6 +32,18 @@ public class OrderCreateConsumer {
             OrderCreateMessage msg = objectMapper.readValue(jsonMsg, OrderCreateMessage.class);
             String queueToken = msg.getQueueToken();
 
+            if (msg.getUserId() == null
+                    || msg.getEventId() == null
+                    || msg.getSessionId() == null
+                    || msg.getTicketId() == null
+                    || msg.getQuantity() == null
+                    || msg.getSpectatorIds() == null
+                    || msg.getSpectatorIds().isEmpty()) {
+                redisTemplate.opsForValue().set("order:result:" + queueToken, "FAIL:订单参数缺失，请重新下单", 10, TimeUnit.MINUTES);
+                log.warn("创建订单消息参数缺失，msg={}", jsonMsg);
+                return;
+            }
+
             Order order = new Order();
             order.setUserId(msg.getUserId());
             order.setEventId(msg.getEventId());
@@ -64,7 +76,7 @@ public class OrderCreateConsumer {
 
     private void releaseLocks(OrderCreateMessage msg) {
         List<String> lockKeys = msg.getSpectatorIds().stream()
-                .map(id -> "event:spectator:lock:" + msg.getEventId() + ":" + id)
+                .map(id -> "event:spectator:lock:" + msg.getEventId() + ":" + msg.getSessionId() + ":" + id)
                 .collect(Collectors.toList());
         redisTemplate.delete(lockKeys);
     }

@@ -146,6 +146,7 @@
 
 /* 底部：操作按钮栏 */
 .order-card-footer {
+
     padding: 12px 20px;
     border-top: 1px solid #ebebeb;
     display: flex;
@@ -420,4 +421,22 @@
     text-align: center;
     border: 1px dashed #d9d9d9;
     border-radius: 4px;
+}
+
+/* 退款弹窗：避免 TextArea 字数统计和底部按钮重叠 */
+.refund-modal .ant-modal-body {
+    padding-bottom: 36px;
+}
+
+.refund-modal .ant-input-textarea-show-count::after {
+    position: static;
+    display: block;
+    text-align: right;
+    margin-top: 6px;
+    color: #999;
+    line-height: 20px;
+}
+
+.refund-modal .ant-modal-footer {
+    margin-top: 8px;
 }

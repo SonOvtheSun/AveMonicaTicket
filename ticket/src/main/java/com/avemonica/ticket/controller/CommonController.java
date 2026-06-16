@@ -2,13 +2,21 @@ package com.avemonica.ticket.controller;
 
 import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.exception.BusinessException;
+import com.avemonica.ticket.service.UploadFileService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.bind.annotation.RequestBody;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Map;
 
 import java.io.File;
 import java.io.IOException;
@@ -31,6 +39,9 @@ public class CommonController {
 
     @Value("${avemonica.upload.scrollbar-dir}")
     private String scrollbarDir;
+
+    @Autowired
+    private UploadFileService uploadFileService;
 
     @PostMapping("/upload")
     public Result<String> upload(@RequestParam("file") MultipartFile file,
@@ -111,5 +122,25 @@ public class CommonController {
         }
 
         return ".jpg";
+    }
+
+    /**
+     * 删除已上传但未被业务正式使用的图片。
+     * 前端传入类似：/uploads/poster/xxxx.webp
+     */
+    @PostMapping("/delete-upload")
+    public Result<Boolean> deleteUpload(@RequestBody Map<String, String> body) {
+        String url = body.get("url");
+
+        if (url == null || url.trim().isEmpty()) {
+            throw new BusinessException("待删除文件路径不能为空");
+        }
+
+        if (!uploadFileService.isLocalUploadUrl(url)) {
+            throw new BusinessException("非法文件路径");
+        }
+
+        boolean deleted = uploadFileService.deleteUploadFile(url);
+        return Result.success(deleted);
     }
 }

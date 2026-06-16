@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Tabs,
     Form,
@@ -16,14 +16,17 @@ import {
     Col,
     Popconfirm,
     Select,
-    Cascader
+    Cascader,
+    Space
 } from 'antd';
-import { UserOutlined, SafetyCertificateOutlined, SettingOutlined, TeamOutlined, PlusOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { UserOutlined, SafetyCertificateOutlined, SettingOutlined, TeamOutlined, PlusOutlined, CameraOutlined, RollbackOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import axios from '../../utils/request';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
 import './UserProfile.css';
 import pcasData from '../../assets/pcas.json';
+import ImgCrop from 'antd-img-crop';
+import { compressImageByShotEasy } from '../../shot-easy/compressImage.jsx';
 
 const { TextArea } = Input;
 const { confirm } = Modal;
@@ -33,6 +36,7 @@ const UserProfile = () => {
     // 状态管理
     // ==========================================
     const [userInfo, setUserInfo] = useState({
+        id: '',
         avatar: '',
         username: 'AveMonica_User', // 🚨 已修改为 username
         gender: '1',
@@ -84,6 +88,13 @@ const UserProfile = () => {
     const [editingAddressId, setEditingAddressId] = useState(null);
 
     const [uploading, setUploading] = useState(false);
+    const [avatarDirty, setAvatarDirty] = useState(false);
+
+    // 已上传但尚未点击“保存修改”的头像 URL。
+    // 保存成功后当前头像会从集合移除；保存失败、离开页面或撤销时会删除未确认头像。
+    const uncommittedAvatarUrlsRef = useRef(new Set());
+    const committedAvatarRef = useRef('');
+
 
     const [pwdModalVisible, setPwdModalVisible] = useState(false);
     const [pwdForm] = Form.useForm();
@@ -118,15 +129,23 @@ const UserProfile = () => {
             if (infoRes.data.code === 200) {
                 const userData = infoRes.data.data;
 
-                setUserInfo({
-                    ...userInfo,
-                    avatar: userData.avatar,
+                committedAvatarRef.current = userData.avatar || '';
+                setAvatarDirty(false);
+
+                setUserInfo(prev => ({
+                    ...prev,
+                    id: userData.id || '',
+                    avatar: userData.avatar || '',
+                    username: userData.username || prev.username,
+                    gender: userData.gender != null ? userData.gender.toString() : '3',
+                    birthday: userData.birthday || null,
+                    bio: userData.bio || '',
                     realName: userData.realName || '未认证',
                     idCard: userData.idCard || '未认证',
                     isRealNameAuth: userData.realName != null,
                     phone: userData.phone,
                     email: userData.email
-                });
+                }));
 
                 // 🚨 动态回填表单数据 (包含 username)
                 basicForm.setFieldsValue({
@@ -159,6 +178,13 @@ const UserProfile = () => {
             const res = await axios.post('/api/user/profile/update', payload);
 
             if (res.data.code === 200) {
+                // 当前头像已经被用户资料正式使用，不能再作为临时图删除。
+                markUploadCommitted(payload.avatar);
+                await cleanupUncommittedUploads();
+
+                committedAvatarRef.current = payload.avatar || '';
+                setAvatarDirty(false);
+
                 message.success('基本信息保存成功');
                 fetchData();
             } else {
@@ -311,36 +337,213 @@ const UserProfile = () => {
         } catch (error) { message.error('删除失败'); }
     };
 
-    // 🚨 校验上传文件（限制只能传 JPG/PNG，且小于 2MB）
-    const beforeUpload = (file) => {
-        const isJpgOrPng = file.type === 'image/jpeg' || file.type === 'image/png';
-        if (!isJpgOrPng) message.error('只能上传 JPG/PNG 格式的图片！');
-        const isLt2M = file.size / 1024 / 1024 < 2;
-        if (!isLt2M) message.error('图片大小必须小于 2MB！');
-        return isJpgOrPng && isLt2M;
+    // ==========================================
+    // 头像上传：裁剪 -> shot-easy 压缩 -> 上传 -> 保存前临时登记
+    // ==========================================
+    const getAvatarCompressOption = () => ({
+        preview: {
+            maxSize: 256,
+        },
+        resize: {
+            method: 'fitWidth',
+            width: 800,
+            height: undefined,
+        },
+        format: {
+            target: 'webp',
+            transparentFill: '#FFFFFF',
+        },
+        jpeg: {
+            quality: 0.90,
+        },
+        png: {
+            colors: 64,
+            dithering: 0,
+            quality: 0.90
+        },
+        gif: {
+            colors: 128,
+            dithering: false,
+        },
+        avif: {
+            quality: 50,
+            speed: 8,
+        },
+    });
+
+    const isLocalUploadUrl = (url) => {
+        return typeof url === 'string' && url.startsWith('/uploads/');
     };
 
-    // 🚨 处理上传进度与结果
+    const addUncommittedUploadUrl = (url) => {
+        if (isLocalUploadUrl(url)) {
+            uncommittedAvatarUrlsRef.current.add(url);
+        }
+    };
+
+    const markUploadCommitted = (url) => {
+        if (url) {
+            uncommittedAvatarUrlsRef.current.delete(url);
+        }
+    };
+
+    const deleteUploadedUrl = async (url) => {
+        if (!isLocalUploadUrl(url)) return;
+
+        try {
+            await axios.post('/api/common/delete-upload', { url });
+        } catch (error) {
+            console.warn('删除未确认头像失败：', url, error);
+        }
+    };
+
+    const cleanupUncommittedUploads = async () => {
+        const urls = Array.from(uncommittedAvatarUrlsRef.current);
+
+        if (urls.length === 0) {
+            return;
+        }
+
+        uncommittedAvatarUrlsRef.current.clear();
+        await Promise.allSettled(urls.map(url => deleteUploadedUrl(url)));
+    };
+
+    useEffect(() => {
+        return () => {
+            cleanupUncommittedUploads();
+        };
+    }, []);
+
+    const beforeAvatarUpload = (file) => {
+        const isImage = file.type && file.type.startsWith('image/');
+        if (!isImage) {
+            message.error('只能上传图片文件');
+            return Upload.LIST_IGNORE;
+        }
+
+        const isLt20M = file.size / 1024 / 1024 < 20;
+        if (!isLt20M) {
+            message.error('原图不能超过 20MB');
+            return Upload.LIST_IGNORE;
+        }
+
+        return true;
+    };
+
+    const customAvatarUpload = async ({ file, onSuccess, onError, onProgress }) => {
+        const rawSize = file?.size || 0;
+        const previousAvatar = userInfo.avatar;
+        const compressMessageKey = `profile-avatar-compress-${Date.now()}`;
+
+        setUploading(true);
+        onProgress?.({ percent: 1 });
+
+        try {
+            message.open({
+                key: compressMessageKey,
+                type: 'loading',
+                content: '正在裁剪并压缩头像...',
+                duration: 0,
+            });
+
+            const compressedFile = await compressImageByShotEasy(file, getAvatarCompressOption());
+
+            const compressedSize = compressedFile?.size || 0;
+            if (rawSize > 0 && compressedSize > 0 && compressedSize < rawSize) {
+                const savedPercent = (((rawSize - compressedSize) / rawSize) * 100).toFixed(1);
+                message.open({
+                    key: compressMessageKey,
+                    type: 'success',
+                    content: `头像压缩完成，体积减少 ${savedPercent}%`,
+                    duration: 2,
+                });
+            } else {
+                message.open({
+                    key: compressMessageKey,
+                    type: 'info',
+                    content: '头像已处理，准备上传',
+                    duration: 1.5,
+                });
+            }
+
+            onProgress?.({ percent: 8 });
+
+            const formData = new FormData();
+            formData.append('file', compressedFile, compressedFile.name || 'avatar.webp');
+            formData.append('type', 'avatar');
+
+            const res = await axios.post('/api/common/upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    Authorization: `Bearer ${localStorage.getItem('token')}`,
+                },
+                onUploadProgress: (progressEvent) => {
+                    if (!progressEvent.total) return;
+                    const uploadPercent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    const percent = Math.min(100, 8 + Math.round(uploadPercent * 0.92));
+                    onProgress?.({ percent });
+                },
+            });
+
+            if (res.data.code === 200) {
+                const imageUrl = res.data.data;
+
+                // 如果用户连续更换头像，删除上一个尚未保存的临时头像。
+                if (
+                    previousAvatar &&
+                    previousAvatar !== imageUrl &&
+                    uncommittedAvatarUrlsRef.current.has(previousAvatar)
+                ) {
+                    uncommittedAvatarUrlsRef.current.delete(previousAvatar);
+                    deleteUploadedUrl(previousAvatar);
+                }
+
+                addUncommittedUploadUrl(imageUrl);
+                setUserInfo(prev => ({ ...prev, avatar: imageUrl }));
+                setAvatarDirty(true);
+
+                onSuccess?.(res.data);
+                message.success('头像上传成功，点击“保存修改”后生效');
+            } else {
+                onError?.(new Error(res.data.message || '头像上传失败'));
+            }
+        } catch (error) {
+            message.destroy(compressMessageKey);
+            onError?.(error);
+            message.error(error?.message || '头像压缩或上传失败');
+        } finally {
+            setUploading(false);
+        }
+    };
+
     const handleAvatarChange = (info) => {
         if (info.file.status === 'uploading') {
             setUploading(true);
             return;
         }
+
         if (info.file.status === 'done') {
-            // 假设后端的上传接口返回的结构是 { code: 200, data: "图片URL" }
-            if (info.file.response && info.file.response.code === 200) {
-                const imageUrl = info.file.response.data;
-                // 实时更新本地 state 预览新头像
-                setUserInfo({ ...userInfo, avatar: imageUrl });
-                message.success('头像上传成功！记得点击底部保存生效哦');
-            } else {
-                message.error(info.file.response?.message || '上传失败');
-            }
             setUploading(false);
-        } else if (info.file.status === 'error') {
-            message.error('网络异常，上传失败');
-            setUploading(false);
+            return;
         }
+
+        if (info.file.status === 'error') {
+            setUploading(false);
+            message.error(info.file.error?.message || '头像上传失败');
+        }
+    };
+
+    const handleRevertAvatar = async () => {
+        const currentAvatar = userInfo.avatar;
+
+        if (currentAvatar && uncommittedAvatarUrlsRef.current.has(currentAvatar)) {
+            uncommittedAvatarUrlsRef.current.delete(currentAvatar);
+            await deleteUploadedUrl(currentAvatar);
+        }
+
+        setUserInfo(prev => ({ ...prev, avatar: committedAvatarRef.current || '' }));
+        setAvatarDirty(false);
+        message.success('已撤销本次头像更换');
     };
 
     // 🚨 新增：修改密码提交
@@ -400,23 +603,58 @@ const UserProfile = () => {
         <div className="tab-pane-content" style={{ textAlign: 'left' }}>
             <div className="section-header">基本信息</div>
             {/* 🚨 绑定了 basicForm 并移除了 initialValues */}
-            <Form form={basicForm} layout="vertical" onFinish={handleSaveBasicInfo} style={{ maxWidth: 600 }}>
+            <Form form={basicForm} layout="vertical" onFinish={handleSaveBasicInfo} className="profile-basic-form">
                 <Form.Item label="头像">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-                        <Avatar size={80} icon={<UserOutlined />} src={userInfo.avatar} />
-                        <Upload
-                            name="file" // 与后端的 @RequestParam("file") 对应
-                            // 🚨 1. 修改为真实的上传接口路径
-                            action="/api/common/upload"
-                            // 🚨 2. 新增：附带额外的表单参数，告诉后端这是头像(avatar)
-                            data={{ type: 'avatar' }}
-                            headers={{ Authorization: `Bearer ${localStorage.getItem('token')}` }}
-                            showUploadList={false}
-                            beforeUpload={beforeUpload}
-                            onChange={handleAvatarChange}
-                        >
-                            <Button loading={uploading}>更换头像</Button>
-                        </Upload>
+                    <div className="profile-avatar-card">
+                        <div className="profile-avatar-main">
+                            <div className="profile-avatar-preview">
+                                <Avatar size={96} icon={<UserOutlined />} src={userInfo.avatar} />
+                                <div className="profile-avatar-ring" />
+                            </div>
+                            <div className="profile-user-uid">
+                                UID：{userInfo.id || '加载中'}
+                            </div>
+                        </div>
+
+                        <div className="profile-avatar-actions">
+                            <div className="profile-avatar-title">
+                                个人头像
+                                {avatarDirty && <Tag color="warning" style={{ marginLeft: 8 }}>待保存</Tag>}
+                            </div>
+
+                            <Space wrap>
+                                <ImgCrop
+                                    rotationSlider
+                                    aspect={1}
+                                    modalTitle="裁剪个人头像"
+                                    modalOk="确认裁剪"
+                                    modalCancel="取消"
+                                >
+                                    <Upload
+                                        customRequest={customAvatarUpload}
+                                        showUploadList={false}
+                                        accept="image/*"
+                                        beforeUpload={beforeAvatarUpload}
+                                        onChange={handleAvatarChange}
+                                    >
+                                        <Button
+                                            type="primary"
+                                            icon={<CameraOutlined />}
+                                            loading={uploading}
+                                            className="profile-avatar-upload-btn"
+                                        >
+                                            更换头像
+                                        </Button>
+                                    </Upload>
+                                </ImgCrop>
+
+                                {avatarDirty && (
+                                    <Button icon={<RollbackOutlined />} onClick={handleRevertAvatar}>
+                                        撤销本次更换
+                                    </Button>
+                                )}
+                            </Space>
+                        </div>
                     </div>
                 </Form.Item>
                 <Row gutter={16}>
@@ -465,7 +703,7 @@ const UserProfile = () => {
                 </Row>
 
                 <Form.Item style={{ marginTop: 30 }}>
-                    <Button type="primary" htmlType="submit" style={{ backgroundColor: '#FF8899', border: 'none', width: 120 }}>
+                    <Button type="primary" htmlType="submit" className="profile-save-btn">
                         保存修改
                     </Button>
                 </Form.Item>

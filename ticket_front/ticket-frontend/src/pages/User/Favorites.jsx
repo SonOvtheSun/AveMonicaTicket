@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Tabs, Spin, Empty, ConfigProvider, message, Button } from 'antd';
-import { HeartFilled, CheckCircleOutlined } from '@ant-design/icons';
+import { Tabs, Spin, Empty, ConfigProvider, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import axios from '../../utils/request';
 import locale from 'antd/locale/zh_CN';
@@ -23,13 +22,15 @@ const Favorites = () => {
         setLoading(true);
         try {
             if (tab === 'events') {
-                // 假设这是后端返回我收藏的演出的接口
                 const res = await axios.get('/api/favorite/events');
-                if (res.data.code === 200) setEvents(res.data.data || []);
+                if (res.data.code === 200) {
+                    setEvents(res.data.data || []);
+                }
             } else {
-                // 假设这是后端返回我关注的艺人的接口
                 const res = await axios.get('/api/favorite/artists');
-                if (res.data.code === 200) setArtists(res.data.data || []);
+                if (res.data.code === 200) {
+                    setArtists(res.data.data || []);
+                }
             }
         } catch (error) {
             message.error('获取收藏列表失败');
@@ -38,102 +39,323 @@ const Favorites = () => {
         }
     };
 
-    const cancelFavorite = async (e, id, type) => {
-        e.stopPropagation(); // 阻止卡片点击跳转
-        try {
-            const res = await axios.post('/api/favorite/toggle', { targetId: id, type });
-            if (res.data.code === 200) {
-                message.success('已取消');
-                // 乐观更新，直接从当前列表中剔除
-                if (type === 1) setEvents(events.filter(item => item.id !== id));
-                else setArtists(artists.filter(item => item.id !== id));
-            }
-        } catch (error) {
-            message.error('取消失败');
+    const formatShowTime = (value) => {
+        if (!value) {
+            return '时间待定';
         }
+
+        const date = dayjs(value);
+        if (!date.isValid()) {
+            return value;
+        }
+
+        return date.format('YYYY.MM.DD HH:mm');
     };
 
-    // Tabs 内容项
+    const renderEventCards = () => (
+        <Spin spinning={loading}>
+            {events.length > 0 ? (
+                <div className="favorites-grid favorites-event-grid">
+                    {events.map((event) => (
+                        <div
+                            key={event.id}
+                            className="favorite-card"
+                            onClick={() => navigate(`/event/${event.id}`)}
+                        >
+                            <div className="favorite-poster-wrap">
+                                <img
+                                    src={event.posterUrl}
+                                    alt={event.title}
+                                    className="favorite-poster"
+                                    loading="lazy"
+                                />
+                            </div>
+                            <div className="favorite-card-body">
+                                <div className="favorite-title" title={event.title}>
+                                    {event.title}
+                                </div>
+                                <div className="favorite-time">
+                                    {formatShowTime(event.showTime)}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <Empty description="暂无想看的演出" className="favorites-empty" />
+            )}
+        </Spin>
+    );
+
+    const renderArtistCards = () => (
+        <Spin spinning={loading}>
+            {artists.length > 0 ? (
+                <div className="favorites-grid favorites-artist-grid">
+                    {artists.map((artist) => (
+                        <div
+                            key={artist.id}
+                            className="favorite-card favorite-artist-card"
+                            onClick={() => navigate(`/artist/${artist.id}`)}
+                        >
+                            <div className="favorite-poster-wrap favorite-artist-avatar-wrap">
+                                <img
+                                    src={artist.avatarUrl}
+                                    alt={artist.name}
+                                    className="favorite-poster"
+                                    loading="lazy"
+                                />
+                            </div>
+                            <div className="favorite-card-body">
+                                <div className="favorite-title favorite-artist-name" title={artist.name}>
+                                    {artist.name}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <Empty description="暂无关注的音乐人" className="favorites-empty" />
+            )}
+        </Spin>
+    );
+
     const tabItems = [
         {
             key: 'events',
             label: '想看的演出',
-            children: (
-                <Spin spinning={loading}>
-                    {events.length > 0 ? (
-                        <div className="home-event-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px' }}>
-                            {events.map((event) => (
-                                <div key={event.id} className="home-event-card" onClick={() => navigate(`/event/${event.id}`)}>
-                                    <div className="home-event-cover-wrapper">
-                                        <img src={event.posterUrl} alt={event.title} className="home-event-cover" />
-                                        <div className="home-event-price-on-cover">
-                                            {event.showTime && dayjs(event.showTime).isBefore(dayjs()) ? '已结束' : '售票中'}
-                                        </div>
-                                    </div>
-                                    <div className="home-event-info" style={{ position: 'relative' }}>
-                                        <h3 className="home-event-title">{event.title}</h3>
-                                        <div className="home-event-meta">{event.showTime || '时间待定'}</div>
-                                        <div className="home-event-meta">{event.city} {event.venue}</div>
-
-                                        {/* 取消收藏小红心 */}
-                                        <HeartFilled
-                                            style={{ position: 'absolute', right: 0, bottom: 5, color: '#FF8899', fontSize: 18, cursor: 'pointer' }}
-                                            onClick={(e) => cancelFavorite(e, event.id, 1)}
-                                            title="取消想看"
-                                        />
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <Empty description="暂无想看的演出" style={{ marginTop: 60 }} />
-                    )}
-                </Spin>
-            )
+            children: renderEventCards()
         },
         {
             key: 'artists',
             label: '关注的音乐人',
-            children: (
-                <Spin spinning={loading}>
-                    {artists.length > 0 ? (
-                        <div className="artist-list-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)', gap: '20px' }}>
-                            {artists.map((artist) => (
-                                <div key={artist.id} className="artist-list-card" onClick={() => navigate(`/artist/${artist.id}`)}>
-                                    <div className="artist-list-avatar-wrapper" style={{ height: 'auto', aspectRatio: '1/1' }}>
-                                        <img src={artist.avatarUrl} alt={artist.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                    </div>
-                                    <div className="artist-list-info" style={{ textAlign: 'center', position: 'relative' }}>
-                                        <div className="artist-list-name" style={{ fontSize: 16 }}>{artist.name}</div>
-                                        <Button
-                                            size="small"
-                                            shape="round"
-                                            icon={<CheckCircleOutlined />}
-                                            style={{ marginTop: 10, color: '#999' }}
-                                            onClick={(e) => cancelFavorite(e, artist.id, 2)}
-                                        >
-                                            已关注
-                                        </Button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <Empty description="暂无关注的音乐人" style={{ marginTop: 60 }} />
-                    )}
-                </Spin>
-            )
+            children: renderArtistCards()
         }
     ];
 
     return (
         <ConfigProvider locale={locale}>
-            <div style={{ backgroundColor: '#f5f7fa', minHeight: '100vh', paddingBottom: 60 }}>
+            <div className="favorites-page">
                 <PublicHeader />
-                <div style={{ maxWidth: 1200, margin: '40px auto 0', backgroundColor: '#fff', padding: '30px 40px', borderRadius: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
-                    <h2 style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 20 }}>我的收藏</h2>
-                    <Tabs defaultActiveKey="events" items={tabItems} size="large" tabBarGutter={40} />
-                </div>
+
+                <main className="favorites-shell">
+                    <div className="favorites-header">
+                        <div>
+                            <h1>我的收藏</h1>
+                        </div>
+                    </div>
+
+                    <Tabs
+                        activeKey={activeTab}
+                        onChange={setActiveTab}
+                        items={tabItems}
+                        size="large"
+                        tabBarGutter={36}
+                        className="favorites-tabs"
+                    />
+                </main>
+
+                <style>{`
+                    .favorites-page {
+                        min-height: 100vh;
+                        padding-bottom: 72px;
+                        background:
+                            radial-gradient(circle at 8% 12%, rgba(255, 136, 153, 0.16), transparent 30%),
+                            radial-gradient(circle at 88% 18%, rgba(23, 185, 185, 0.10), transparent 28%),
+                            linear-gradient(180deg, #fff7fa 0%, #f7f8fb 42%, #f5f7fa 100%);
+                    }
+
+                    .favorites-shell {
+                        width: min(1200px, calc(100% - 48px));
+                        margin: 36px auto 0;
+                        padding: 34px 38px 42px;
+                        border: 1px solid rgba(255, 136, 153, 0.14);
+                        border-radius: 24px;
+                        background: rgba(255, 255, 255, 0.92);
+                        box-shadow: 0 22px 55px rgba(31, 35, 52, 0.08);
+                        backdrop-filter: blur(14px);
+                    }
+
+                    .favorites-header {
+                        display: flex;
+                        align-items: flex-end;
+                        justify-content: space-between;
+                        margin-bottom: 20px;
+                    }
+
+                    .favorites-eyebrow {
+                        margin-bottom: 6px;
+                        color: #ff7f92;
+                        font-size: 12px;
+                        font-weight: 800;
+                        letter-spacing: 0.16em;
+                    }
+
+                    .favorites-header h1 {
+                        margin: 0;
+                        color: #2f2f3a;
+                        font-size: 28px;
+                        font-weight: 900;
+                        letter-spacing: -0.02em;
+                    }
+
+                    .favorites-tabs .ant-tabs-nav {
+                        margin-bottom: 28px;
+                    }
+
+                    .favorites-tabs .ant-tabs-tab {
+                        padding: 10px 0;
+                        color: #777;
+                        font-size: 16px;
+                    }
+
+                    .favorites-tabs .ant-tabs-tab-btn {
+                        font-weight: 700;
+                    }
+
+                    .favorites-tabs .ant-tabs-tab:hover {
+                        color: #ff6f84;
+                    }
+
+                    .favorites-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+                        color: #ff6f84;
+                    }
+
+                    .favorites-tabs .ant-tabs-ink-bar {
+                        height: 3px;
+                        border-radius: 999px;
+                        background: linear-gradient(90deg, #FF8899, #ffb4c0);
+                    }
+
+                    .favorites-grid {
+                        display: grid;
+                        gap: 24px;
+                    }
+
+                    .favorites-event-grid {
+                        grid-template-columns: repeat(4, minmax(0, 1fr));
+                    }
+
+                    .favorites-artist-grid {
+                        grid-template-columns: repeat(5, minmax(0, 1fr));
+                    }
+
+                    .favorite-card {
+                        overflow: hidden;
+                        border: 1px solid rgba(31, 35, 52, 0.08);
+                        border-radius: 18px;
+                        background: #fff;
+                        cursor: pointer;
+                        box-shadow: 0 10px 26px rgba(31, 35, 52, 0.055);
+                        transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+                    }
+
+                    .favorite-card:hover {
+                        border-color: rgba(255, 136, 153, 0.42);
+                        box-shadow: 0 18px 38px rgba(31, 35, 52, 0.10);
+                        transform: translateY(-3px);
+                    }
+
+                    .favorite-poster-wrap {
+                        position: relative;
+                        width: 100%;
+                        aspect-ratio: 1 / 1.414;
+                        overflow: hidden;
+                        background: #f3f4f6;
+                    }
+
+                    .favorite-artist-avatar-wrap {
+                        aspect-ratio: 1 / 1;
+                    }
+
+                    .favorite-poster {
+                        width: 100%;
+                        height: 100%;
+                        display: block;
+                        object-fit: cover;
+                        transition: transform 0.28s ease;
+                    }
+
+                    .favorite-card:hover .favorite-poster {
+                        transform: scale(1.035);
+                    }
+
+                    .favorite-card-body {
+                        padding: 14px 14px 16px;
+                    }
+
+                    .favorite-title {
+                        color: #2f2f3a;
+                        font-size: 15px;
+                        font-weight: 800;
+                        line-height: 1.45;
+                        overflow: hidden;
+                        display: -webkit-box;
+                        -webkit-line-clamp: 2;
+                        -webkit-box-orient: vertical;
+                        min-height: 42px;
+                    }
+
+                    .favorite-time {
+                        margin-top: 8px;
+                        color: #8b8b96;
+                        font-size: 13px;
+                        font-weight: 600;
+                        line-height: 1.4;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
+
+                    .favorite-artist-card .favorite-card-body {
+                        padding: 14px 12px 16px;
+                        text-align: center;
+                    }
+
+                    .favorite-artist-name {
+                        min-height: auto;
+                        -webkit-line-clamp: 1;
+                    }
+
+                    .favorites-empty {
+                        margin: 80px 0 60px;
+                    }
+
+                    @media (max-width: 1100px) {
+                        .favorites-event-grid {
+                            grid-template-columns: repeat(3, minmax(0, 1fr));
+                        }
+
+                        .favorites-artist-grid {
+                            grid-template-columns: repeat(4, minmax(0, 1fr));
+                        }
+                    }
+
+                    @media (max-width: 820px) {
+                        .favorites-shell {
+                            width: calc(100% - 28px);
+                            margin-top: 20px;
+                            padding: 24px 18px 32px;
+                            border-radius: 18px;
+                        }
+
+                        .favorites-event-grid,
+                        .favorites-artist-grid {
+                            grid-template-columns: repeat(2, minmax(0, 1fr));
+                            gap: 16px;
+                        }
+
+                        .favorites-header h1 {
+                            font-size: 24px;
+                        }
+                    }
+
+                    @media (max-width: 480px) {
+                        .favorites-event-grid,
+                        .favorites-artist-grid {
+                            grid-template-columns: 1fr;
+                        }
+                    }
+                `}</style>
             </div>
         </ConfigProvider>
     );

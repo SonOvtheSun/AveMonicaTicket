@@ -1177,3 +1177,90 @@
         align-self: flex-start;
     }
 }
+
+/* 追加到 UserOrders.css 底部
+   修复订单详情弹窗顶部演出卡片布局。
+   原因：EventDetail.css 里也有 .detail-poster，全局样式会污染订单弹窗。
+*/
+
+.premium-order-modal .order-detail-event-header {
+    display: flex !important;
+    align-items: center !important;
+    gap: 14px !important;
+    width: 100% !important;
+    padding: 14px !important;
+    margin-bottom: 18px !important;
+    border-radius: 16px !important;
+    background: linear-gradient(135deg, #fff7fa 0%, #ffffff 100%) !important;
+    border: 1px solid rgba(255, 136, 153, 0.16) !important;
+    cursor: pointer;
+    box-sizing: border-box !important;
+}
+
+.premium-order-modal .order-detail-poster {
+    width: 76px !important;
+    height: 104px !important;
+    min-width: 76px !important;
+    max-width: 76px !important;
+    flex: 0 0 76px !important;
+    display: block !important;
+    object-fit: cover !important;
+    border-radius: 10px !important;
+    box-shadow: 0 8px 18px rgba(31, 36, 48, 0.12) !important;
+}
+
+.premium-order-modal .order-detail-event-info {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    display: block !important;
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+}
+
+.premium-order-modal .order-detail-title {
+    color: #1f2430 !important;
+    font-size: 16px !important;
+    font-weight: 900 !important;
+    line-height: 1.35 !important;
+    margin-bottom: 8px !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow: hidden !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+}
+
+.premium-order-modal .order-detail-venue {
+    color: #8b95a7 !important;
+    font-size: 13px !important;
+    line-height: 1.45 !important;
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+}
+
+.premium-order-modal .order-detail-arrow {
+    flex: 0 0 auto !important;
+    color: #c2c8d2 !important;
+    font-size: 14px !important;
+}
+
+/* 兜底：如果旧 className 仍然存在，也强制恢复小海报，防止被 EventDetail.css 污染 */
+.premium-order-modal .detail-event-header {
+    display: flex !important;
+    align-items: center !important;
+    gap: 14px !important;
+}
+
+.premium-order-modal .detail-poster {
+    width: 76px !important;
+    height: 104px !important;
+    min-width: 76px !important;
+    max-width: 76px !important;
+    flex: 0 0 76px !important;
+    object-fit: cover !important;
+    border-radius: 10px !important;
+}
+

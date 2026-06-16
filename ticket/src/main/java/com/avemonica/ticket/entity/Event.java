@@ -19,9 +19,10 @@ import java.util.Map;
 public class Event {
 
     /**
-     * 主键 ID，对应数据库自增
+     * 主键 ID。
+     * 使用 MyBatis-Plus 雪花算法生成。
      */
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     /**
@@ -125,6 +126,8 @@ public class Event {
 
     private Long collectionId;
     private String collectionAlias;
+
+    private Integer allowRefund;
 
 
     // ==========================================

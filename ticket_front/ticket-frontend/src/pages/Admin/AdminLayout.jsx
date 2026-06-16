@@ -96,7 +96,7 @@ const AdminLayout = () => {
         hasAccess('order:refund') && {
             key: '/admin/orders',
             icon: <ShoppingCart size={18} />,
-            label: '订单退票处理'
+            label: '订单管理'
         },
         // 用户权限管理属于最高敏感权限，强制要求只有 Super Admin 可见
         isSuperAdmin && {

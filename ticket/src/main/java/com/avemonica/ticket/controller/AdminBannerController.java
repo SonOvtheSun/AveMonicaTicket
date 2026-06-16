@@ -8,6 +8,7 @@ import com.avemonica.ticket.entity.BannerOverdate;
 import com.avemonica.ticket.exception.BusinessException;
 import com.avemonica.ticket.service.BannerOverdateService;
 import com.avemonica.ticket.service.BannerService;
+import com.avemonica.ticket.service.UploadFileService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import org.springframework.beans.BeanUtils;
@@ -21,6 +22,7 @@ import com.avemonica.ticket.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.security.SecureRandom;
 import java.util.Objects;
 
 import java.time.LocalDate;
@@ -43,6 +45,20 @@ public class AdminBannerController {
 
     @Autowired
     private BannerOverdateService overdateService;
+
+    @Autowired
+    private UploadFileService uploadFileService;
+
+    /**
+     * 横幅 ID 规则：11 位随机数字。
+     * 范围：10000000000 ~ 99999999999。
+     *
+     * 保持 Long / BIGINT 类型不变，不需要把全项目横幅 ID 改成 String。
+     */
+    private static final long BANNER_ID_MIN = 10000000000L;
+    private static final long BANNER_ID_RANGE = 90000000000L;
+    private static final int BANNER_ID_MAX_RETRY = 50;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private User getCurrentUser() {
         String userId = SecurityContextHolder.getContext().getAuthentication().getName();
@@ -103,9 +119,14 @@ public class AdminBannerController {
             checkBannerDailyLimit(dto.getStartTime(), dto.getEndTime(), dto.getId());
         }
 
-        // 1. 超管：直接走原来的保存逻辑，立即生效
+        // 1. 超管：直接保存并立即生效，不走审核。
+        //    如果这次编辑替换了横幅图片，数据库更新成功后立刻删除旧图。
         if (superAdmin) {
+            String oldPosterUrl = getCurrentBannerPosterUrl(dto.getId(), dto.getIsExpiredEdit());
+
             saveBannerDirectly(dto, now, isNowExpired);
+
+            deleteReplacedBannerImage(oldPosterUrl, dto.getPosterUrl());
             return Result.success("横幅配置保存成功");
         }
 
@@ -113,6 +134,10 @@ public class AdminBannerController {
         if (dto.getId() == null) {
             Banner banner = new Banner();
             BeanUtils.copyProperties(dto, banner);
+
+            // 新增横幅时手动生成 11 位随机数字 ID。
+            banner.setId(generateUniqueBannerId());
+
             banner.setAuditStatus(0);
             banner.setEditAuditStatus(null);
             banner.setPendingPayload(null);
@@ -150,6 +175,8 @@ public class AdminBannerController {
         }
 
         if (Objects.equals(oldBanner.getAuditStatus(), 2) || Objects.equals(oldBanner.getAuditStatus(), 3)) {
+            String oldPosterUrl = oldBanner.getPosterUrl();
+
             Banner banner = new Banner();
             BeanUtils.copyProperties(dto, banner);
             banner.setId(dto.getId());
@@ -158,6 +185,10 @@ public class AdminBannerController {
             banner.setPendingPayload(null);
             banner.setAuditSubmitTime(now);
             bannerService.updateById(banner);
+
+            // 这类横幅本身尚未对 C 端生效，重新提交时主记录图片已经被替换，旧图可以删除。
+            deleteReplacedBannerImage(oldPosterUrl, dto.getPosterUrl());
+
             return Result.success("横幅已重新提交审核");
         }
 
@@ -207,11 +238,25 @@ public class AdminBannerController {
     @DeleteMapping("/{id}")
     @PreAuthorize(AuthExp.BANNER_MANAGE)
     public Result<String> deleteBanner(@PathVariable Long id, @RequestParam Boolean isExpired) {
-        if (isExpired) {
+        String posterUrl;
+
+        if (Boolean.TRUE.equals(isExpired)) {
+            BannerOverdate banner = overdateService.getById(id);
+            posterUrl = banner == null ? null : banner.getPosterUrl();
             overdateService.removeById(id);
         } else {
+            Banner banner = bannerService.getById(id);
+            posterUrl = banner == null ? null : banner.getPosterUrl();
+
+            // 删除主记录时，也顺手清理修改审核 pendingPayload 里未生效的新图。
+            if (banner != null) {
+                deletePendingBannerImage(banner);
+            }
+
             bannerService.removeById(id);
         }
+
+        deleteBannerImageQuietly(posterUrl);
         return Result.success("删除成功");
     }
 
@@ -241,6 +286,8 @@ public class AdminBannerController {
         if (Objects.equals(banner.getEditAuditStatus(), 0)) {
             if (isPass) {
                 try {
+                    String oldPosterUrl = banner.getPosterUrl();
+
                     BannerSaveDTO dto = objectMapper.readValue(banner.getPendingPayload(), BannerSaveDTO.class);
                     LocalDateTime now = LocalDateTime.now();
                     boolean isNowExpired = dto.getEndTime().isBefore(now);
@@ -254,11 +301,17 @@ public class AdminBannerController {
                                     .set(Banner::getAuditSubmitTime, LocalDateTime.now())
                     );
 
+                    // 修改审核通过后，新图正式生效，此时删除旧横幅图。
+                    deleteReplacedBannerImage(oldPosterUrl, dto.getPosterUrl());
+
                     return Result.success("横幅修改审核已通过，客户端信息已同步更新");
                 } catch (Exception e) {
                     throw new BusinessException("解析横幅修改审核快照失败");
                 }
             } else {
+                // 修改审核被驳回后，pendingPayload 里的新横幅图不会被使用，需要删除。
+                deletePendingBannerImage(banner);
+
                 bannerService.update(
                         new LambdaUpdateWrapper<Banner>()
                                 .eq(Banner::getId, id)
@@ -299,6 +352,9 @@ public class AdminBannerController {
         }
 
         if (Objects.equals(banner.getEditAuditStatus(), 0)) {
+            // 撤销修改审核后，pendingPayload 里的新横幅图不会被使用，需要删除。
+            deletePendingBannerImage(banner);
+
             bannerService.update(
                     new LambdaUpdateWrapper<Banner>()
                             .eq(Banner::getId, id)
@@ -312,9 +368,130 @@ public class AdminBannerController {
         throw new BusinessException("当前状态无需撤销审核");
     }
 
+
+    /**
+     * 获取本次编辑前的旧横幅图片。
+     *
+     * 说明：
+     * 1. 普通主表横幅从 tb_banner 查；
+     * 2. 已过期归档横幅从 tb_banner_overdate 查；
+     * 3. 新增横幅 id 为空，无旧图。
+     */
+    private String getCurrentBannerPosterUrl(Long id, Boolean isExpiredEdit) {
+        if (id == null) {
+            return null;
+        }
+
+        if (Boolean.TRUE.equals(isExpiredEdit)) {
+            BannerOverdate oldBanner = overdateService.getById(id);
+            return oldBanner == null ? null : oldBanner.getPosterUrl();
+        }
+
+        Banner oldBanner = bannerService.getById(id);
+        return oldBanner == null ? null : oldBanner.getPosterUrl();
+    }
+
+    /**
+     * 删除被新横幅图替换掉的旧图。
+     *
+     * 只在数据库已经保存成功之后调用，避免保存失败但旧图被误删。
+     */
+    private void deleteReplacedBannerImage(String oldPosterUrl, String newPosterUrl) {
+        if (oldPosterUrl == null || oldPosterUrl.trim().isEmpty()) {
+            return;
+        }
+
+        if (Objects.equals(oldPosterUrl, newPosterUrl)) {
+            return;
+        }
+
+        deleteBannerImageQuietly(oldPosterUrl);
+    }
+
+    /**
+     * 删除 pendingPayload 中的新横幅图。
+     *
+     * 用于普通管理员修改审核被驳回、撤销时。
+     * 这些图片已经上传成功，但没有正式替换主表横幅，因此需要清理。
+     */
+    private void deletePendingBannerImage(Banner banner) {
+        if (banner == null || banner.getPendingPayload() == null || banner.getPendingPayload().trim().isEmpty()) {
+            return;
+        }
+
+        try {
+            BannerSaveDTO dto = objectMapper.readValue(banner.getPendingPayload(), BannerSaveDTO.class);
+            deleteReplacedBannerImage(dto.getPosterUrl(), banner.getPosterUrl());
+        } catch (Exception e) {
+            throw new BusinessException("解析横幅待审核图片失败");
+        }
+    }
+
+    /**
+     * 只允许删除本项目上传目录中的图片，避免误删外链或系统资源。
+     *
+     * 当前横幅图片通常由 /api/common/upload 上传到 /uploads/poster/。
+     * 如果你后续把横幅单独放到 /uploads/scrollbar/，这里也已经放行。
+     */
+    private boolean isDeletableBannerImage(String url) {
+        return url != null
+                && uploadFileService.isLocalUploadUrl(url)
+                && (url.startsWith("/uploads/poster/") || url.startsWith("/uploads/scrollbar/"));
+    }
+
+    private void deleteBannerImageQuietly(String url) {
+        if (!isDeletableBannerImage(url)) {
+            return;
+        }
+
+        try {
+            uploadFileService.deleteUploadFile(url);
+        } catch (Exception e) {
+            throw new BusinessException("删除横幅旧图片失败");
+        }
+    }
+
+    /**
+     * 生成唯一横幅 ID：11 位随机数字。
+     *
+     * 由于横幅可能在主表 tb_banner 和归档表 tb_banner_overdate 之间流转，
+     * 所以两个表都要查重，避免同一个 ID 在冷热表之间冲突。
+     */
+    private Long generateUniqueBannerId() {
+        for (int i = 0; i < BANNER_ID_MAX_RETRY; i++) {
+            Long bannerId = nextElevenDigitBannerId();
+
+            long activeCount = bannerService.count(
+                    new LambdaQueryWrapper<Banner>()
+                            .eq(Banner::getId, bannerId)
+            );
+
+            long expiredCount = overdateService.count(
+                    new LambdaQueryWrapper<BannerOverdate>()
+                            .eq(BannerOverdate::getId, bannerId)
+            );
+
+            if (activeCount == 0 && expiredCount == 0) {
+                return bannerId;
+            }
+        }
+
+        throw new BusinessException("横幅ID生成失败，请稍后重试");
+    }
+
+    /**
+     * 生成 10000000000 ~ 99999999999 之间的 11 位数字。
+     */
+    private Long nextElevenDigitBannerId() {
+        return BANNER_ID_MIN + Math.floorMod(SECURE_RANDOM.nextLong(), BANNER_ID_RANGE);
+    }
+
     private void saveBannerDirectly(BannerSaveDTO dto, LocalDateTime now, boolean isNowExpired) {
+        Long finalBannerId = dto.getId() == null ? generateUniqueBannerId() : dto.getId();
+
         Banner activeBanner = new Banner();
         BeanUtils.copyProperties(dto, activeBanner);
+        activeBanner.setId(finalBannerId);
         if (activeBanner.getCreateTime() == null) activeBanner.setCreateTime(now);
         activeBanner.setAuditStatus(1);
         activeBanner.setEditAuditStatus(null);
@@ -323,6 +500,7 @@ public class AdminBannerController {
 
         BannerOverdate coldBanner = new BannerOverdate();
         BeanUtils.copyProperties(dto, coldBanner);
+        coldBanner.setId(finalBannerId);
         if (coldBanner.getCreateTime() == null) coldBanner.setCreateTime(now);
         coldBanner.setArchiveTime(now);
 

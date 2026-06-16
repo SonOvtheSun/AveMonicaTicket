@@ -4,6 +4,8 @@ import WorkerCompress from './engines/WorkerCompress?worker';
 import { Mimes } from './lib/mimes';
 import { AvifImage } from './engines/AvifImage';
 
+const TASK_TIMEOUT_MS = 15 * 1000;
+
 const DefaultCompressOption = {
     preview: {
         maxSize: 256,
@@ -38,12 +40,29 @@ let worker = null;
 let taskId = 0;
 const taskMap = new Map();
 
+function clearTask(task) {
+    if (task?.timer) {
+        clearTimeout(task.timer);
+    }
+    if (task?.src) {
+        URL.revokeObjectURL(task.src);
+    }
+}
+
+function rejectAllTasks(error) {
+    for (const [key, task] of taskMap.entries()) {
+        taskMap.delete(key);
+        clearTask(task);
+        task.reject(error);
+    }
+}
+
 function getWorker() {
     if (!worker) {
         worker = new WorkerCompress();
 
         worker.addEventListener('message', async (event) => {
-            const data = event.data;
+            const data = event.data || {};
             const task = taskMap.get(data.key);
 
             if (!task) return;
@@ -51,6 +70,10 @@ function getWorker() {
             taskMap.delete(data.key);
 
             try {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
                 let compress = data.compress;
 
                 // SVG 如果需要转 webp/jpg/avif，需要在主线程再转一次
@@ -81,11 +104,33 @@ function getWorker() {
                 task.resolve(outputFile);
             } catch (error) {
                 task.reject(error);
+            } finally {
+                clearTask(task);
             }
         });
 
         worker.addEventListener('error', (error) => {
             console.error('shot-easy compress worker error:', error);
+
+            const err = error instanceof Error
+                ? error
+                : new Error(error?.message || '图片压缩 Worker 运行异常');
+
+            rejectAllTasks(err);
+
+            worker?.terminate();
+            worker = null;
+        });
+
+        worker.addEventListener('messageerror', (error) => {
+            console.error('shot-easy compress worker message error:', error);
+
+            const err = new Error('图片压缩 Worker 消息传输失败');
+
+            rejectAllTasks(err);
+
+            worker?.terminate();
+            worker = null;
         });
     }
 
@@ -256,6 +301,13 @@ async function convertSvgToTarget(compress, width, height, option) {
     };
 }
 
+/**
+ * 使用 shot-easy 压缩算法压缩图片。
+ *
+ * 关键修复：
+ * 1. Worker 任务增加超时保护，避免 Promise 永远 pending。
+ * 2. Worker 报错时会 reject 当前任务，外层 customUpload 会自动回退原图上传。
+ */
 export async function compressImageByShotEasy(file, option = {}) {
     if (!file || !file.type?.startsWith('image/')) {
         return file;
@@ -263,9 +315,10 @@ export async function compressImageByShotEasy(file, option = {}) {
 
     const finalOption = mergeOption(option);
     const src = URL.createObjectURL(file);
+    const key = createKey();
 
     const info = {
-        key: createKey(),
+        key,
         name: file.name || 'image',
         blob: file,
         width: 0,
@@ -279,22 +332,36 @@ export async function compressImageByShotEasy(file, option = {}) {
     }
 
     return new Promise((resolve, reject) => {
-        taskMap.set(info.key, {
+        const timer = setTimeout(() => {
+            const task = taskMap.get(key);
+
+            if (!task) return;
+
+            taskMap.delete(key);
+            clearTask(task);
+
+            reject(new Error('图片压缩超时，已自动回退为原图上传'));
+        }, TASK_TIMEOUT_MS);
+
+        taskMap.set(key, {
             file,
             option: finalOption,
-            resolve: (resultFile) => {
-                URL.revokeObjectURL(src);
-                resolve(resultFile);
-            },
-            reject: (error) => {
-                URL.revokeObjectURL(src);
-                reject(error);
-            },
+            src,
+            timer,
+            resolve,
+            reject,
         });
 
-        getWorker().postMessage({
-            info,
-            option: finalOption,
-        });
+        try {
+            getWorker().postMessage({
+                info,
+                option: finalOption,
+            });
+        } catch (error) {
+            const task = taskMap.get(key);
+            taskMap.delete(key);
+            clearTask(task);
+            reject(error);
+        }
     });
 }

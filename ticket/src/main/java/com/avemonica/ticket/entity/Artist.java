@@ -4,42 +4,39 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+import com.baomidou.mybatisplus.annotation.TableField;
 
 import java.time.LocalDateTime;
 
-/**
- * 艺人/乐队实体类
- */
 @Data
 @TableName("tb_artist")
 public class Artist {
 
-    @TableId(type = IdType.AUTO)
+    /**
+     * 艺人ID。
+     * 使用 MyBatis-Plus 雪花算法生成。
+     */
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
-    /**
-     * 艺人/乐队名称
-     */
     private String name;
 
-    /**
-     * 艺人头像URL
-     */
     private String avatarUrl;
 
-    /**
-     * 艺人简介
-     */
     private String description;
 
-    /**
-     * 审核状态 (0:待审核, 1:审核通过, 2:被驳回)
-     */
+    private String region;
+
+    private String style;
+
     private Integer auditStatus;
 
-    /**
-     * 创建者用户ID
-     */
+    private Integer editAuditStatus;
+
+    private String pendingPayload;
+
+    private LocalDateTime auditSubmitTime;
+
     private Long createBy;
 
     private LocalDateTime createTime;
@@ -47,19 +44,8 @@ public class Artist {
     private LocalDateTime updateTime;
 
     /**
-     * 国家或地区
+     * 最近/未来关联演出数量，仅用于 C 端展示，不映射数据库字段。
      */
-    private String region;
-
-    /**
-     * 音乐风格
-     */
-    private String style;
-
-    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @TableField(exist = false)
     private Integer recentEventCount;
-
-    private Integer editAuditStatus;
-    private String pendingPayload;
-    private LocalDateTime auditSubmitTime;
 }

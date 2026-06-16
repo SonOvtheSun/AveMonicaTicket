@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Table, Button, Space, Input, Tag, Popconfirm, message, Modal, Form, Select, Upload, Image, Empty } from 'antd';
 import { SearchOutlined, EditOutlined, StopOutlined, CheckCircleOutlined, UploadOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import axios from '../../utils/request';
 import ImgCrop from "antd-img-crop";
+import { compressImageByShotEasy } from '../../shot-easy/compressImage.jsx';
 
 const MUSIC_STYLE_OPTIONS = [
     '古典', '流行', '世界音乐', '独立', '摇滚', '爵士', 'HipHop', '轻音乐', '民谣', '动漫', '朋克', '电子', '金属', '雷鬼', '核'
@@ -26,6 +27,209 @@ const ArtistLibrary = () => {
     const [form] = Form.useForm();
     const [submitting, setSubmitting] = useState(false);
     const [avatarFileList, setAvatarFileList] = useState([]);
+
+    // 记录本页面中“已上传成功但尚未确认保存”的头像 URL。
+    // 编辑旧艺人时原本已有的 avatarUrl 不会进入这个集合，因此取消编辑不会误删旧头像。
+    const uncommittedUploadUrlsRef = useRef(new Set());
+
+    const getAvatarCompressOption = () => ({
+        preview: {
+            maxSize: 256,
+        },
+        resize: {
+            method: 'fitWidth',
+            width: 800,
+            height: undefined,
+        },
+        format: {
+            target: 'webp',
+            transparentFill: '#FFFFFF',
+        },
+        jpeg: {
+            quality: 0.90,
+        },
+        png: {
+            colors: 64,
+            dithering: 0,
+            quality: 0.90
+        },
+        gif: {
+            colors: 128,
+            dithering: false,
+        },
+        avif: {
+            quality: 50,
+            speed: 8,
+        },
+    });
+
+    const parseUploadedUrlFromFile = (file) => {
+        if (!file) return '';
+
+        if (file.response && file.response.code === 200 && file.response.data) {
+            return file.response.data;
+        }
+
+        if (typeof file.response === 'string') {
+            return file.response;
+        }
+
+        if (file.url) {
+            return file.url;
+        }
+
+        if (file.status === 'done' && file.xhr?.responseText) {
+            try {
+                const resObj = JSON.parse(file.xhr.responseText);
+                if (resObj.code === 200 && resObj.data) {
+                    return resObj.data;
+                }
+                return resObj.data || resObj;
+            } catch (e) {
+                return '';
+            }
+        }
+
+        return '';
+    };
+
+    const addUncommittedUploadUrl = (url) => {
+        if (url && url.startsWith('/uploads/')) {
+            uncommittedUploadUrlsRef.current.add(url);
+        }
+    };
+
+    const markUploadCommitted = (url) => {
+        if (url) {
+            uncommittedUploadUrlsRef.current.delete(url);
+        }
+    };
+
+    const deleteUploadedUrl = async (url) => {
+        if (!url || !url.startsWith('/uploads/')) return;
+
+        try {
+            await axios.post('/api/common/delete-upload', { url });
+        } catch (error) {
+            console.warn('删除未确认上传头像失败：', url, error);
+        }
+    };
+
+    const cleanupUncommittedUploads = async () => {
+        const urls = Array.from(uncommittedUploadUrlsRef.current);
+
+        if (urls.length === 0) {
+            return;
+        }
+
+        uncommittedUploadUrlsRef.current.clear();
+
+        await Promise.allSettled(
+            urls.map(url => deleteUploadedUrl(url))
+        );
+    };
+
+    const handleRemoveUploadedFile = async (file) => {
+        const url = parseUploadedUrlFromFile(file);
+
+        if (url && uncommittedUploadUrlsRef.current.has(url)) {
+            uncommittedUploadUrlsRef.current.delete(url);
+            await deleteUploadedUrl(url);
+        }
+
+        return true;
+    };
+
+    const customAvatarUpload = async (options) => {
+        const { file, onSuccess, onError, onProgress } = options;
+        const rawSize = file?.size || 0;
+        const compressMessageKey = `artist-avatar-compress-${Date.now()}`;
+
+        let uploadFile = file;
+
+        try {
+            onProgress?.({ percent: 1 });
+
+            if (file && file.type && file.type.startsWith('image/')) {
+                message.open({
+                    key: compressMessageKey,
+                    type: 'loading',
+                    content: '正在压缩头像...',
+                    duration: 0,
+                });
+
+                try {
+                    uploadFile = await compressImageByShotEasy(file, getAvatarCompressOption());
+
+                    const compressedSize = uploadFile?.size || 0;
+
+                    if (rawSize > 0 && compressedSize > 0 && compressedSize < rawSize) {
+                        const savedPercent = (((rawSize - compressedSize) / rawSize) * 100).toFixed(1);
+                        message.open({
+                            key: compressMessageKey,
+                            type: 'success',
+                            content: `头像压缩完成，体积减少 ${savedPercent}%`,
+                            duration: 2,
+                        });
+                    } else {
+                        message.open({
+                            key: compressMessageKey,
+                            type: 'info',
+                            content: '头像已处理，继续上传',
+                            duration: 2,
+                        });
+                    }
+                } catch (compressError) {
+                    console.error('头像压缩失败，已使用原图上传：', compressError);
+                    message.open({
+                        key: compressMessageKey,
+                        type: 'warning',
+                        content: '头像压缩失败，已使用原图上传',
+                        duration: 2,
+                    });
+                    uploadFile = file;
+                }
+            }
+
+            onProgress?.({ percent: 8 });
+
+            const formData = new FormData();
+            formData.append('file', uploadFile, uploadFile.name || 'artist-avatar.webp');
+            formData.append('type', 'avatar');
+
+            const res = await axios.post('/api/common/upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    Authorization: `Bearer ${localStorage.getItem('token')}`,
+                },
+                onUploadProgress: (progressEvent) => {
+                    if (!progressEvent.total) return;
+
+                    const uploadPercent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    const percent = Math.min(100, 8 + Math.round(uploadPercent * 0.92));
+
+                    onProgress?.({ percent });
+                },
+            });
+
+            if (res.data.code === 200) {
+                addUncommittedUploadUrl(res.data.data);
+                onSuccess(res.data);
+            } else {
+                onError(new Error(res.data.message || '上传失败'));
+            }
+        } catch (error) {
+            message.destroy(compressMessageKey);
+            onError(error);
+        }
+    };
+
+    const handleModalCancel = async () => {
+        await cleanupUncommittedUploads();
+        setAvatarFileList([]);
+        form.resetFields();
+        setModalVisible(false);
+    };
 
     // 🚨 权限状态管理
     const [userRole, setUserRole] = useState(6);
@@ -97,6 +301,13 @@ const ArtistLibrary = () => {
             fetchData();
         }
     }, [canViewArtist]);
+
+    // 组件卸载时兜底清理本页面上传但未提交成功的头像。
+    useEffect(() => {
+        return () => {
+            cleanupUncommittedUploads();
+        };
+    }, []);
 
     const handleConfirmEditReject = async (id) => {
         try {
@@ -220,8 +431,15 @@ const ArtistLibrary = () => {
             }
 
             if (res.data.code === 200) {
+                // 头像已被新增/修改业务正式使用，前端不再删除；
+                // 后端 Artist 新增/修改成功后也需要调用 uploadTempFileService.markUsed(finalAvatarUrl)，避免凌晨定时任务误删。
+                markUploadCommitted(finalAvatarUrl);
+                await cleanupUncommittedUploads();
+
                 message.success(modalType === 'edit' ? '修改成功' : '新增成功');
                 setModalVisible(false);
+                setAvatarFileList([]);
+                form.resetFields();
                 fetchData(modalType === 'add' ? 1 : pagination.current);
             } else {
                 message.error(res.data.message);
@@ -427,7 +645,7 @@ const ArtistLibrary = () => {
             <Modal
                 title={modalType === 'add' ? '新增音乐人入驻' : '编辑艺人资料'}
                 open={modalVisible}
-                onCancel={() => setModalVisible(false)}
+                onCancel={handleModalCancel}
                 footer={null}
                 destroyOnClose
             >
@@ -449,10 +667,21 @@ const ArtistLibrary = () => {
                     <Form.Item label="官方头像" required>
                         <ImgCrop rotationSlider aspect={1} modalTitle="裁剪头像" modalOk="确认裁剪" modalCancel="取消">
                             <Upload
-                                name="file" action="/api/common/upload" data={{ type: 'avatar' }}
-                                listType="picture" maxCount={1}
-                                headers={{ Authorization: `Bearer ${localStorage.getItem('token')}` }}
-                                fileList={avatarFileList} onChange={({ fileList }) => setAvatarFileList(fileList)}
+                                customRequest={customAvatarUpload}
+                                listType="picture"
+                                maxCount={1}
+                                accept="image/*"
+                                fileList={avatarFileList}
+                                onRemove={handleRemoveUploadedFile}
+                                onChange={({ file, fileList }) => {
+                                    setAvatarFileList(fileList);
+
+                                    if (file.status === 'done' && file.response?.code === 200) {
+                                        message.success('头像上传成功');
+                                    } else if (file.status === 'error') {
+                                        message.error(file.response?.message || '头像上传失败');
+                                    }
+                                }}
                             >
                                 <Button icon={<UploadOutlined />}>上传头像</Button>
                             </Upload>
@@ -462,7 +691,7 @@ const ArtistLibrary = () => {
                         <Input.TextArea rows={4} />
                     </Form.Item>
                     <div style={{ textAlign: 'right', marginTop: 30 }}>
-                        <Button onClick={() => setModalVisible(false)} style={{ marginRight: 10 }}>取消</Button>
+                        <Button onClick={handleModalCancel} style={{ marginRight: 10 }}>取消</Button>
                         <Button type="primary" htmlType="submit" loading={submitting} style={modalType === 'add' ? {backgroundColor: '#FF8899', borderColor: '#FF8899'} : {}}>
                             {modalType === 'add' ? '确认新增' : '保存修改'}
                         </Button>

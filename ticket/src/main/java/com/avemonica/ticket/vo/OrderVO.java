@@ -26,6 +26,7 @@ public class OrderVO {
         private String time;
         private Integer runningTime;
         private String sessionName;
+        private Integer allowRefund;
     }
 
     @Data

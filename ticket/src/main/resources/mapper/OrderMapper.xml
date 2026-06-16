@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.avemonica.ticket.mapper.OrderMapper">
+
+    <sql id="AdminOrderWhere">
+        <where>
+            <if test="query.status != null">
+                AND o.status = #{query.status}
+            </if>
+
+            <if test="query.orderId != null">
+                AND o.id = #{query.orderId}
+            </if>
+
+            <if test="query.userId != null">
+                AND o.user_id = #{query.userId}
+            </if>
+
+            <if test="query.eventId != null">
+                AND o.event_id = #{query.eventId}
+            </if>
+
+            <if test="query.eventName != null and query.eventName != ''">
+                AND e.title LIKE CONCAT('%', #{query.eventName}, '%')
+            </if>
+        </where>
+    </sql>
+
+    <select id="countAdminOrders" resultType="java.lang.Long">
+        SELECT COUNT(1)
+        FROM tb_order o
+        LEFT JOIN tb_event e ON e.id = o.event_id
+        <include refid="AdminOrderWhere"/>
+    </select>
+
+    <select id="selectAdminOrderPage" resultType="java.util.LinkedHashMap">
+        SELECT
+        o.id AS id,
+        o.status AS status,
+        CASE
+        WHEN o.status = 1 THEN '未支付'
+        WHEN o.status = 2 THEN '已取消'
+        WHEN o.status = 3 THEN '已完成订单'
+        WHEN o.status = 4 THEN '申请退款中'
+        WHEN o.status = 5 THEN '异常订单'
+        WHEN o.status = 6 THEN '未检票'
+        WHEN o.status = 7 THEN '已退票'
+        ELSE '未知状态'
+        END AS statusText,
+        o.pay_price AS totalAmount,
+        o.quantity AS quantity,
+        DATE_FORMAT(o.create_time, '%Y-%m-%d %H:%i:%s') AS createTime,
+        DATE_FORMAT(o.expire_time, '%Y-%m-%d %H:%i:%s') AS expireTime,
+        o.refund_reason AS refundReason,
+        DATE_FORMAT(o.refund_apply_time, '%Y-%m-%d %H:%i:%s') AS refundApplyTime,
+        DATE_FORMAT(o.refund_audit_time, '%Y-%m-%d %H:%i:%s') AS refundAuditTime,
+        o.refund_reject_reason AS refundRejectReason,
+        o.refund_operator_id AS refundOperatorId,
+
+        u.id AS userId,
+        u.username AS username,
+        u.phone AS phone,
+        u.real_name AS realName,
+
+        e.id AS eventId,
+        e.title AS eventTitle,
+        e.poster_url AS posterUrl,
+        e.city AS city,
+        e.venue AS venue,
+        e.allow_refund AS allowRefund,
+
+        s.id AS sessionId,
+        s.session_name AS sessionName,
+        DATE_FORMAT(s.show_time, '%Y-%m-%d %H:%i:%s') AS showTime,
+
+        tc.id AS ticketCategoryId,
+        tc.name AS ticketCategoryName,
+        tc.price AS ticketPrice
+        FROM tb_order o
+        LEFT JOIN tb_user u ON u.id = o.user_id
+        LEFT JOIN tb_event e ON e.id = o.event_id
+        LEFT JOIN tb_event_session s ON s.id = o.session_id
+        LEFT JOIN tb_ticket_category tc ON tc.id = o.ticket_id
+        <include refid="AdminOrderWhere"/>
+        ORDER BY o.create_time DESC
+        LIMIT #{query.offset}, #{query.size}
+    </select>
+
+    <select id="selectAdminOrderDetail" resultType="java.util.LinkedHashMap">
+        SELECT
+        o.id AS id,
+        o.status AS status,
+        CASE
+        WHEN o.status = 1 THEN '已创建，未支付'
+        WHEN o.status = 2 THEN '已取消'
+        WHEN o.status = 3 THEN '已完成订单'
+        WHEN o.status = 4 THEN '申请退款中'
+        WHEN o.status = 5 THEN '异常订单'
+        WHEN o.status = 6 THEN '已支付，未检票'
+        WHEN o.status = 7 THEN '已退票'
+        ELSE '未知状态'
+        END AS statusText,
+        o.pay_price AS totalAmount,
+        o.quantity AS quantity,
+        DATE_FORMAT(o.create_time, '%Y-%m-%d %H:%i:%s') AS createTime,
+        DATE_FORMAT(o.expire_time, '%Y-%m-%d %H:%i:%s') AS expireTime,
+        o.refund_reason AS refundReason,
+        DATE_FORMAT(o.refund_apply_time, '%Y-%m-%d %H:%i:%s') AS refundApplyTime,
+        DATE_FORMAT(o.refund_audit_time, '%Y-%m-%d %H:%i:%s') AS refundAuditTime,
+        o.refund_reject_reason AS refundRejectReason,
+        o.refund_operator_id AS refundOperatorId,
+
+        u.id AS userId,
+        u.username AS username,
+        u.phone AS phone,
+        u.real_name AS realName,
+
+        e.id AS eventId,
+        e.title AS eventTitle,
+        e.poster_url AS posterUrl,
+        e.city AS city,
+        e.venue AS venue,
+        e.allow_refund AS allowRefund,
+
+        s.id AS sessionId,
+        s.session_name AS sessionName,
+        DATE_FORMAT(s.show_time, '%Y-%m-%d %H:%i:%s') AS showTime,
+
+        tc.id AS ticketCategoryId,
+        tc.name AS ticketCategoryName,
+        tc.price AS ticketPrice
+        FROM tb_order o
+        LEFT JOIN tb_user u ON u.id = o.user_id
+        LEFT JOIN tb_event e ON e.id = o.event_id
+        LEFT JOIN tb_event_session s ON s.id = o.session_id
+        LEFT JOIN tb_ticket_category tc ON tc.id = o.ticket_id
+        WHERE o.id = #{id}
+        LIMIT 1
+    </select>
+
+    <select id="selectAdminOrderSpectators" resultType="java.util.LinkedHashMap">
+        SELECT
+        os.order_id AS orderId,
+        os.spectator_id AS id,
+        sp.name AS name,
+        sp.id_type AS idType,
+        sp.id_card AS idCard
+        FROM tb_order_spectator os
+        LEFT JOIN tb_spectator sp ON sp.id = os.spectator_id
+        WHERE os.delete_token = 0
+        AND os.order_id IN
+        <foreach collection="orderIds" item="id" open="(" close=")" separator=",">
+            #{id}
+        </foreach>
+        ORDER BY os.id ASC
+    </select>
+
+    <select id="selectAdminOrderTickets" resultType="java.util.LinkedHashMap">
+        SELECT
+        ot.order_id AS orderId,
+        ot.id AS id,
+        ot.ticket_name AS ticketName,
+        ot.spectator_id AS spectatorId,
+        ot.spectator_name AS spectatorName,
+        ot.check_status AS checkStatus,
+        ot.seat_info AS seatInfo,
+        ot.qr_code AS qrCode
+        FROM tb_order_ticket ot
+        WHERE ot.order_id IN
+        <foreach collection="orderIds" item="id" open="(" close=")" separator=",">
+            #{id}
+        </foreach>
+        ORDER BY ot.id ASC
+    </select>
+
+</mapper>

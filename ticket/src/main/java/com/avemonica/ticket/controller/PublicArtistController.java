@@ -58,10 +58,25 @@ public class PublicArtistController {
         for (Artist artist : pageData.getRecords()) {
             long eventCount = eventService.count(
                     new LambdaQueryWrapper<Event>()
-//                            .eq(Event::getStatus, 1) // 1: 必须是已上架/在售的活跃演出
-//                            .ge(Event::getShowTime, now) // 必须是未开始的未来演出
-                            // 跨表联查桥接表：筛选出包含当前艺人ID的演出
-                            .inSql(Event::getId, "SELECT event_id FROM tb_event_artist WHERE artist_id = " + artist.getId())
+                            // C端只统计未隐藏的演出
+                            .ne(Event::getStatus, Event.STATUS_HIDDEN)
+
+                            // 当前艺人关联的演出
+                            .inSql(
+                                    Event::getId,
+                                    "SELECT event_id FROM tb_event_artist WHERE artist_id = " + artist.getId()
+                            )
+
+                            // 至少有一个未来场次
+                            .apply(
+                                    "EXISTS (" +
+                                            "SELECT 1 FROM tb_event_session s " +
+                                            "WHERE s.event_id = tb_event.id " +
+                                            "AND s.status <> 4 " +
+                                            "AND s.show_time >= {0}" +
+                                            ")",
+                                    now
+                            )
             );
             // 写入刚才扩展的临时字段中
             artist.setRecentEventCount((int) eventCount);

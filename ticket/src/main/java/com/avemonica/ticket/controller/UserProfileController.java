@@ -2,11 +2,15 @@ package com.avemonica.ticket.controller;
 
 import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.entity.User;
+import com.avemonica.ticket.service.UploadFileService;
 import com.avemonica.ticket.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/user/profile")
@@ -14,6 +18,9 @@ public class UserProfileController {
 
     @Autowired
     private UserService userService;
+
+    @Autowired
+    private UploadFileService uploadFileService;
 
     @Autowired
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
@@ -40,8 +47,15 @@ public class UserProfileController {
     }
 
     /**
-     * 更新用户基本资料 (用户名、性别、生日、简介)
-     * 对接前端：axios.post('/api/user/profile/update')
+     * 更新用户基本资料。
+     *
+     * 头像清理规则：
+     * 1. 先更新数据库；
+     * 2. 数据库更新成功后，再删除旧头像；
+     * 3. 只删除 /uploads/avatar/ 下的本地头像；
+     * 4. 新旧头像相同、空头像、默认头像都不删除。
+     *
+     * 这样可以避免“数据库保存失败但旧头像已被删除”的数据不一致问题。
      */
     @PostMapping("/update")
     public Result<String> updateProfile(@RequestBody User updateParams) {
@@ -50,37 +64,44 @@ public class UserProfileController {
             return Result.error(401, "登录已过期");
         }
 
-        // 1. 查出当前未修改的系统用户信息
         User currentUser = userService.getById(userId);
         if (currentUser == null) {
             return Result.error("用户不存在");
         }
 
-        // 2. 🚨 唯一性校验：如果用户修改了用户名，需要去数据库查重
+        String oldAvatar = currentUser.getAvatar();
+        String newAvatar = updateParams.getAvatar();
+
+        // 用户名修改校验：admin 账号禁止改名；普通用户改名需要查重。
         String newUsername = updateParams.getUsername();
         if (newUsername != null && !newUsername.equals(currentUser.getUsername())) {
             if (userId == 1 || "admin".equals(currentUser.getUsername())) {
                 return Result.error("安全限制：管理员账号（admin）不可修改用户名");
             }
 
-            // 复用你已有的用户名可用性检查服务
             boolean available = userService.isUsernameAvailable(newUsername);
             if (!available) {
                 return Result.error("该用户名已存在，请换一个试试");
             }
         }
 
-        // 3. 执行更新
         User user = new User();
         user.setId(userId);
-        user.setUsername(newUsername); // 🚨 替换为 username
+        user.setUsername(newUsername);
         user.setGender(updateParams.getGender());
         user.setBirthday(updateParams.getBirthday());
         user.setBio(updateParams.getBio());
-        user.setAvatar(updateParams.getAvatar());
+        user.setAvatar(newAvatar);
 
         boolean success = userService.updateById(user);
-        return success ? Result.success("基本信息修改成功", null) : Result.error("修改失败");
+        if (!success) {
+            return Result.error("修改失败");
+        }
+
+        // 旧头像删除必须放在数据库更新成功之后。
+        deleteOldAvatarIfNecessary(oldAvatar, newAvatar);
+
+        return Result.success("基本信息修改成功", null);
     }
 
     /**
@@ -196,6 +217,44 @@ public class UserProfileController {
         userService.updateById(updateUser);
 
         return Result.success("手机号更换成功");
+    }
+
+
+    /**
+     * 数据库已成功保存新头像后，删除旧头像文件。
+     *
+     * 注意：失败不影响主流程。头像文件清理失败只记录日志/静默跳过，
+     * 不应该让用户资料保存结果回滚。
+     */
+    private void deleteOldAvatarIfNecessary(String oldAvatar, String newAvatar) {
+        if (!shouldDeleteOldAvatar(oldAvatar, newAvatar)) {
+            return;
+        }
+
+        uploadFileService.deleteUploadFile(oldAvatar);
+    }
+
+    /**
+     * 判断旧头像是否允许删除。
+     *
+     * 只删除头像目录下的本地上传文件，避免误删海报、系统图、外链图片。
+     */
+    private boolean shouldDeleteOldAvatar(String oldAvatar, String newAvatar) {
+        if (!StringUtils.hasText(oldAvatar)) {
+            return false;
+        }
+
+        if (Objects.equals(oldAvatar, newAvatar)) {
+            return false;
+        }
+
+        // 项目默认头像不要删除；如果你还有其他默认头像路径，也可以继续加白名单。
+        if ("/uploads/avatar/default.png".equals(oldAvatar)) {
+            return false;
+        }
+
+        // 只删除头像目录，避免误删 poster、scrollbar、系统资源等。
+        return oldAvatar.startsWith("/uploads/avatar/");
     }
 
     /**
