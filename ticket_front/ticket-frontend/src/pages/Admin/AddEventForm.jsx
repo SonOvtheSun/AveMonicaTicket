@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import './AddEventForm.css';
 import pcasData from '../../assets/pcas.json';
 import ImgCrop from 'antd-img-crop';
+import { compressImageByShotEasy } from '../../shot-easy/compressImage';
 
 const cityOptions = Object.keys(pcasData).map(province => {
     const cityKeys = Object.keys(pcasData[province]);
@@ -66,6 +67,81 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
     const [detailsFileList, setDetailsFileList] = useState([]);
     const [avatarFileList, setAvatarFileList] = useState([]);
 
+    const getImageCompressOption = (scene) => {
+        const baseOption = {
+            preview: {
+                maxSize: 256,
+            },
+            format: {
+                // 推荐统一转 webp，体积小，浏览器支持也比较好
+                target: 'webp',
+                // PNG/SVG 转 JPG/WEBP 时透明区域的底色
+                transparentFill: '#FFFFFF',
+            },
+            jpeg: {
+                quality: 0.72,
+            },
+            png: {
+                colors: 64,
+                dithering: 0,
+            },
+            gif: {
+                colors: 128,
+                dithering: false,
+            },
+            avif: {
+                quality: 50,
+                speed: 8,
+            },
+        };
+
+        if (scene === 'avatar') {
+            return {
+                ...baseOption,
+                resize: {
+                    method: 'fitWidth',
+                    width: 800,
+                    height: undefined,
+                },
+            };
+        }
+
+        if (scene === 'details') {
+            return {
+                ...baseOption,
+                resize: {
+                    method: 'fitWidth',
+                    width: 2200,
+                    height: undefined,
+                },
+                jpeg: {
+                    quality: 0.76,
+                },
+                png: {
+                    colors: 96,
+                    dithering: 0,
+                },
+            };
+        }
+
+        // 默认 poster
+        return {
+            ...baseOption,
+            resize: {
+                method: 'fitWidth',
+                width: 1800,
+                height: undefined,
+            },
+            jpeg: {
+                quality: 0.75,
+            },
+            png: {
+                colors: 96,
+                dithering: 0,
+            },
+        };
+    };
+
     const fetchRemoteArtists = async (keyword, page = 1, append = false) => {
         if (!keyword) {
             if (!append) {
@@ -122,28 +198,102 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         fetchRemoteArtists(artistKeyword, artistPage + 1, true);
     };
 
-    const customUpload = async (options, uploadType) => {
+    const customUpload = async (options, uploadType, compressScene = uploadType) => {
         const { file, onSuccess, onError, onProgress } = options;
-        const formData = new FormData();
-        formData.append('file', file, file.name || `cropped-${uploadType}.jpg`);
-        formData.append('type', uploadType);
+
+        let uploadFile = file;
+        const rawSize = file?.size || 0;
 
         try {
+            // 先给 Upload 一个初始进度，避免压缩阶段看起来卡住
+            onProgress?.({ percent: 1 });
+
+            if (file && file.type && file.type.startsWith('image/')) {
+                const compressMessageKey = `compress-${Date.now()}`;
+
+                message.open({
+                    key: compressMessageKey,
+                    type: 'loading',
+                    content: '正在压缩图片...',
+                    duration: 0,
+                });
+
+                try {
+                    uploadFile = await compressImageByShotEasy(
+                        file,
+                        getImageCompressOption(compressScene)
+                    );
+
+                    const compressedSize = uploadFile?.size || 0;
+
+                    if (rawSize > 0 && compressedSize > 0 && compressedSize < rawSize) {
+                        const savedPercent = (((rawSize - compressedSize) / rawSize) * 100).toFixed(1);
+
+                        message.open({
+                            key: compressMessageKey,
+                            type: 'success',
+                            content: `图片压缩完成，体积减少 ${savedPercent}%`,
+                            duration: 2,
+                        });
+                    } else {
+                        message.open({
+                            key: compressMessageKey,
+                            type: 'info',
+                            content: '图片已处理，压缩后未小于原图，继续上传',
+                            duration: 2,
+                        });
+                    }
+                } catch (compressError) {
+                    console.error('图片压缩失败，已使用原图上传：', compressError);
+
+                    message.open({
+                        key: compressMessageKey,
+                        type: 'warning',
+                        content: '图片压缩失败，已使用原图上传',
+                        duration: 2,
+                    });
+
+                    uploadFile = file;
+                }
+            }
+
+            onProgress?.({ percent: 8 });
+
+            const formData = new FormData();
+
+            // 注意：这里必须用 uploadFile.name。
+            // 如果 shot-easy 转成 webp，这里的文件名也会变成 .webp，
+            // 后端 CommonController 才能按正确后缀保存。
+            formData.append(
+                'file',
+                uploadFile,
+                uploadFile.name || `compressed-${uploadType}.webp`
+            );
+
+            // uploadType 仍然传给后端决定目录。
+            // poster/details 可以都传 poster，avatar 传 avatar。
+            formData.append('type', uploadType);
+
             const res = await axios.post('/api/common/upload', formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                     'Authorization': `Bearer ${localStorage.getItem('token')}`
                 },
                 onUploadProgress: (progressEvent) => {
-                    const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-                    onProgress({ percent });
+                    if (!progressEvent.total) return;
+
+                    // 压缩阶段占 0~8%，真实上传阶段从 8% 映射到 100%
+                    const uploadPercent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    const percent = Math.min(100, 8 + Math.round(uploadPercent * 0.92));
+
+                    onProgress?.({ percent });
                 }
             });
 
             if (res.data.code === 200) {
                 onSuccess(res.data);
             } else {
-                onError(new Error(res.data.message));
+                onError(new Error(res.data.message || '上传失败'));
             }
         } catch (err) {
             onError(err);
@@ -553,7 +703,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                     <Form.Item label="演出主海报" required>
                         <ImgCrop rotationSlider aspect={1 / 1.414} modalTitle="裁剪演出海报" modalOk="确认裁剪" modalCancel="取消">
                             <Upload
-                                customRequest={(options) => customUpload(options, 'poster')}
+                                customRequest={(options) => customUpload(options, 'poster', 'poster')}
                                 listType="picture"
                                 maxCount={1}
                                 fileList={posterFileList}
@@ -570,7 +720,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 <Col span={12}>
                     <Form.Item label="详情长图">
                         <Upload
-                            customRequest={(options) => customUpload(options, 'poster')}
+                            customRequest={(options) => customUpload(options, 'poster', 'details')}
                             listType="picture"
                             maxCount={1}
                             fileList={detailsFileList}
@@ -880,21 +1030,27 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                     </Form.Item>
 
                     <Form.Item name="avatar" label="官方头像" valuePropName="fileList" getValueFromEvent={normFile}>
-                        <Upload
-                            name="file"
-                            action="/api/common/upload"
-                            data={{ type: 'avatar' }}
-                            listType="picture"
-                            maxCount={1}
-                            headers={{ Authorization: `Bearer ${localStorage.getItem('token')}` }}
-                            fileList={avatarFileList}
-                            onChange={(info) => {
-                                setAvatarFileList(info.fileList);
-                                handleUploadChange(info, '艺人头像');
-                            }}
+                        <ImgCrop
+                            rotationSlider
+                            aspect={1}
+                            modalTitle="裁剪艺人头像"
+                            modalOk="确认裁剪"
+                            modalCancel="取消"
                         >
-                            <Button icon={<UploadOutlined />}>上传专属头像</Button>
-                        </Upload>
+                            <Upload
+                                customRequest={(options) => customUpload(options, 'avatar', 'avatar')}
+                                listType="picture"
+                                maxCount={1}
+                                accept="image/*"
+                                fileList={avatarFileList}
+                                onChange={(info) => {
+                                    setAvatarFileList(info.fileList);
+                                    handleUploadChange(info, '艺人头像');
+                                }}
+                            >
+                                <Button icon={<UploadOutlined />}>上传专属头像</Button>
+                            </Upload>
+                        </ImgCrop>
                     </Form.Item>
 
                     <Form.Item name="region" label="国家或地区" rules={[{ required: true, message: '请选择或输入国家/地区' }]}>

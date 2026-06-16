@@ -57,12 +57,7 @@ public class CommonController {
 
         try {
             // 3. 生成新文件名 (UUID)
-            String originalFilename = file.getOriginalFilename();
-            String suffix = ".jpg"; // 给定一个默认后缀，兼容前端裁剪生成的 Blob
-
-            if (originalFilename != null && originalFilename.contains(".")) {
-                suffix = originalFilename.substring(originalFilename.lastIndexOf("."));
-            }
+            String suffix = getSuffix(file);
 
             String newFileName = UUID.randomUUID().toString().replace("-", "") + suffix;
 
@@ -88,5 +83,33 @@ public class CommonController {
             log.error("文件上传失败", e);
             throw new BusinessException("文件上传失败");
         }
+    }
+
+    private String getSuffix(MultipartFile file) {
+        String originalFilename = file.getOriginalFilename();
+
+        if (originalFilename != null && originalFilename.contains(".")) {
+            return originalFilename.substring(originalFilename.lastIndexOf("."));
+        }
+
+        String contentType = file.getContentType();
+
+        if ("image/webp".equals(contentType)) {
+            return ".webp";
+        }
+        if ("image/png".equals(contentType)) {
+            return ".png";
+        }
+        if ("image/gif".equals(contentType)) {
+            return ".gif";
+        }
+        if ("image/avif".equals(contentType)) {
+            return ".avif";
+        }
+        if ("image/svg+xml".equals(contentType)) {
+            return ".svg";
+        }
+
+        return ".jpg";
     }
 }
