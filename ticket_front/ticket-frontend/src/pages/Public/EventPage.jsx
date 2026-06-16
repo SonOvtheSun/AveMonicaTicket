@@ -117,22 +117,72 @@ const EventsPage = () => {
         fetchEvents(1);
     }, [city, timeType, dateRange, style, keyword]);
 
-    // 计算最低票价
-    const getMinPrice = (tickets) => {
-        if (!tickets || tickets.length === 0) return '票档待定';
+    // 新数据结构：票档只存在于 sessions[*].tickets，不再读取 event.tickets
+    const getAllSessionTickets = (event) => {
+        if (!event || !Array.isArray(event.sessions)) return [];
+
+        return event.sessions.flatMap(session =>
+            Array.isArray(session.tickets) ? session.tickets : []
+        );
+    };
+
+    // 计算全部场次中的最低票价
+    const getMinPrice = (event) => {
+        const tickets = getAllSessionTickets(event);
+        if (tickets.length === 0) return '票档待定';
+
         const validPrices = tickets
             .map(t => Number(t.price))
             .filter(price => Number.isFinite(price));
+
         if (validPrices.length === 0) return '票档待定';
         return `¥${Math.min(...validPrices)}起`;
     };
 
+    // 获取用于列表展示的演出时间。优先使用 event.showTime；没有时从 sessions 中取最早时间
+    const getDisplayShowTime = (event) => {
+        if (event?.showTime && dayjs(event.showTime).isValid()) {
+            return event.showTime;
+        }
+
+        const validSessionTimes = Array.isArray(event?.sessions)
+            ? event.sessions
+                .map(session => session.showTime)
+                .filter(time => time && dayjs(time).isValid())
+                .sort((a, b) => dayjs(a).valueOf() - dayjs(b).valueOf())
+            : [];
+
+        return validSessionTimes[0] || null;
+    };
+
+    // 获取用于判断预售的开票时间。优先使用 event.saleTime；没有时从 sessions 中取最早开票时间
+    const getDisplaySaleTime = (event) => {
+        if (event?.saleTime && dayjs(event.saleTime).isValid()) {
+            return event.saleTime;
+        }
+
+        const validSaleTimes = Array.isArray(event?.sessions)
+            ? event.sessions
+                .map(session => session.saleTime)
+                .filter(time => time && dayjs(time).isValid())
+                .sort((a, b) => dayjs(a).valueOf() - dayjs(b).valueOf())
+            : [];
+
+        return validSaleTimes[0] || null;
+    };
+
     // 根据演出状态展示价格或状态文案
     const getPriceText = (event) => {
+        const showTime = getDisplayShowTime(event);
+
+        // 没有拿到任何演出时间时，不能判定为已结束，只能显示敬请期待
+        if (!showTime) return '敬请期待';
+
         if (Number(event.status) === 3) {
-            return dayjs(event.showTime).isAfter(dayjs()) ? '敬请期待' : '已结束';
+            return dayjs(showTime).isAfter(dayjs()) ? '敬请期待' : '已结束';
         }
-        return getMinPrice(event.tickets);
+
+        return getMinPrice(event);
     };
 
     // 提取艺人名字
@@ -142,8 +192,10 @@ const EventsPage = () => {
     };
 
     const getStatusClassName = (event) => {
+        const showTime = getDisplayShowTime(event);
+        if (!showTime) return 'is-coming-soon';
         if (Number(event.status) !== 3) return '';
-        return dayjs(event.showTime).isAfter(dayjs()) ? 'is-coming-soon' : 'is-ended';
+        return dayjs(showTime).isAfter(dayjs()) ? 'is-coming-soon' : 'is-ended';
     };
 
     return (
@@ -223,7 +275,9 @@ const EventsPage = () => {
                                     {events.map((event, index) => {
                                         const styleTags = getStyleTags(event.style);
                                         const statusClassName = getStatusClassName(event);
-                                        const isPresale = Number(event.status) === 1 && event.saleTime && dayjs().isBefore(dayjs(event.saleTime));
+                                        const displayShowTime = getDisplayShowTime(event);
+                                        const displaySaleTime = getDisplaySaleTime(event);
+                                        const isPresale = Number(event.status) === 1 && displaySaleTime && dayjs().isBefore(dayjs(displaySaleTime));
                                         return (
                                             <div
                                                 key={event.id}
@@ -279,7 +333,7 @@ const EventsPage = () => {
                                                     </div>
 
                                                     <div className="event-list-meta-line">
-                                                        {event.showTime ? dayjs(event.showTime).format('YYYY/MM/DD HH:mm') : '时间待定'}
+                                                        {displayShowTime ? dayjs(displayShowTime).format('YYYY/MM/DD HH:mm') : '时间待定'}
                                                     </div>
 
                                                     <div className="event-list-meta-line" title={`${event.city || ''} ${event.venue || ''}`}>

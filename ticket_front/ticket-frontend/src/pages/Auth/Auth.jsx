@@ -30,7 +30,7 @@ const Auth = () => {
         setTurnstileError(false);
 
         try {
-            reloadTurnstile();
+            turnstileRef.current?.reset?.();
         } catch (e) {
             // reset 失败时直接靠 key 强制重建
         }
@@ -266,20 +266,20 @@ const Auth = () => {
                             {/* 字段渲染逻辑 */}
                             {(loginType === 'sms' || !isLogin) && (
                                 <Form.Item name="phone" rules={[{ required: true, message: '请输入手机号' }, { pattern: /^1\d{10}$/, message: '格式错误' }]}>
-                                    <Input prefix={<Smartphone size={16} color="#17b9b9" />} placeholder="手机号" allowClear maxLength={11} />
+                                    <Input prefix={<Smartphone size={16} color="#FF8899" />} placeholder="手机号" allowClear maxLength={11} />
                                 </Form.Item>
                             )}
 
                             {isLogin && loginType === 'password' && (
                                 <Form.Item name="username" rules={[{ required: true, message: '请输入账号' }]}>
-                                    <Input prefix={<User size={16} color="#17b9b9" />} placeholder="账号 / 手机号" allowClear />
+                                    <Input prefix={<User size={16} color="#FF8899" />} placeholder="账号 / 手机号" allowClear />
                                 </Form.Item>
                             )}
 
                             {(!isLogin || (isLogin && loginType === 'sms')) && (
                                 <div className="code-input-group">
                                     <Form.Item name="code" rules={[{ required: true, message: '请输入验证码' }]}>
-                                        <Input prefix={<ShieldCheck size={16} color="#17b9b9" />} placeholder="验证码" allowClear maxLength={6} />
+                                        <Input prefix={<ShieldCheck size={16} color="#FF8899" />} placeholder="验证码" allowClear maxLength={6} />
                                     </Form.Item>
                                     <Button className="get-code-btn" onClick={handleGetCode} disabled={countdown > 0}>
                                         {countdown > 0 ? `${countdown}s` : '获取验证码'}
@@ -292,17 +292,17 @@ const Auth = () => {
                                     <Form.Item name="username"
                                                validateTrigger="onBlur"
                                                rules={[
-                                        { required: true, message: '请输入昵称' },
-                                        { validator: checkUsernameUnique }
-                                    ]}>
-                                        <Input prefix={<Smile size={16} color="#17b9b9" />} placeholder="昵称" allowClear/>
+                                                   { required: true, message: '请输入昵称' },
+                                                   { validator: checkUsernameUnique }
+                                               ]}>
+                                        <Input prefix={<Smile size={16} color="#FF8899" />} placeholder="昵称" allowClear/>
                                     </Form.Item>
                                 </>
                             )}
 
                             {(loginType === 'password' || !isLogin) && (
                                 <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
-                                    <Input.Password prefix={<Lock size={16} color="#17b9b9" />} placeholder="密码" allowClear/>
+                                    <Input.Password prefix={<Lock size={16} color="#FF8899" />} placeholder="密码" allowClear/>
                                 </Form.Item>
                             )}
 

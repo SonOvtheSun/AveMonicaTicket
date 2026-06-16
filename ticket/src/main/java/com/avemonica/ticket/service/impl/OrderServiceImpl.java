@@ -1,45 +1,44 @@
 package com.avemonica.ticket.service.impl;
 
-import com.avemonica.ticket.dto.EventAddDTO;
-import com.avemonica.ticket.dto.TicketCategoryDTO;
-import com.avemonica.ticket.entity.*;
-import com.avemonica.ticket.exception.BusinessException;
-import com.avemonica.ticket.mapper.*;
-import com.avemonica.ticket.service.EventArtistService;
-import com.avemonica.ticket.service.EventService;
+import com.avemonica.ticket.entity.Event;
+import com.avemonica.ticket.entity.EventSession;
+import com.avemonica.ticket.entity.Order;
+import com.avemonica.ticket.entity.OrderSpectator;
+import com.avemonica.ticket.entity.OrderTicket;
+import com.avemonica.ticket.entity.Spectator;
+import com.avemonica.ticket.entity.TicketCategory;
+import com.avemonica.ticket.mapper.EventMapper;
+import com.avemonica.ticket.mapper.EventSessionMapper;
+import com.avemonica.ticket.mapper.OrderMapper;
+import com.avemonica.ticket.mapper.OrderSpectatorMapper;
+import com.avemonica.ticket.mapper.OrderTicketMapper;
+import com.avemonica.ticket.mapper.SpectatorMapper;
+import com.avemonica.ticket.mapper.TicketCategoryMapper;
 import com.avemonica.ticket.service.OrderService;
-import com.avemonica.ticket.service.UserService;
 import com.avemonica.ticket.vo.OrderVO;
-import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.lang.reflect.Method;
-import java.util.*;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
-
-import org.springframework.security.core.context.SecurityContextHolder;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import org.springframework.util.StringUtils;
 
 @Service
 public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements OrderService {
+
     @Autowired
     private TicketCategoryMapper ticketMapper;
 
@@ -50,51 +49,43 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private EventSessionMapper eventSessionMapper;
 
     @Autowired
-    private ObjectMapper objectMapper;
-
-    @Autowired
     private OrderSpectatorMapper orderSpectatorMapper;
 
     @Autowired
     private SpectatorMapper spectatorMapper;
 
     @Autowired
-    private EventMapper eventMapper; // 假设你已有 EventMapper
-    @Autowired
-    private OrderTicketMapper orderTicketMapper; // 存储真实电子票的 Mapper (对应 tb_order_ticket)
+    private EventMapper eventMapper;
 
+    @Autowired
+    private OrderTicketMapper orderTicketMapper;
+
+    private static final int ORDER_STATUS_PENDING_PAY = 1;
+    private static final int ORDER_STATUS_CANCELED = 2;
+    private static final int ORDER_STATUS_PAID = 3;
+    private static final int ORDER_STATUS_CHECK_PENDING = 6;
+
+    private static final int TICKET_CHECK_STATUS_PENDING_ISSUE = 4;
+    private static final int TICKET_CHECK_STATUS_CHECKED = 2;
+
+    private static final String KEY_SPEC_LOCK = "event:spectator:lock:";
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    /**
+     * Kafka 消费者调用的真正建单逻辑。
+     * 新模型下订单必须绑定 eventId + sessionId + ticketId，不再兼容 event 级别票档。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Order createTicketOrder(Order order, List<Long> spectatorIds) {
-        if (order == null) {
-            throw new RuntimeException("订单参数不能为空");
-        }
-        if (order.getEventId() == null) {
-            throw new RuntimeException("缺少演出信息");
-        }
-        if (order.getSessionId() == null) {
-            throw new RuntimeException("缺少演出场次信息");
-        }
-        if (order.getTicketId() == null) {
-            throw new RuntimeException("缺少票档信息");
-        }
-        if (order.getQuantity() == null || order.getQuantity() <= 0) {
-            throw new RuntimeException("购票数量不正确");
-        }
-        if (spectatorIds == null || spectatorIds.size() != order.getQuantity()) {
-            throw new RuntimeException("实名观演人数量与购票数量不一致");
-        }
+        validateCreateOrderArgs(order, spectatorIds);
 
         TicketCategory ticket = ticketMapper.selectById(order.getTicketId());
         if (ticket == null) {
             throw new RuntimeException("该票档不存在或已下架");
         }
 
-        /*
-         * 多场次模型核心校验：
-         * 票档必须同时属于当前 eventId 和 sessionId。
-         * 这样可以防止用户绕过前端，拿 A 场次的票档 ID 去买 B 场次。
-         */
+        // 防止用户用 A 场次的 ticketId 购买 B 场次。
         if (!Objects.equals(ticket.getEventId(), order.getEventId())
                 || !Objects.equals(ticket.getSessionId(), order.getSessionId())) {
             throw new RuntimeException("票档不属于当前演出场次");
@@ -105,27 +96,20 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new RuntimeException("演出场次不存在或不属于当前演出");
         }
 
-        /*
-         * 库存扣减必须放在所有归属校验之后。
-         * 否则如果先扣库存再发现 sessionId 不合法，会导致库存被错误扣减。
-         */
+        // 所有归属校验通过后再扣库存，避免错误扣减。
         int updateRows = ticketMapper.deductStock(order.getTicketId(), order.getQuantity());
         if (updateRows == 0) {
             throw new RuntimeException("手慢了，该票档库存不足！");
         }
 
-        BigDecimal payPrice = ticket.getPrice().multiply(new BigDecimal(order.getQuantity()));
+        BigDecimal payPrice = ticket.getPrice().multiply(BigDecimal.valueOf(order.getQuantity()));
         order.setPayPrice(payPrice);
-        order.setStatus(1);
+        order.setStatus(ORDER_STATUS_PENDING_PAY);
         order.setOrderNo(IdWorker.getIdStr());
         order.setCreateTime(LocalDateTime.now());
-
         this.save(order);
 
-        /*
-         * 立即将订单与观演人的绑定关系落入 tb_order_spectator。
-         * 这里必须写 sessionId，否则同一个演出下的下午场/晚场会互相冲突。
-         */
+        // 一票一证关系立即落库，且必须写入 sessionId。
         for (Long specId : spectatorIds) {
             OrderSpectator os = new OrderSpectator();
             os.setOrderId(order.getId());
@@ -142,40 +126,34 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void cancelOrder(Long orderId, Long userId) {
-        // 1. 基础校验
         Order order = this.getById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
+        if (order == null || !Objects.equals(order.getUserId(), userId)) {
             throw new RuntimeException("订单不存在或无权操作");
         }
-        if (order.getStatus() != 1) { // 1: 待支付
+        if (!Objects.equals(order.getStatus(), ORDER_STATUS_PENDING_PAY)) {
             throw new RuntimeException("只能取消待支付的订单");
         }
 
-        // 2. 更新订单状态为已取消 (2: 已取消)
-        order.setStatus(2);
+        order.setStatus(ORDER_STATUS_CANCELED);
         this.updateById(order);
 
-        // 3. 回滚库存：把原本扣掉的票还回去
-        // （需要在 TicketCategoryMapper 中补充 addStock 方法：UPDATE tb_ticket_category SET remaining_stock = remaining_stock + #{quantity} WHERE id = #{id}）
         ticketMapper.addStock(order.getTicketId(), order.getQuantity());
 
-        // 4. 查询该订单绑定的所有观演人关系
         List<OrderSpectator> osList = orderSpectatorMapper.selectList(
-                new LambdaQueryWrapper<OrderSpectator>().eq(OrderSpectator::getOrderId, orderId)
+                new LambdaQueryWrapper<OrderSpectator>()
+                        .eq(OrderSpectator::getOrderId, orderId)
+                        .eq(OrderSpectator::getDeleteToken, 0L)
         );
 
         List<String> redisLockKeys = new ArrayList<>();
-
         for (OrderSpectator os : osList) {
-            // 🚨 核心 1：释放 MySQL 唯一索引（将 delete_token 从 0 改为主键 ID）
+            // 释放 MySQL 唯一索引：活跃关系 deleteToken=0，取消后改为自身主键。
             os.setDeleteToken(os.getId());
             orderSpectatorMapper.updateById(os);
 
-            // 收集需要删除的 Redis 短锁 Key
-            redisLockKeys.add("event:spectator:lock:" + order.getEventId() + ":" + order.getSessionId() + ":" + os.getSpectatorId());
+            redisLockKeys.add(KEY_SPEC_LOCK + sceneKey(order.getEventId(), order.getSessionId()) + ":" + os.getSpectatorId());
         }
 
-        // 5. 🚨 核心 2：立刻删除 Redis 短锁，让这些观演人马上重获购票资格！
         if (!redisLockKeys.isEmpty()) {
             redisTemplate.delete(redisLockKeys);
         }
@@ -183,169 +161,204 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Override
     public List<OrderVO> getUserOrderList(Long userId, String status) {
-        // 1. 查询该用户的主订单
         LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<Order>()
                 .eq(Order::getUserId, userId)
                 .orderByDesc(Order::getCreateTime);
 
-        // 待检票/已完成不能直接按订单主表 status 判断。
-        // 因为已支付订单可能主表 status 仍为 3，但票本身还未检票；应基于 ticket.checkStatus 动态归类。
+        // 待检票/已完成基于电子票 checkStatus 动态归类，不能只看订单主表 status。
         boolean dynamicTicketStatusFilter = "3".equals(status) || "6".equals(status);
-        if (status != null && !"all".equals(status)) {
+        if (StringUtils.hasText(status) && !"all".equals(status)) {
             if (dynamicTicketStatusFilter) {
-                wrapper.in(Order::getStatus, 3, 6);
+                wrapper.in(Order::getStatus, ORDER_STATUS_PAID, ORDER_STATUS_CHECK_PENDING);
             } else {
                 wrapper.eq(Order::getStatus, Integer.parseInt(status));
             }
         }
-        List<Order> orders = this.list(wrapper);
 
-        // 2. 组装 VO 返回给前端
+        List<Order> orders = this.list(wrapper);
         List<OrderVO> voList = new ArrayList<>();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
         for (Order order : orders) {
-            OrderVO vo = new OrderVO();
-            vo.setId(order.getId().toString());
-            vo.setCreateTime(order.getCreateTime() != null ? order.getCreateTime().format(formatter) : "");
-            vo.setStatus(order.getStatus());
-            vo.setTotalAmount(order.getPayPrice());
+            OrderVO vo = buildOrderVO(order);
 
-            // 2.1 组装演出信息
-            Event event = eventMapper.selectById(order.getEventId());
-            EventSession session = null;
-            if (order.getSessionId() != null) {
-                session = eventSessionMapper.selectById(order.getSessionId());
-            }
-
-            OrderVO.EventVO eventVO = new OrderVO.EventVO();
-            if (event != null) {
-                eventVO.setName(event.getTitle());
-                eventVO.setPoster(event.getPosterUrl());
-                eventVO.setCity(event.getCity());
-                eventVO.setVenue(event.getVenue());
-
-                /*
-                 * 多场次模型下，订单展示时间必须优先使用 tb_event_session.show_time。
-                 * 如果是旧订单或旧数据没有 sessionId，则回退到 tb_event.show_time。
-                 */
-                LocalDateTime displayShowTime = session != null && session.getShowTime() != null
-                        ? session.getShowTime()
-                        : event.getShowTime();
-
-                eventVO.setTime(displayShowTime != null ? displayShowTime.format(formatter) : "时间待定");
-                eventVO.setRunningTime(event.getRunningTime());
-            }
-            vo.setEvent(eventVO);
-            vo.setEventId(order.getEventId().toString());
-
-            if (order.getStatus() == 3 || order.getStatus() == 6) {
-                // 假设你有 payTime 字段，如果没有可以用 updateTime 代替展示
-                vo.setPaymentMethod("支付宝支付");
-            }
-
-            // 2.2 先查订单绑定的观演人关系，后续给每张电子票补充 viewerName / idCardNo
-            List<OrderSpectator> orderSpectators = orderSpectatorMapper.selectList(
-                    new LambdaQueryWrapper<OrderSpectator>()
-                            .eq(OrderSpectator::getOrderId, order.getId())
-                            .eq(OrderSpectator::getDeleteToken, 0L)
-                            .orderByAsc(OrderSpectator::getId)
-            );
-
-            List<Long> spectatorIds = orderSpectators.stream()
-                    .map(OrderSpectator::getSpectatorId)
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-
-            Map<Long, Object> spectatorMap = buildSpectatorMap(spectatorIds);
-
-            // 2.3 组装电子票信息
-            List<OrderVO.TicketVO> ticketVOs = new ArrayList<>();
-            TicketCategory category = ticketMapper.selectById(order.getTicketId());
-            String categoryName = category != null ? category.getName() : "未知票档";
-
-            if (order.getStatus() == 1 || order.getStatus() == 2) {
-                // 状态A：待支付或已取消 -> 根本还没出票，但仍展示本订单选择的观演人
-                for (int i = 0; i < order.getQuantity(); i++) {
-                    OrderVO.TicketVO tVO = new OrderVO.TicketVO();
-                    tVO.setId("T_PENDING_" + order.getId() + "_" + i);
-                    tVO.setName(categoryName);
-                    tVO.setCheckStatus(4); // 后台配座中/未出票
-                    fillTicketSpectatorInfo(tVO, getSpectatorByIndex(i, orderSpectators, spectatorMap));
-                    ticketVOs.add(tVO);
-                }
-            } else {
-                // 状态B：已支付 -> 去 tb_order_ticket 查真实的票
-                List<OrderTicket> realTickets = orderTicketMapper.selectList(
-                        new LambdaQueryWrapper<OrderTicket>().eq(OrderTicket::getOrderId, order.getId())
-                );
-
-                if (realTickets.isEmpty()) {
-                    // 状态C：虽然支付了，但 Kafka 后台还没消费完，真实的票还没落库
-                    for (int i = 0; i < order.getQuantity(); i++) {
-                        OrderVO.TicketVO tVO = new OrderVO.TicketVO();
-                        tVO.setId("T_QUEUE_" + order.getId() + "_" + i);
-                        tVO.setName(categoryName);
-                        tVO.setCheckStatus(4);
-                        fillTicketSpectatorInfo(tVO, getSpectatorByIndex(i, orderSpectators, spectatorMap));
-                        ticketVOs.add(tVO);
-                    }
-                } else {
-                    // 状态D：完美出票，下发座位号、二维码和对应观演人信息
-                    for (int i = 0; i < realTickets.size(); i++) {
-                        OrderTicket rt = realTickets.get(i);
-                        OrderVO.TicketVO tVO = new OrderVO.TicketVO();
-                        tVO.setId(rt.getId().toString());
-                        tVO.setName(rt.getTicketName());
-                        tVO.setSeatInfo(rt.getSeatInfo());
-                        tVO.setCheckStatus(rt.getCheckStatus());
-                        tVO.setQrCode(rt.getQrCode());
-
-                        // 优先使用电子票表中的 spectatorId；如果实体里暂时没有该字段，则按订单观演人绑定顺序兜底。
-                        Object ticketSpectatorId = readProperty(rt, "getSpectatorId");
-                        Object spectator = null;
-                        if (ticketSpectatorId != null) {
-                            spectator = spectatorMap.get(toLong(ticketSpectatorId));
-                        }
-                        if (spectator == null) {
-                            spectator = getSpectatorByIndex(i, orderSpectators, spectatorMap);
-                        }
-                        fillTicketSpectatorInfo(tVO, spectator);
-
-                        ticketVOs.add(tVO);
-                    }
-                }
-            }
-            vo.setTickets(ticketVOs);
-
-            // 2.4 对“待检票 / 已完成”做动态过滤，避免待检票订单被后端归到已完成列表里
             if (dynamicTicketStatusFilter && !status.equals(resolveOrderCategoryKey(vo))) {
                 continue;
             }
 
             voList.add(vo);
         }
+
         return voList;
     }
 
-    private Map<Long, Object> buildSpectatorMap(List<Long> spectatorIds) {
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteOrder(Long orderId, Long userId) {
+        Order order = this.getById(orderId);
+        if (order == null || !Objects.equals(order.getUserId(), userId)) {
+            throw new RuntimeException("订单不存在或无权操作");
+        }
+
+        if (Objects.equals(order.getStatus(), ORDER_STATUS_PENDING_PAY)
+                || Objects.equals(order.getStatus(), ORDER_STATUS_CHECK_PENDING)) {
+            throw new RuntimeException("当前订单状态不允许删除，请先取消订单");
+        }
+
+        this.removeById(orderId);
+        orderSpectatorMapper.delete(new LambdaQueryWrapper<OrderSpectator>().eq(OrderSpectator::getOrderId, orderId));
+    }
+
+    private void validateCreateOrderArgs(Order order, List<Long> spectatorIds) {
+        if (order == null) throw new RuntimeException("订单参数不能为空");
+        if (order.getUserId() == null) throw new RuntimeException("缺少用户信息");
+        if (order.getEventId() == null) throw new RuntimeException("缺少演出信息");
+        if (order.getSessionId() == null) throw new RuntimeException("缺少演出场次信息");
+        if (order.getTicketId() == null) throw new RuntimeException("缺少票档信息");
+        if (order.getQuantity() == null || order.getQuantity() <= 0) throw new RuntimeException("购票数量不正确");
+        if (spectatorIds == null || spectatorIds.size() != order.getQuantity()) {
+            throw new RuntimeException("实名观演人数量与购票数量不一致");
+        }
+    }
+
+    private OrderVO buildOrderVO(Order order) {
+        OrderVO vo = new OrderVO();
+        vo.setId(String.valueOf(order.getId()));
+        vo.setCreateTime(order.getCreateTime() != null ? order.getCreateTime().format(DATE_TIME_FORMATTER) : "");
+        vo.setStatus(order.getStatus());
+        vo.setTotalAmount(order.getPayPrice());
+        vo.setEventId(String.valueOf(order.getEventId()));
+
+        Event event = eventMapper.selectById(order.getEventId());
+        EventSession session = eventSessionMapper.selectById(order.getSessionId());
+        vo.setEvent(buildEventVO(event, session));
+
+        if (Objects.equals(order.getStatus(), ORDER_STATUS_PAID)
+                || Objects.equals(order.getStatus(), ORDER_STATUS_CHECK_PENDING)) {
+            vo.setPaymentMethod("支付宝支付");
+        }
+
+        List<OrderSpectator> orderSpectators = orderSpectatorMapper.selectList(
+                new LambdaQueryWrapper<OrderSpectator>()
+                        .eq(OrderSpectator::getOrderId, order.getId())
+                        .eq(OrderSpectator::getDeleteToken, 0L)
+                        .orderByAsc(OrderSpectator::getId)
+        );
+
+        List<Long> spectatorIds = orderSpectators.stream()
+                .map(OrderSpectator::getSpectatorId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        Map<Long, Spectator> spectatorMap = buildSpectatorMap(spectatorIds);
+        TicketCategory category = ticketMapper.selectById(order.getTicketId());
+        String categoryName = category != null ? category.getName() : "未知票档";
+
+        vo.setTickets(buildTicketVOs(order, orderSpectators, spectatorMap, categoryName));
+        return vo;
+    }
+
+    private OrderVO.EventVO buildEventVO(Event event, EventSession session) {
+        OrderVO.EventVO eventVO = new OrderVO.EventVO();
+        if (event == null) {
+            return eventVO;
+        }
+
+        eventVO.setName(event.getTitle());
+        eventVO.setPoster(event.getPosterUrl());
+        eventVO.setCity(event.getCity());
+        eventVO.setVenue(event.getVenue());
+        eventVO.setRunningTime(event.getRunningTime());
+
+        // 新模型只使用订单绑定的场次时间；如果缺失，明确提示数据异常，不回退到 event.showTime。
+        eventVO.setTime(session != null && session.getShowTime() != null
+                ? session.getShowTime().format(DATE_TIME_FORMATTER)
+                : "场次信息缺失");
+
+        return eventVO;
+    }
+
+    private List<OrderVO.TicketVO> buildTicketVOs(
+            Order order,
+            List<OrderSpectator> orderSpectators,
+            Map<Long, Spectator> spectatorMap,
+            String categoryName
+    ) {
+        List<OrderVO.TicketVO> ticketVOs = new ArrayList<>();
+
+        if (Objects.equals(order.getStatus(), ORDER_STATUS_PENDING_PAY)
+                || Objects.equals(order.getStatus(), ORDER_STATUS_CANCELED)) {
+            for (int i = 0; i < order.getQuantity(); i++) {
+                OrderVO.TicketVO ticketVO = createPendingTicketVO(order, i, categoryName);
+                fillTicketSpectatorInfo(ticketVO, getSpectatorByIndex(i, orderSpectators, spectatorMap));
+                ticketVOs.add(ticketVO);
+            }
+            return ticketVOs;
+        }
+
+        List<OrderTicket> realTickets = orderTicketMapper.selectList(
+                new LambdaQueryWrapper<OrderTicket>()
+                        .eq(OrderTicket::getOrderId, order.getId())
+                        .orderByAsc(OrderTicket::getId)
+        );
+
+        if (realTickets.isEmpty()) {
+            for (int i = 0; i < order.getQuantity(); i++) {
+                OrderVO.TicketVO ticketVO = createQueueTicketVO(order, i, categoryName);
+                fillTicketSpectatorInfo(ticketVO, getSpectatorByIndex(i, orderSpectators, spectatorMap));
+                ticketVOs.add(ticketVO);
+            }
+            return ticketVOs;
+        }
+
+        for (OrderTicket realTicket : realTickets) {
+            OrderVO.TicketVO ticketVO = new OrderVO.TicketVO();
+            ticketVO.setId(String.valueOf(realTicket.getId()));
+            ticketVO.setName(realTicket.getTicketName());
+            ticketVO.setSeatInfo(realTicket.getSeatInfo());
+            ticketVO.setCheckStatus(realTicket.getCheckStatus());
+            ticketVO.setQrCode(realTicket.getQrCode());
+
+            Spectator spectator = realTicket.getSpectatorId() == null
+                    ? null
+                    : spectatorMap.get(realTicket.getSpectatorId());
+            fillTicketSpectatorInfo(ticketVO, spectator);
+
+            ticketVOs.add(ticketVO);
+        }
+
+        return ticketVOs;
+    }
+
+    private OrderVO.TicketVO createPendingTicketVO(Order order, int index, String categoryName) {
+        OrderVO.TicketVO ticketVO = new OrderVO.TicketVO();
+        ticketVO.setId("T_PENDING_" + order.getId() + "_" + index);
+        ticketVO.setName(categoryName);
+        ticketVO.setCheckStatus(TICKET_CHECK_STATUS_PENDING_ISSUE);
+        return ticketVO;
+    }
+
+    private OrderVO.TicketVO createQueueTicketVO(Order order, int index, String categoryName) {
+        OrderVO.TicketVO ticketVO = new OrderVO.TicketVO();
+        ticketVO.setId("T_QUEUE_" + order.getId() + "_" + index);
+        ticketVO.setName(categoryName);
+        ticketVO.setCheckStatus(TICKET_CHECK_STATUS_PENDING_ISSUE);
+        return ticketVO;
+    }
+
+    private Map<Long, Spectator> buildSpectatorMap(List<Long> spectatorIds) {
         if (spectatorIds == null || spectatorIds.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        List<?> spectators = spectatorMapper.selectBatchIds(spectatorIds);
-        Map<Long, Object> spectatorMap = new HashMap<>();
-        for (Object spectator : spectators) {
-            Object id = readProperty(spectator, "getId");
-            Long spectatorId = toLong(id);
-            if (spectatorId != null) {
-                spectatorMap.put(spectatorId, spectator);
-            }
+        List<Spectator> spectators = spectatorMapper.selectBatchIds(spectatorIds);
+        Map<Long, Spectator> spectatorMap = new HashMap<>();
+        for (Spectator spectator : spectators) {
+            spectatorMap.put(spectator.getId(), spectator);
         }
         return spectatorMap;
     }
 
-    private Object getSpectatorByIndex(int index, List<OrderSpectator> orderSpectators, Map<Long, Object> spectatorMap) {
+    private Spectator getSpectatorByIndex(int index, List<OrderSpectator> orderSpectators, Map<Long, Spectator> spectatorMap) {
         if (orderSpectators == null || index < 0 || index >= orderSpectators.size()) {
             return null;
         }
@@ -353,56 +366,39 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         return spectatorId == null ? null : spectatorMap.get(spectatorId);
     }
 
-    private void fillTicketSpectatorInfo(OrderVO.TicketVO ticketVO, Object spectator) {
-        if (ticketVO == null || spectator == null) return;
-
-        Object id = readProperty(spectator, "getId");
-        if (id != null) {
-            ticketVO.setSpectatorId(String.valueOf(id));
+    private void fillTicketSpectatorInfo(OrderVO.TicketVO ticketVO, Spectator spectator) {
+        if (ticketVO == null || spectator == null) {
+            return;
         }
-
-        String viewerName = firstNotBlank(
-                readStringProperty(spectator, "getName"),
-                readStringProperty(spectator, "getRealName"),
-                readStringProperty(spectator, "getViewerName"),
-                readStringProperty(spectator, "getAudienceName"),
-                readStringProperty(spectator, "getSpectatorName")
-        );
-        ticketVO.setViewerName(viewerName);
-
-        String idCardNo = firstNotBlank(
-                readStringProperty(spectator, "getIdCard"),
-                readStringProperty(spectator, "getIdCardNo"),
-                readStringProperty(spectator, "getIdentityNo"),
-                readStringProperty(spectator, "getCertNo"),
-                readStringProperty(spectator, "getCertificateNo")
-        );
-        ticketVO.setIdCardNo(idCardNo);
+        ticketVO.setSpectatorId(String.valueOf(spectator.getId()));
+        ticketVO.setViewerName(spectator.getName());
+        ticketVO.setIdCardNo(spectator.getIdCard());
     }
 
     private String resolveOrderCategoryKey(OrderVO vo) {
         if (vo == null) return "other";
+
         Integer status = vo.getStatus();
-        if (Objects.equals(status, 1)) return "1"; // 待支付
-        if (Objects.equals(status, 2)) return "2"; // 已取消
-        if (Objects.equals(status, 4)) return "4"; // 退款中等
+        if (Objects.equals(status, ORDER_STATUS_PENDING_PAY)) return "1";
+        if (Objects.equals(status, ORDER_STATUS_CANCELED)) return "2";
+        if (Objects.equals(status, 4)) return "4";
 
         List<OrderVO.TicketVO> tickets = vo.getTickets();
         if (tickets == null || tickets.isEmpty()) {
             return "6";
         }
 
-        // 注意：当前 VO 注释约定 checkStatus：1=未检票，2=已检票，4=未出票。
-        boolean allChecked = tickets.stream().allMatch(t -> Objects.equals(t.getCheckStatus(), 2));
+        boolean allChecked = tickets.stream()
+                .allMatch(ticket -> Objects.equals(ticket.getCheckStatus(), TICKET_CHECK_STATUS_CHECKED));
         if (allChecked) {
-            return "3"; // 已完成
+            return "3";
         }
 
         if (isOrderEventOver(vo)) {
-            return "ended"; // 已结束但未全部检票，不应该归入“已完成”
+            return "ended";
         }
 
-        return "6"; // 待检票
+        return "6";
     }
 
     private boolean isOrderEventOver(OrderVO vo) {
@@ -410,7 +406,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             if (vo == null || vo.getEvent() == null || !StringUtils.hasText(vo.getEvent().getTime())) {
                 return false;
             }
-            LocalDateTime showTime = LocalDateTime.parse(vo.getEvent().getTime(), DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            LocalDateTime showTime = LocalDateTime.parse(vo.getEvent().getTime(), DATE_TIME_FORMATTER);
             int runningTime = vo.getEvent().getRunningTime() == null ? 120 : vo.getEvent().getRunningTime();
             return LocalDateTime.now().isAfter(showTime.plusMinutes(runningTime));
         } catch (Exception e) {
@@ -418,58 +414,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
     }
 
-    private Object readProperty(Object target, String getterName) {
-        if (target == null || !StringUtils.hasText(getterName)) return null;
-        try {
-            Method method = target.getClass().getMethod(getterName);
-            return method.invoke(target);
-        } catch (Exception ignored) {
-            return null;
-        }
+    private String sceneKey(Long eventId, Long sessionId) {
+        return eventId + ":" + sessionId;
     }
-
-    private String readStringProperty(Object target, String getterName) {
-        Object value = readProperty(target, getterName);
-        if (value == null) return null;
-        String text = String.valueOf(value).trim();
-        return text.isEmpty() ? null : text;
-    }
-
-    private String firstNotBlank(String... values) {
-        if (values == null) return null;
-        for (String value : values) {
-            if (StringUtils.hasText(value)) return value;
-        }
-        return null;
-    }
-
-    private Long toLong(Object value) {
-        if (value == null) return null;
-        try {
-            return Long.valueOf(String.valueOf(value));
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void deleteOrder(Long orderId, Long userId) {
-        Order order = this.getById(orderId);
-        if (order == null || !order.getUserId().equals(userId)) {
-            throw new RuntimeException("订单不存在或无权操作");
-        }
-
-        // 只有已取消（2）或已完成（3）的订单允许删除。待支付（1）和待检票（6）不能删！
-        if (order.getStatus() == 1 || order.getStatus() == 6) {
-            throw new RuntimeException("当前订单状态不允许删除，请先取消订单");
-        }
-
-        // 执行物理删除 (如果有逻辑删除需求，可以改为 update status)
-        this.removeById(orderId);
-
-        // 清理关系表，防止脏数据
-        orderSpectatorMapper.delete(new LambdaQueryWrapper<OrderSpectator>().eq(OrderSpectator::getOrderId, orderId));
-    }
-
 }

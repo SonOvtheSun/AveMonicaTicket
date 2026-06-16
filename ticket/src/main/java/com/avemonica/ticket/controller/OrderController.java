@@ -3,7 +3,11 @@ package com.avemonica.ticket.controller;
 import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.dto.OrderCreateMessage;
 import com.avemonica.ticket.dto.TicketIssueMessage;
-import com.avemonica.ticket.entity.*;
+import com.avemonica.ticket.entity.Event;
+import com.avemonica.ticket.entity.EventSession;
+import com.avemonica.ticket.entity.Order;
+import com.avemonica.ticket.entity.OrderSpectator;
+import com.avemonica.ticket.entity.TicketCategory;
 import com.avemonica.ticket.mapper.EventMapper;
 import com.avemonica.ticket.mapper.EventSessionMapper;
 import com.avemonica.ticket.mapper.OrderSpectatorMapper;
@@ -22,52 +26,76 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.util.StringUtils;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/api/order")
 public class OrderController {
 
-    // ==========================================
-    // 依赖注入区
-    // ==========================================
     @Autowired
     private OrderService orderService;
+
     @Autowired
     private StringRedisTemplate redisTemplate;
+
     @Autowired
     private KafkaTemplate<String, String> kafkaTemplate;
+
     @Autowired
     private ObjectMapper objectMapper;
+
     @Autowired
     private TicketCategoryMapper ticketCategoryMapper;
+
     @Autowired
     private OrderSpectatorMapper orderSpectatorMapper;
+
     @Autowired
     private EventMapper eventMapper;
+
     @Autowired
     private EventSessionMapper eventSessionMapper;
 
-    // ==========================================
-    // 常量与配置区 (消除硬编码)
-    // ==========================================
+    /** 演出隐藏状态。隐藏演出不允许进入购票流程。 */
+    private static final int EVENT_STATUS_HIDDEN = 4;
+
+    /** 场次上架状态。只有场次状态为 1 时允许预检/下单。 */
+    private static final int SESSION_STATUS_ON_SALE = 1;
+
+    /** 订单待支付状态。 */
+    private static final int ORDER_STATUS_PENDING_PAY = 1;
+
+    /** 单笔订单最大购票数量。前端也有限制，后端再兜底一次。 */
+    private static final int MAX_TICKET_QUANTITY = 6;
+
+    /** 分布式令牌桶容量与速率。 */
     private static final String BUCKET_CAPACITY = "1500";
     private static final String BUCKET_RATE = "1000";
 
-    // Redis Key 统一前缀管理
+    /** Redis Key 统一前缀。 */
     private static final String KEY_USER_LOCK = "order:lock:user:";
     private static final String KEY_FLOW_BUCKET = "order:flow:bucket:";
     private static final String KEY_SUBMIT_TOKEN = "order:submit:token:";
     private static final String KEY_PURCHASED_SPEC = "event:purchased:spectators:";
     private static final String KEY_SPEC_LOCK = "event:spectator:lock:";
     private static final String KEY_ORDER_RESULT = "order:result:";
-    private static final String KEY_EVENT_STATUS = "event:status:";
 
-    // 黄牛风控 Key
+    /** 黄牛风控 Key。这里按“演出:场次”维度统计，避免不同场次互相污染。 */
     private static final String KEY_SCALPER_BLOCK = "risk:scalper:block:";
     private static final String KEY_RISK_SCORE = "risk:scalper:score:";
     private static final String KEY_RISK_USER_ACTION = "risk:user:action:";
@@ -82,6 +110,11 @@ public class OrderController {
     private DefaultRedisScript<Long> tokenBucketScript;
     private DefaultRedisScript<Long> spectatorLockScript;
 
+    /**
+     * 一票一证短锁 Lua：
+     * 1. 只要一个观演人已被锁定，就整体失败；
+     * 2. 全部未锁定时，批量写入 10 分钟锁。
+     */
     private static final String SPECTATOR_LOCK_LUA =
             "for i, key in ipairs(KEYS) do \n" +
                     "   if redis.call('EXISTS', key) == 1 then return 0 end \n" +
@@ -100,57 +133,36 @@ public class OrderController {
         spectatorLockScript = new DefaultRedisScript<>(SPECTATOR_LOCK_LUA, Long.class);
     }
 
-    // ==========================================
-    // 接口区
-    // ==========================================
-
+    /**
+     * 进入订单确认页前的预检查。
+     * 只允许明确传入 eventId + sessionId 的新数据结构，不再兼容旧的 event 级别购票。
+     */
     @PostMapping("/pre-check")
     public Result<String> preCheck(@RequestBody Map<String, Object> params, HttpServletRequest request) {
         Long userId = getCurrentUserId();
-        if (userId == null) return Result.error(502, "登录已过期，请重新登录");
+        if (userId == null) {
+            return Result.error(502, "登录已过期，请重新登录");
+        }
 
         Long eventId = parseLongParam(params, "eventId");
         Long sessionId = parseLongParam(params, "sessionId");
+        if (eventId == null) return Result.error("演出ID不能为空");
+        if (sessionId == null) return Result.error("场次ID不能为空");
 
-        if (eventId == null) {
-            return Result.error("演出ID不能为空");
-        }
-        if (sessionId == null) {
-            return Result.error("场次ID不能为空");
-        }
-
-        Event event = eventMapper.selectById(eventId);
-        if (event == null || event.getStatus() == 4) {
-            return Result.error("该演出信息不存在或已下架！");
+        PurchaseContext context;
+        try {
+            context = validateSessionForPurchase(eventId, sessionId, null, false);
+        } catch (IllegalArgumentException e) {
+            return Result.error(e.getMessage());
         }
 
-        EventSession session = eventSessionMapper.selectById(sessionId);
-        if (session == null || !Objects.equals(session.getEventId(), eventId)) {
-            return Result.error("场次不存在或不属于当前演出");
-        }
+        String sceneKey = sceneKey(context.event.getId(), context.session.getId());
 
-        Integer activeStatus = session.getStatus() != null ? session.getStatus() : event.getStatus();
-        if (!Objects.equals(activeStatus, 1)) {
-            return Result.error("该场次尚未上架或已停售，无法购票！");
-        }
+        ScalperRiskResult riskResult = checkScalperRisk(userId, sceneKey, request, "preCheck", 1, null);
+        if (riskResult.blocked) return Result.error(2002, riskResult.message);
+        if (riskResult.needCaptcha) return Result.error(2001, riskResult.message);
 
-        LocalDateTime activeSaleTime = session.getSaleTime() != null ? session.getSaleTime() : event.getSaleTime();
-        if (activeSaleTime != null && LocalDateTime.now().isBefore(activeSaleTime)) {
-            return Result.error("该场次尚未正式开售，请等待倒计时结束！");
-        }
-
-        String sceneKey = sceneKey(eventId, sessionId);
-
-        // 0. 黄牛风险预检：同 IP / 同设备 / 同 UA / 同账号异常请求会被要求验证码或临时拦截
-        ScalperRiskResult riskResult = checkScalperRisk(userId, eventId, request, "preCheck", 1, null);
-        if (riskResult.blocked) {
-            return Result.error(2002, riskResult.message);
-        }
-        if (riskResult.needCaptcha) {
-            return Result.error(2001, riskResult.message);
-        }
-
-        // 1. 同一账户防刷防连点
+        // 同一账号短时间连点限制。
         String userIdCountKey = KEY_USER_LOCK + userId;
         Long clickCount = redisTemplate.opsForValue().increment(userIdCountKey);
         if (clickCount != null && clickCount == 1) {
@@ -160,125 +172,104 @@ public class OrderController {
             return Result.error(2001, "请求过于频繁，请输入验证码验证");
         }
 
-        // 2. 全局限流 (分布式令牌桶)
+        // 当前场次维度的全局令牌桶限流。
         String serverFlowKey = KEY_FLOW_BUCKET + sceneKey;
-        Long result = redisTemplate.execute(tokenBucketScript, Collections.singletonList(serverFlowKey), BUCKET_CAPACITY, BUCKET_RATE);
+        Long result = redisTemplate.execute(
+                tokenBucketScript,
+                Collections.singletonList(serverFlowKey),
+                BUCKET_CAPACITY,
+                BUCKET_RATE
+        );
         if (result != null && result == 0L) {
             return Result.error("当前抢票人数过多，排队拥挤，请稍后再试");
         }
 
-        // 3. 生成一次性下单授权 Token
+        // 生成一次性下单授权 Token。Token 绑定用户 + 演出 + 场次。
         String submitToken = generateToken();
         redisTemplate.opsForValue().set(KEY_SUBMIT_TOKEN + userId + ":" + sceneKey, submitToken, 30, TimeUnit.MINUTES);
 
-        // 🚨 核心修复：前端 EventDetail.jsx 中是通过 res.data.data 来获取 submitToken 的
-        // 所以必须把 submitToken 放到 success 的数据载荷中返回
         return Result.success("恭喜进入订单确认页", submitToken);
     }
 
+    /**
+     * 创建订单入口。
+     * 实际扣库存与落库由 Kafka 消费者调用 OrderService#createTicketOrder 完成。
+     */
     @PostMapping("/create")
     public Result<String> createOrder(@RequestBody Map<String, Object> params, HttpServletRequest request) {
         Long userId = getCurrentUserId();
-        if (userId == null) return Result.error(502, "登录已过期，请重新登录");
+        if (userId == null) {
+            return Result.error(502, "登录已过期，请重新登录");
+        }
 
         Long eventId = parseLongParam(params, "eventId");
         Long sessionId = parseLongParam(params, "sessionId");
         Long ticketId = parseLongParam(params, "ticketId");
-
-        if (eventId == null) {
-            return Result.error("演出ID不能为空");
-        }
-        if (sessionId == null) {
-            return Result.error("场次ID不能为空");
-        }
-        if (ticketId == null) {
-            return Result.error("票档ID不能为空");
-        }
-
-        String sceneKey = sceneKey(eventId, sessionId);
-        int quantity = Integer.parseInt(params.get("quantity").toString());
+        Integer quantity = parseIntParam(params, "quantity");
         String clientToken = (String) params.get("submitToken");
 
-
-        // ==========================================
-        // 🚨 核心校验：基于新的 Integer 状态码进行全面拦截
-        // 状态码：1-预售中；2-在售；3-停售；4-隐藏；-1-不存在
-        // ==========================================
-        Event event = eventMapper.selectById(eventId);
-        if (event == null || event.getStatus() == 4) {
-            return Result.error("该演出信息不存在或已下架！");
+        if (eventId == null) return Result.error("演出ID不能为空");
+        if (sessionId == null) return Result.error("场次ID不能为空");
+        if (ticketId == null) return Result.error("票档ID不能为空");
+        if (quantity == null || quantity <= 0 || quantity > MAX_TICKET_QUANTITY) {
+            return Result.error("购票数量不正确");
+        }
+        if (!StringUtils.hasText(clientToken)) {
+            return Result.error("非法请求或页面已过期，请重新从详情页进入！");
         }
 
-        EventSession session = eventSessionMapper.selectById(sessionId);
-        if (session == null || !Objects.equals(session.getEventId(), eventId)) {
-            return Result.error("场次不存在或不属于当前演出");
+        PurchaseContext context;
+        try {
+            context = validateSessionForPurchase(eventId, sessionId, ticketId, true);
+        } catch (IllegalArgumentException e) {
+            return Result.error(e.getMessage());
         }
 
-        Integer activeStatus = session.getStatus() != null ? session.getStatus() : event.getStatus();
-        if (!Objects.equals(activeStatus, 1)) {
-            return Result.error("该场次已停售，无法购票！");
-        }
+        String sceneKey = sceneKey(context.event.getId(), context.session.getId());
 
-        LocalDateTime activeSaleTime = session.getSaleTime() != null ? session.getSaleTime() : event.getSaleTime();
-        if (activeSaleTime != null && LocalDateTime.now().isBefore(activeSaleTime)) {
-            return Result.error("该场次正处于预售/预约阶段，暂未开放正式购票！");
-        }
-
-        TicketCategory ticket = ticketCategoryMapper.selectById(ticketId);
-        if (ticket == null
-                || !Objects.equals(ticket.getEventId(), eventId)
-                || !Objects.equals(ticket.getSessionId(), sessionId)) {
-            return Result.error("票档不存在或不属于当前场次");
-        }
-
-        // 1. 防越权 API 绕过校验
+        // 校验一次性授权 Token，防止绕过详情页和预检直接下单。
         String redisTokenKey = KEY_SUBMIT_TOKEN + userId + ":" + sceneKey;
         String serverToken = redisTemplate.opsForValue().get(redisTokenKey);
         if (serverToken == null || !serverToken.equals(clientToken)) {
             return Result.error("非法请求或页面已过期，请重新从详情页进入！");
         }
 
-        // 2. 观演人参数校验
         Object rawSpectators = params.get("spectatorIds");
-        if (!(rawSpectators instanceof List)) return Result.error("非法请求：观演人参数格式错误！");
+        if (!(rawSpectators instanceof List<?>)) {
+            return Result.error("非法请求：观演人参数格式错误！");
+        }
 
         List<Long> spectatorIds = ((List<?>) rawSpectators).stream()
                 .map(id -> Long.valueOf(id.toString()))
                 .toList();
-
-        if (spectatorIds.size() != quantity) return Result.error("非法请求：实名观演人数量与购票数量不符！");
-
-        // 2.1 黄牛风险复检：下单阶段结合购票数量和观演人去重再次评估
-        ScalperRiskResult riskResult = checkScalperRisk(userId, eventId, request, "create", quantity, spectatorIds);
-        if (riskResult.blocked) {
-            return Result.error(2002, riskResult.message);
-        }
-        if (riskResult.needCaptcha) {
-            return Result.error(2001, riskResult.message);
+        if (spectatorIds.size() != quantity) {
+            return Result.error("非法请求：实名观演人数量与购票数量不符！");
         }
 
-        // Token 通过且风控通过后再删除，避免验证码/风险提示导致用户白白丢失令牌
+        ScalperRiskResult riskResult = checkScalperRisk(userId, sceneKey, request, "create", quantity, spectatorIds);
+        if (riskResult.blocked) return Result.error(2002, riskResult.message);
+        if (riskResult.needCaptcha) return Result.error(2001, riskResult.message);
+
+        // 风控通过后再删除 Token，避免验证码/风险提示导致用户白白丢失令牌。
         redisTemplate.delete(redisTokenKey);
 
-        // 3. 内存极速预检：历史已购永久名单
+        // 已购名单按“演出:场次”隔离，允许同一观演人购买同演出不同场次。
         String purchasedSetKey = KEY_PURCHASED_SPEC + sceneKey;
         for (Long specId : spectatorIds) {
             if (Boolean.TRUE.equals(redisTemplate.opsForSet().isMember(purchasedSetKey, String.valueOf(specId)))) {
-                return Result.error("您选择的观演人中已有人购买过本场演出门票，请勿重复购买！");
+                return Result.error("您选择的观演人中已有人购买过本场次门票，请勿重复购买！");
             }
         }
 
-        // 4. 高并发一票一证防御 (锁定 10 分钟)
+        // 待支付短锁也按“演出:场次:观演人”隔离。
         List<String> lockKeys = spectatorIds.stream()
                 .map(id -> KEY_SPEC_LOCK + sceneKey + ":" + id)
                 .toList();
-
         Long lockResult = redisTemplate.execute(spectatorLockScript, lockKeys, "600");
         if (lockResult == null || lockResult == 0L) {
-            return Result.error("您选择的观演人中，有人已有本场演出的待支付订单或已购票，请勿重复购买！");
+            return Result.error("您选择的观演人中，有人已有本场次的待支付订单或已购票，请勿重复购买！");
         }
 
-        // 5. 预检通过，发送至 Kafka 处理队列
         String queueToken = generateToken();
         OrderCreateMessage msg = new OrderCreateMessage();
         msg.setQueueToken(queueToken);
@@ -293,7 +284,7 @@ public class OrderController {
             kafkaTemplate.send("order-create-topic", objectMapper.writeValueAsString(msg));
             return Result.success("排队中", queueToken);
         } catch (Exception e) {
-            redisTemplate.delete(lockKeys); // 补偿机制
+            redisTemplate.delete(lockKeys);
             return Result.error("系统繁忙，请稍后再试");
         }
     }
@@ -323,23 +314,24 @@ public class OrderController {
         Order order = orderService.getById(orderId);
 
         if (order == null) return Result.error("订单不存在");
-        if (order.getStatus() != 1) return Result.error("订单当前状态无法支付");
+        if (order.getStatus() != ORDER_STATUS_PENDING_PAY) return Result.error("订单当前状态无法支付");
+        if (order.getSessionId() == null) return Result.error("订单缺少场次信息，无法支付");
 
         order.setStatus(3);
         orderService.updateById(order);
 
         try {
             List<OrderSpectator> osList = orderSpectatorMapper.selectList(
-                    new LambdaQueryWrapper<OrderSpectator>().eq(OrderSpectator::getOrderId, orderId)
+                    new LambdaQueryWrapper<OrderSpectator>()
+                            .eq(OrderSpectator::getOrderId, orderId)
+                            .eq(OrderSpectator::getDeleteToken, 0L)
             );
 
             List<Long> spectatorIds = osList.stream().map(OrderSpectator::getSpectatorId).toList();
-
             if (!spectatorIds.isEmpty()) {
                 TicketCategory ticket = ticketCategoryMapper.selectById(order.getTicketId());
-                String ticketName = (ticket != null) ? ticket.getName() : "未知票档";
+                String ticketName = ticket != null ? ticket.getName() : "未知票档";
 
-                // 发送出票消息
                 TicketIssueMessage message = new TicketIssueMessage(
                         orderId,
                         order.getEventId(),
@@ -350,7 +342,6 @@ public class OrderController {
                 );
                 kafkaTemplate.send("order-ticket-issue-topic", objectMapper.writeValueAsString(message));
 
-                // 加入 Redis 永久已购名单
                 String purchasedSetKey = KEY_PURCHASED_SPEC + sceneKey(order.getEventId(), order.getSessionId());
                 String[] specIdArray = spectatorIds.stream().map(String::valueOf).toArray(String[]::new);
                 redisTemplate.opsForSet().add(purchasedSetKey, specIdArray);
@@ -358,39 +349,25 @@ public class OrderController {
             }
         } catch (Exception e) {
             e.printStackTrace();
-            // TODO: 记录报警或抛入死信队列
+            // 支付已成功但出票消息异常时，应接入报警或死信队列补偿。
         }
 
         return Result.success("支付成功，正在为您出票");
     }
 
-    /**
-     * 获取我的订单列表
-     */
     @GetMapping("/list")
     public Result<List<com.avemonica.ticket.vo.OrderVO>> getOrderList(@RequestParam(defaultValue = "all") String status) {
-        Long userId = null;
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            userId = Long.valueOf(((User) auth.getPrincipal()).getUsername());
-        } catch (Exception e) {
+        Long userId = getCurrentUserId();
+        if (userId == null) {
             return Result.error("登录已过期，请重新登录");
         }
-
-        List<com.avemonica.ticket.vo.OrderVO> list = orderService.getUserOrderList(userId, status);
-        return Result.success(list);
+        return Result.success(orderService.getUserOrderList(userId, status));
     }
 
-    /**
-     * 删除订单 (前端点垃圾桶图标触发)
-     */
     @PostMapping("/delete/{orderId}")
     public Result<String> deleteOrder(@PathVariable Long orderId) {
-        Long userId = null;
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            userId = Long.valueOf(((User) auth.getPrincipal()).getUsername());
-        } catch (Exception e) {
+        Long userId = getCurrentUserId();
+        if (userId == null) {
             return Result.error("登录已过期，请重新登录");
         }
 
@@ -402,13 +379,46 @@ public class OrderController {
         }
     }
 
-    // ==========================================
-    // 私有辅助方法区
-    // ==========================================
+    private PurchaseContext validateSessionForPurchase(Long eventId, Long sessionId, Long ticketId, boolean requireTicket) {
+        Event event = eventMapper.selectById(eventId);
+        if (event == null || Objects.equals(event.getStatus(), EVENT_STATUS_HIDDEN)) {
+            throw new IllegalArgumentException("该演出信息不存在或已下架！");
+        }
 
-    /**
-     * 统一获取当前登录用户的 ID
-     */
+        EventSession session = eventSessionMapper.selectById(sessionId);
+        if (session == null || !Objects.equals(session.getEventId(), eventId)) {
+            throw new IllegalArgumentException("场次不存在或不属于当前演出");
+        }
+
+        if (!Objects.equals(session.getStatus(), SESSION_STATUS_ON_SALE)) {
+            throw new IllegalArgumentException("该场次尚未上架或已停售，无法购票！");
+        }
+
+        if (session.getSaleTime() == null) {
+            throw new IllegalArgumentException("该场次尚未配置开票时间，暂不可购票！");
+        }
+
+        if (LocalDateTime.now().isBefore(session.getSaleTime())) {
+            throw new IllegalArgumentException("该场次尚未正式开售，请等待倒计时结束！");
+        }
+
+        TicketCategory ticket = null;
+        if (requireTicket) {
+            ticket = ticketCategoryMapper.selectById(ticketId);
+            if (ticket == null
+                    || !Objects.equals(ticket.getEventId(), eventId)
+                    || !Objects.equals(ticket.getSessionId(), sessionId)) {
+                throw new IllegalArgumentException("票档不存在或不属于当前场次");
+            }
+        }
+
+        PurchaseContext context = new PurchaseContext();
+        context.event = event;
+        context.session = session;
+        context.ticket = ticket;
+        return context;
+    }
+
     private Long getCurrentUserId() {
         try {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -418,50 +428,9 @@ public class OrderController {
         }
     }
 
-    /**
-     * 获取演出状态（带数据库兜底及回写机制）
-     * 返回值：1-预售中；2-在售；3-停售；4-隐藏；-1-演出不存在
-     */
-    private Integer getEventStatusWithFallback(Long eventId) {
-        String redisKey = KEY_EVENT_STATUS + eventId;
-
-        // 1. 尝试从 Redis 获取 (Redis 里存的是字符串)
-        String statusStr = redisTemplate.opsForValue().get(redisKey);
-        if (statusStr != null) {
-            return Integer.valueOf(statusStr);
-        }
-
-        // 2. Redis 未查到，从数据库兜底调取
-        Event event = eventMapper.selectById(eventId);
-        if (event != null && event.getStatus() != null) {
-            Integer status = event.getStatus();
-
-            // 3. 顺手回写 Redis，将 int 转为 String 存入，设置10分钟过期
-            redisTemplate.opsForValue().set(
-                    redisKey,
-                    String.valueOf(status),
-                    10,
-                    java.util.concurrent.TimeUnit.MINUTES
-            );
-
-            return status;
-        }
-
-        // 4. 如果数据库也完全没有这条记录，返回 -1
-        return -1;
-    }
-
-
-    /**
-     * 黄牛风险检测：不直接替代实名/库存/令牌校验，而是在这些校验之前增加风险评分。
-     * 设计目标：
-     * 1. 正常用户偶发刷新不受影响；
-     * 2. 同账号、同 IP、同设备、同 UA 在短时间内高频请求时触发验证码；
-     * 3. 极端异常流量临时封禁，保护后端队列和库存服务。
-     */
     private ScalperRiskResult checkScalperRisk(
             Long userId,
-            Long eventId,
+            String sceneKey,
             HttpServletRequest request,
             String stage,
             Integer quantity,
@@ -474,7 +443,7 @@ public class OrderController {
             deviceId = normalizeHeader(request.getHeader("X-Fingerprint"));
         }
 
-        String blockKey = KEY_SCALPER_BLOCK + eventId + ":" + userId;
+        String blockKey = KEY_SCALPER_BLOCK + sceneKey + ":" + userId;
         if (Boolean.TRUE.equals(redisTemplate.hasKey(blockKey))) {
             return ScalperRiskResult.block("操作过于频繁，已触发临时风控，请稍后再试");
         }
@@ -482,8 +451,7 @@ public class OrderController {
         int risk = 0;
         List<String> reasons = new ArrayList<>();
 
-        // 1. 单账号短时间高频动作：同一用户 10 秒内连续 preCheck/create
-        Long userActionCount = incrWithExpire(KEY_RISK_USER_ACTION + eventId + ":" + userId + ":" + stage, 10);
+        Long userActionCount = incrWithExpire(KEY_RISK_USER_ACTION + sceneKey + ":" + userId + ":" + stage, 10);
         if (userActionCount != null && userActionCount > 5) {
             risk += 45;
             reasons.add("账号请求过于频繁");
@@ -492,8 +460,7 @@ public class OrderController {
             reasons.add("账号短时间多次请求");
         }
 
-        // 2. 同一 IP 对同一演出的请求洪峰
-        Long ipActionCount = incrWithExpire(KEY_RISK_IP_EVENT_ACTION + eventId + ":" + ip + ":" + stage, 60);
+        Long ipActionCount = incrWithExpire(KEY_RISK_IP_EVENT_ACTION + sceneKey + ":" + ip + ":" + stage, 60);
         if (ipActionCount != null && ipActionCount > 80) {
             risk += 70;
             reasons.add("同一网络请求异常密集");
@@ -502,8 +469,7 @@ public class OrderController {
             reasons.add("同一网络多人高频请求");
         }
 
-        // 3. 同 IP 短时间内出现大量不同账号：典型工作室/脚本池特征
-        String ipUsersKey = KEY_RISK_IP_EVENT_USERS + eventId + ":" + ip;
+        String ipUsersKey = KEY_RISK_IP_EVENT_USERS + sceneKey + ":" + ip;
         redisTemplate.opsForSet().add(ipUsersKey, String.valueOf(userId));
         redisTemplate.expire(ipUsersKey, 10, TimeUnit.MINUTES);
         Long ipUserCount = redisTemplate.opsForSet().size(ipUsersKey);
@@ -515,9 +481,8 @@ public class OrderController {
             reasons.add("同一网络下多账号请求");
         }
 
-        // 4. 同一设备指纹绑定多个账号
         if (StringUtils.hasText(deviceId)) {
-            String deviceUsersKey = KEY_RISK_DEVICE_EVENT_USERS + eventId + ":" + deviceId;
+            String deviceUsersKey = KEY_RISK_DEVICE_EVENT_USERS + sceneKey + ":" + deviceId;
             redisTemplate.opsForSet().add(deviceUsersKey, String.valueOf(userId));
             redisTemplate.expire(deviceUsersKey, 30, TimeUnit.MINUTES);
             Long deviceUserCount = redisTemplate.opsForSet().size(deviceUsersKey);
@@ -530,9 +495,8 @@ public class OrderController {
             }
         }
 
-        // 5. 同一 UA 对同一演出聚集过多账号，作为弱信号，只加少量分
         if (StringUtils.hasText(ua)) {
-            String uaUsersKey = KEY_RISK_UA_EVENT_USERS + eventId + ":" + Math.abs(ua.hashCode());
+            String uaUsersKey = KEY_RISK_UA_EVENT_USERS + sceneKey + ":" + Math.abs(ua.hashCode());
             redisTemplate.opsForSet().add(uaUsersKey, String.valueOf(userId));
             redisTemplate.expire(uaUsersKey, 10, TimeUnit.MINUTES);
             Long uaUserCount = redisTemplate.opsForSet().size(uaUsersKey);
@@ -542,7 +506,6 @@ public class OrderController {
             }
         }
 
-        // 6. 下单数量和观演人参数异常
         if (quantity != null) {
             if (quantity >= 5) {
                 risk += 30;
@@ -560,13 +523,11 @@ public class OrderController {
             }
         }
 
-        // 7. 累计风险分：避免脚本分散到多个阶段规避检测
-        String scoreKey = KEY_RISK_SCORE + eventId + ":" + userId;
+        String scoreKey = KEY_RISK_SCORE + sceneKey + ":" + userId;
         Long totalRisk = redisTemplate.opsForValue().increment(scoreKey, risk);
         redisTemplate.expire(scoreKey, 30, TimeUnit.MINUTES);
 
         int finalRisk = totalRisk == null ? risk : totalRisk.intValue();
-
         if (finalRisk >= RISK_BLOCK_SCORE) {
             redisTemplate.opsForValue().set(blockKey, "1", 10, TimeUnit.MINUTES);
             return ScalperRiskResult.block("检测到异常抢票行为，已触发临时风控，请稍后再试");
@@ -589,29 +550,54 @@ public class OrderController {
     }
 
     private String getClientIp(HttpServletRequest request) {
-        String[] headers = {
-                "X-Forwarded-For",
-                "X-Real-IP",
-                "Proxy-Client-IP",
-                "WL-Proxy-Client-IP"
-        };
-
+        String[] headers = {"X-Forwarded-For", "X-Real-IP", "Proxy-Client-IP", "WL-Proxy-Client-IP"};
         for (String header : headers) {
             String value = request.getHeader(header);
             if (StringUtils.hasText(value) && !"unknown".equalsIgnoreCase(value)) {
                 return value.split(",")[0].trim();
             }
         }
-
         return request.getRemoteAddr();
     }
 
     private String normalizeHeader(String value) {
-        if (!StringUtils.hasText(value)) {
-            return "";
-        }
+        if (!StringUtils.hasText(value)) return "";
         value = value.trim();
         return value.length() > 180 ? value.substring(0, 180) : value;
+    }
+
+    private String generateToken() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String sceneKey(Long eventId, Long sessionId) {
+        return eventId + ":" + sessionId;
+    }
+
+    private Long parseLongParam(Map<String, Object> params, String key) {
+        Object value = params.get(key);
+        if (value == null) return null;
+        try {
+            return Long.valueOf(value.toString());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Integer parseIntParam(Map<String, Object> params, String key) {
+        Object value = params.get(key);
+        if (value == null) return null;
+        try {
+            return Integer.valueOf(value.toString());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static class PurchaseContext {
+        private Event event;
+        private EventSession session;
+        private TicketCategory ticket;
     }
 
     private static class ScalperRiskResult {
@@ -636,24 +622,5 @@ public class OrderController {
         private static ScalperRiskResult block(String message) {
             return new ScalperRiskResult(true, false, message);
         }
-    }
-
-    /**
-     * 统一生成无横线的 UUID Token
-     */
-    private String generateToken() {
-        return UUID.randomUUID().toString().replace("-", "");
-    }
-
-    private String sceneKey(Long eventId, Long sessionId) {
-        return eventId + ":" + sessionId;
-    }
-
-    private Long parseLongParam(Map<String, Object> params, String key) {
-        Object value = params.get(key);
-        if (value == null) {
-            return null;
-        }
-        return Long.valueOf(value.toString());
     }
 }

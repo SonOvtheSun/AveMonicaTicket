@@ -63,7 +63,7 @@
     border-radius: 50%;  /* 核心：变成正圆 */
     overflow: hidden;    /* 核心：超出圆形的图片部分会被切掉 */
 
-    /* 青春色边框：使用你喜欢的湖蓝色 */
+    /* 青春色边框：使用你喜欢的主题粉色 */
     border: 3px solid #FF8899;
 
     /* 背景色：给 Logo 一个白底或浅色底，防止透明 Logo 与毛玻璃混在一起 */
@@ -98,11 +98,11 @@
 /* --- 登录方式切换器 (青春主题) --- */
 .login-type-switch {
     display: flex;
-    background: rgba(23, 185, 185, 0.08); /* 极淡的湖蓝底色 */
+    background: rgba(255, 136, 153, 0.08); /* 极淡的主题粉底色 */
     border-radius: 8px;
     margin-bottom: 24px;
     padding: 4px;
-    border: 1px solid rgba(23, 185, 185, 0.1);
+    border: 1px solid rgba(255, 136, 153, 0.10);
 }
 
 .login-type-btn {
@@ -117,9 +117,9 @@
 }
 
 .login-type-btn.active {
-    /* --- 关键修改：激活状态采用青春湖蓝 --- */
-    background: rgba(23, 185, 185, 0.15);
-    color: #17b9b9; /* 青春湖蓝 */
+    /* --- 关键修改：激活状态采用青春主题粉 --- */
+    background: rgba(255, 136, 153, 0.15);
+    color: #FF8899; /* 青春主题粉 */
     font-weight: 600;
 }
 
@@ -132,11 +132,11 @@
     padding: 10px 12px;
 }
 
-/* 输入框聚焦样式 (--- 关键修改：改为湖蓝 ---) */
+/* 输入框聚焦样式 (--- 关键修改：改为主题粉 ---) */
 .auth-card .ant-input:focus,
 .auth-card .ant-input-affix-wrapper-focused {
-    border-color: #17b9b9 !important; /* 聚焦边框改为湖蓝 */
-    box-shadow: 0 0 0 2px rgba(23, 185, 185, 0.15) !important;
+    border-color: #FF8899 !important; /* 聚焦边框改为主题粉 */
+    box-shadow: 0 0 0 2px rgba(255, 136, 153, 0.15) !important;
     background-color: #ffffff !important;
 }
 
@@ -154,7 +154,7 @@
     color: rgba(94, 94, 102, 0.4) !important;
 }
 
-/* --- 验证码输入框组合 (改为青春 lake-blue 主题并彻底修正) --- */
+/* --- 验证码输入框组合 (改为青春 theme-pink 主题并彻底修正) --- */
 .code-input-group {
     display: flex;
     gap: 10px;
@@ -177,13 +177,13 @@
     align-items: center;
     justify-content: center;
 
-    /* 2. 颜色美化：降低透明度，使其清晰可见，并采用青春湖蓝调色 */
-    /* 文字改为更清晰、不透明的湖蓝 */
-    color: #17b9b9 !important;
-    /* 稍微增加背景的湖蓝色不透明度 */
-    background: rgba(23, 185, 185, 0.15) !important;
+    /* 2. 颜色美化：降低透明度，使其清晰可见，并采用青春主题粉调色 */
+    /* 文字改为更清晰、不透明的主题粉 */
+    color: #FF8899 !important;
+    /* 稍微增加背景的主题粉色不透明度 */
+    background: rgba(255, 136, 153, 0.15) !important;
     /* 稍微增加边框的不透明度，使其更像一个按钮 */
-    border: 1px solid rgba(23, 185, 185, 0.4) !important;
+    border: 1px solid rgba(255, 136, 153, 0.40) !important;
     border-radius: 8px !important;
     font-weight: 500 !important;
 }
@@ -195,25 +195,25 @@
     background: rgba(0, 0, 0, 0.05) !important;
 }
 
-/* --- 核心按钮 (--- 关键修改：改为充满活力的湖蓝背景，文字改为白色 ---) --- */
+/* --- 核心按钮 (--- 关键修改：改为充满活力的主题粉背景，文字改为白色 ---) --- */
 .auth-submit-btn {
-    background: #17b9b9 !important; /* 青春湖蓝背景 */
+    background: #FF8899 !important; /* 青春主题粉背景 */
     border: none !important;
     color: #ffffff !important; /* 按钮文字改为白色以确保清晰 */
     height: 45px !important;
     font-weight: 600 !important;
     margin-top: 5px;
     border-radius: 8px !important;
-    box-shadow: 0 4px 14px rgba(23, 185, 185, 0.3) !important; /* 增加湖蓝发光阴影 */
+    box-shadow: 0 4px 14px rgba(255, 136, 153, 0.30) !important; /* 增加主题粉发光阴影 */
     transition: all 0.3s;
 }
 
 .auth-submit-btn:hover, .auth-submit-btn:focus {
-    background: #1ccfcf !important; /* 悬停时稍微变亮 */
-    box-shadow: 0 6px 20px rgba(23, 185, 185, 0.4) !important;
+    background: #ff6b80 !important; /* 悬停时稍微变亮 */
+    box-shadow: 0 6px 20px rgba(255, 136, 153, 0.40) !important;
 }
 
-/* --- 切换文本和链接 (--- 关键修改：改为湖蓝链接 ---) --- */
+/* --- 切换文本和链接 (--- 关键修改：改为主题粉链接 ---) --- */
 .auth-switch-text {
     text-align: center;
     margin-top: 15px;
@@ -221,7 +221,7 @@
     font-size: 13px;
 }
 .auth-switch-link {
-    color: #17b9b9; /* 湖蓝链接 */
+    color: #FF8899; /* 主题粉链接 */
     cursor: pointer;
     font-weight: 600;
     margin-left: 5px;
@@ -251,7 +251,7 @@
     min-height: 60px;
 }
 
-/* --- 弹窗修改 (同步青春湖蓝主题) --- */
+/* --- 弹窗修改 (同步青春主题粉主题) --- */
 .dark-modal .ant-modal-content {
     background: rgba(255, 240, 245, 0.8) !important;
     backdrop-filter: blur(10px) !important;
@@ -264,8 +264,8 @@
 /* --- 修改弹窗也为浅色毛玻璃 --- */
 .dark-modal .ant-modal-title {
     background: transparent !important;
-    /* 修改这里：从深金色改为青春湖蓝标题 */
-    color: #17b9b9 !important;
+    /* 修改这里：从深金色改为青春主题粉标题 */
+    color: #FF8899 !important;
     text-align: left;
 }
 
@@ -331,12 +331,12 @@
 
 .auth-back-btn:hover {
     background: rgba(255, 240, 245, 0.8);
-    /* 悬停时变为我们的主题湖蓝/粉色，这里默认用湖蓝，更有科技感 */
-    color: #17b9b9;
+    /* 悬停时变为我们的主题主题粉/粉色，这里默认用主题粉，更有科技感 */
+    color: #FF8899;
     /* 悬停时图标和文字微微向左移动，暗示“返回”方向 */
     transform: translateX(-4px);
-    box-shadow: 0 4px 15px rgba(23, 185, 185, 0.15);
-    border-color: rgba(23, 185, 185, 0.3);
+    box-shadow: 0 4px 15px rgba(255, 136, 153, 0.15);
+    border-color: rgba(255, 136, 153, 0.30);
 }
 
 .auth-back-btn svg {
@@ -411,4 +411,70 @@
 .modal-submit-btn:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px rgba(255, 136, 153, 0.6) !important;
+}
+
+/* =========================
+   全站统一色覆盖：主题粉
+   放在文件底部，兜底覆盖旧的青绿色样式
+   ========================= */
+:root {
+    --auth-primary: #FF8899;
+    --auth-primary-deep: #ff6b80;
+    --auth-primary-soft: rgba(255, 136, 153, 0.12);
+    --auth-primary-border: rgba(255, 136, 153, 0.34);
+}
+
+.login-type-switch {
+    background: rgba(255, 136, 153, 0.08) !important;
+    border-color: rgba(255, 136, 153, 0.14) !important;
+}
+
+.login-type-btn.active {
+    background: rgba(255, 136, 153, 0.16) !important;
+    color: var(--auth-primary) !important;
+}
+
+.auth-card .ant-input:focus,
+.auth-card .ant-input-affix-wrapper-focused {
+    border-color: var(--auth-primary) !important;
+    box-shadow: 0 0 0 2px rgba(255, 136, 153, 0.15) !important;
+}
+
+.get-code-btn {
+    color: var(--auth-primary) !important;
+    background: rgba(255, 136, 153, 0.14) !important;
+    border-color: rgba(255, 136, 153, 0.38) !important;
+}
+
+.get-code-btn:not(:disabled):hover {
+    color: var(--auth-primary-deep) !important;
+    background: rgba(255, 136, 153, 0.20) !important;
+    border-color: rgba(255, 136, 153, 0.58) !important;
+}
+
+.auth-submit-btn {
+    background: linear-gradient(135deg, var(--auth-primary), var(--auth-primary-deep)) !important;
+    box-shadow: 0 4px 14px rgba(255, 136, 153, 0.30) !important;
+}
+
+.auth-submit-btn:hover,
+.auth-submit-btn:focus {
+    background: linear-gradient(135deg, #ff93a3, var(--auth-primary-deep)) !important;
+    box-shadow: 0 6px 20px rgba(255, 136, 153, 0.40) !important;
+}
+
+.auth-switch-link,
+.dark-modal .ant-modal-title,
+.auth-back-btn:hover {
+    color: var(--auth-primary) !important;
+}
+
+.auth-back-btn:hover {
+    box-shadow: 0 4px 15px rgba(255, 136, 153, 0.15) !important;
+    border-color: rgba(255, 136, 153, 0.30) !important;
+}
+
+.auth-logo-wrapper {
+    border-color: var(--auth-primary) !important;
+    box-shadow: 0 0 15px rgba(255, 136, 153, 0.40) !important;
 }
