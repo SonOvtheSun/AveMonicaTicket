@@ -163,32 +163,42 @@ const UserOrders = () => {
 
     // 渲染订单状态。不要只看 order.status，已支付订单要结合电子票 checkStatus 和场次时间判断。
     const getDynamicOrderStatus = (order) => {
-        if (Number(order.status) === 1) return { key: '1', color: 'warning', text: '待支付' };
-        if (Number(order.status) === 2) return { key: 'other', color: 'default', text: '已取消' };
-        if (Number(order.status) === 4) return { key: 'other', color: 'processing', text: '退款中' };
+        const status = Number(order.status);
 
-        const tickets = Array.isArray(order.tickets) ? order.tickets : [];
-        if (tickets.length === 0) {
-            return { key: '6', color: 'processing', text: '出票中' };
+        // 主订单状态优先级最高
+        if (status === 1) return { key: '1', color: 'warning', text: '待支付' };
+        if (status === 2) return { key: '2', color: 'default', text: '已取消' };
+        if (status === 3) return { key: '3', color: 'success', text: '已完成' };
+        if (status === 4) return { key: '4', color: 'red', text: '申请退款中' };
+        if (status === 5) return { key: '5', color: 'error', text: '异常订单' };
+        if (status === 7) return { key: '7', color: 'grey', text: '已退票' };
+
+        // status=6：已支付但未检票。这里再结合电子票状态细分展示。
+        if (status === 6) {
+            const tickets = Array.isArray(order.tickets) ? order.tickets : [];
+
+            if (tickets.length === 0) {
+                return { key: '6', color: 'processing', text: '出票中' };
+            }
+
+            const allChecked = tickets.every(isTicketChecked);
+            if (allChecked) {
+                return { key: '3', color: 'success', text: '已完成' };
+            }
+
+            const allUnissued = tickets.every(isTicketUnissued);
+            if (allUnissued) {
+                return { key: '6', color: 'processing', text: '出票中' };
+            }
+
+            if (isOrderEventOver(order)) {
+                return { key: 'other', color: 'default', text: '已结束' };
+            }
+
+            return { key: '6', color: 'blue', text: '待检票' };
         }
 
-        const allChecked = tickets.every(isTicketChecked);
-        if (allChecked) {
-            return { key: '3', color: 'success', text: '已完成' };
-        }
-
-        const allUnissued = tickets.every(isTicketUnissued);
-        if (allUnissued) {
-            return { key: '6', color: 'processing', text: '出票中' };
-        }
-
-        const eventOver = isOrderEventOver(order);
-        const hasExpiredTicket = eventOver && tickets.some(t => !isTicketChecked(t));
-        if (hasExpiredTicket) {
-            return { key: 'other', color: 'default', text: '已结束' };
-        }
-
-        return { key: '6', color: 'processing', text: '待检票' };
+        return { key: 'other', color: 'default', text: '未知状态' };
     };
 
     // 操作：取消待支付订单
@@ -315,6 +325,8 @@ const UserOrders = () => {
         { key: '1', label: '待支付' },
         { key: '6', label: '待检票' },
         { key: '3', label: '已完成' },
+        { key: '4', label: '退款中' },
+        { key: '7', label: '已退票' }
     ];
 
     return (

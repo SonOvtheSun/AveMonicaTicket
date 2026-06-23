@@ -37,4 +37,9 @@ public interface OrderService extends IService<Order> {
     void auditRefund(Map<String, Object> body);
 
     void applyRefund(Long orderId, Long userId, String reason);
+
+    /**
+     * 管理员强制退款。
+     */
+    void forceRefund(Map<String, Object> body);
 }

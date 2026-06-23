@@ -60,6 +60,13 @@
         o.refund_reject_reason AS refundRejectReason,
         o.refund_operator_id AS refundOperatorId,
 
+        o.refund_status AS refundStatus,
+        o.refund_step AS refundStep,
+        o.refund_fail_step AS refundFailStep,
+        o.refund_fail_reason AS refundFailReason,
+        DATE_FORMAT(o.refund_return_time, '%Y-%m-%d %H:%i:%s') AS refundReturnTime,
+        DATE_FORMAT(o.refund_finish_time, '%Y-%m-%d %H:%i:%s') AS refundFinishTime,
+
         u.id AS userId,
         u.username AS username,
         u.phone AS phone,
@@ -82,8 +89,8 @@
         FROM tb_order o
         LEFT JOIN tb_user u ON u.id = o.user_id
         LEFT JOIN tb_event e ON e.id = o.event_id
-        LEFT JOIN tb_event_session s ON s.id = o.session_id
         LEFT JOIN tb_ticket_category tc ON tc.id = o.ticket_id
+        LEFT JOIN tb_event_session s ON s.id = COALESCE(o.session_id, tc.session_id)
         <include refid="AdminOrderWhere"/>
         ORDER BY o.create_time DESC
         LIMIT #{query.offset}, #{query.size}
@@ -112,6 +119,13 @@
         DATE_FORMAT(o.refund_audit_time, '%Y-%m-%d %H:%i:%s') AS refundAuditTime,
         o.refund_reject_reason AS refundRejectReason,
         o.refund_operator_id AS refundOperatorId,
+
+        o.refund_status AS refundStatus,
+        o.refund_step AS refundStep,
+        o.refund_fail_step AS refundFailStep,
+        o.refund_fail_reason AS refundFailReason,
+        DATE_FORMAT(o.refund_return_time, '%Y-%m-%d %H:%i:%s') AS refundReturnTime,
+        DATE_FORMAT(o.refund_finish_time, '%Y-%m-%d %H:%i:%s') AS refundFinishTime,
 
         u.id AS userId,
         u.username AS username,

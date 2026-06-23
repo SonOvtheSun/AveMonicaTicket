@@ -18,6 +18,13 @@ avemonica:
 server:
   port: 18080
 
+  tomcat:
+    threads:
+      max: 800 # 适当调大最大工作线程数
+      min-spare: 100
+    accept-count: 1000 # 线程全忙时，允许在队列里排队的请求数
+    max-connections: 8192 # 最大允许保持的连接数
+
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
 

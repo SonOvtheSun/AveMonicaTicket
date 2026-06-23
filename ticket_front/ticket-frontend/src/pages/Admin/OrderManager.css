@@ -234,3 +234,77 @@
         max-width: none;
     }
 }
+
+.aom-refund-flow {
+    padding-top: 4px;
+}
+
+.aom-refund-steps {
+    margin: 28px 0 22px;
+    padding: 22px 18px;
+    border-radius: 14px;
+    background: #fffafa;
+    border: 1px solid rgba(255, 136, 153, 0.16);
+}
+
+.aom-refund-error-box {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #fff2f0;
+    border: 1px solid #ffccc7;
+    color: #cf1322;
+    font-weight: 600;
+}
+
+.aom-refund-audit-panel {
+    margin-top: 20px;
+    padding: 16px;
+    border-radius: 14px;
+    background: #fafafa;
+    border: 1px solid #eee;
+}
+
+.aom-refund-audit-title {
+    margin-bottom: 12px;
+    color: #333;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.aom-refund-audit-actions {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.admin-order-refund-modal .ant-modal-content {
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+.admin-order-refund-modal .ant-input-textarea-show-count::after {
+    position: static;
+    display: block;
+    margin-top: 6px;
+    text-align: right;
+    color: #999;
+}
+
+.aom-detail-force-refund {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #fff2f0;
+    border: 1px solid #ffccc7;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.aom-force-refund-tip {
+    color: #cf1322;
+    font-size: 13px;
+    font-weight: 600;
+}

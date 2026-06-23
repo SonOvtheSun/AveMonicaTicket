@@ -14,6 +14,7 @@ import {
 } from '@ant-design/icons';
 import axios from '../../utils/request';
 import './EventDetail.css';
+import EventComments from './EventComments';
 import dayjs from 'dayjs';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
 
@@ -811,6 +812,7 @@ const EventDetail = () => {
                 )}
 
                 <div className="section-block">
+                    <EventComments eventId={id} event={event} />
                     <div className="section-header">图文详情</div>
                     {event.detailsUrl ? (
                         <img src={event.detailsUrl} alt="详情长图" className="details-long-img" />

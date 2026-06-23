@@ -10,6 +10,7 @@ import {
     Modal,
     Select,
     Space,
+    Steps,
     Table,
     Tag,
     Typography
@@ -48,10 +49,10 @@ const statusColorMap = {
     1: 'warning',
     2: 'default',
     3: 'success',
-    4: 'processing',
+    4: 'red',
     5: 'error',
     6: 'blue',
-    7: 'purple'
+    7: 'grey'
 };
 
 const statusTextMap = {
@@ -197,17 +198,106 @@ const OrderManager = () => {
         }
     };
 
-    const openRefund = (record, mode) => {
-        setRefundOrder(record);
-        setRefundMode(mode);
-        setRefundReason('');
+    const openRefund = async (record) => {
         setRefundVisible(true);
+        setRefundOrder(null);
+        setRefundReason('');
+        setRefundMode('view');
+
+        try {
+            const res = await axios.get(`/api/admin/order/detail/${record.id}`);
+            if (res.data.code === 200) {
+                setRefundOrder(res.data.data || record);
+            } else {
+                message.error(res.data.message || '获取退款详情失败');
+                setRefundOrder(record);
+            }
+        } catch (error) {
+            message.error(error.response?.data?.message || '网络异常，获取退款详情失败');
+            setRefundOrder(record);
+        }
     };
 
-    const submitRefundAudit = async () => {
+    const getRefundStepCurrent = (order) => {
+        const step = Number(order?.refundStep || 1);
+        return Math.max(0, Math.min(3, step - 1));
+    };
+
+    const getRefundStepStatus = (order) => {
+        if (Number(order?.refundStatus) === 5 || Number(order?.refundStatus) === 6) {
+            return 'error';
+        }
+        if (Number(order?.refundStatus) === 4 || Number(order?.status) === 7) {
+            return 'finish';
+        }
+        return 'process';
+    };
+
+
+    const getRefundFailText = (order) => {
+        const refundStatus = Number(order?.refundStatus);
+
+        // 只有审核拒绝或退款失败时，才显示红色错误原因
+        if (refundStatus === 5 || refundStatus === 6) {
+            return order?.refundFailReason || order?.refundRejectReason || '';
+        }
+
+        return '';
+    };
+
+    const canAuditRefund = (order) => {
+        return Number(order?.status) === 4 && [1, 2].includes(Number(order?.refundStatus || 1));
+    };
+
+    const canForceRefund = (order) => {
+        const status = Number(order?.status);
+
+        // 1 未支付：不能退款，因为还没付款
+        // 2 已取消：不能退款
+        // 7 已退票：不能重复退款
+        return order && ![1, 2, 7].includes(status);
+    };
+
+    const handleForceRefund = async () => {
+        if (!currentOrder) return;
+
+        Modal.confirm({
+            title: '确认强制退款？',
+            content: '强制退款会绕过用户申请流程，直接执行退款操作。请确认该订单确实需要退款。',
+            okText: '确认退款',
+            cancelText: '取消',
+            okButtonProps: {
+                danger: true
+            },
+            async onOk() {
+                try {
+                    const res = await axios.post('/api/admin/order/refund/force', {
+                        orderId: currentOrder.id
+                    });
+
+                    if (res.data.code === 200) {
+                        message.success('强制退款成功');
+
+                        const detailRes = await axios.get(`/api/admin/order/detail/${currentOrder.id}`);
+                        if (detailRes.data.code === 200) {
+                            setCurrentOrder(detailRes.data.data);
+                        }
+
+                        fetchOrders(pagination.current, pagination.pageSize);
+                    } else {
+                        message.error(res.data.message || '强制退款失败');
+                    }
+                } catch (error) {
+                    message.error(error.response?.data?.message || '网络异常，强制退款失败');
+                }
+            }
+        });
+    };
+
+    const submitRefundAudit = async (mode) => {
         if (!refundOrder) return;
 
-        if (refundMode === 'reject' && !refundReason.trim()) {
+        if (mode === 'reject' && !refundReason.trim()) {
             message.warning('拒绝退票时必须填写原因');
             return;
         }
@@ -217,15 +307,18 @@ const OrderManager = () => {
         try {
             const res = await axios.post('/api/admin/order/refund/audit', {
                 orderId: refundOrder.id,
-                approve: refundMode === 'approve',
+                approve: mode === 'approve',
                 rejectReason: refundReason.trim()
             });
 
             if (res.data.code === 200) {
-                message.success(refundMode === 'approve' ? '已同意退票' : '已拒绝退票');
-                setRefundVisible(false);
-                setRefundOrder(null);
-                setRefundReason('');
+                message.success(mode === 'approve' ? '已同意退票' : '已拒绝退票');
+
+                const detailRes = await axios.get(`/api/admin/order/detail/${refundOrder.id}`);
+                if (detailRes.data.code === 200) {
+                    setRefundOrder(detailRes.data.data);
+                }
+
                 fetchOrders(pagination.current, pagination.pageSize);
             } else {
                 message.error(res.data.message || '操作失败');
@@ -294,35 +387,14 @@ const OrderManager = () => {
             )
         },
         {
-            title: '金额/数量',
+            title: '金额',
             width: '8%',
             align: 'right',
             render: (_, record) => (
                 <div>
                     <div className="aom-price">¥{formatMoney(record.totalAmount)}</div>
-                    <div className="aom-sub-text">x {record.quantity || 0}</div>
                 </div>
             )
-        },
-        {
-            title: '退款信息',
-            width: '11%',
-            render: (_, record) => {
-                if (Number(record.status) !== 4 && Number(record.status) !== 7) {
-                    return <span className="aom-sub-text">-</span>;
-                }
-
-                return (
-                    <div>
-                        {record.refundReason && (
-                            <div className="aom-refund-reason" title={record.refundReason}>
-                                {record.refundReason}
-                            </div>
-                        )}
-                        <div className="aom-sub-text">{record.refundApplyTime || '-'}</div>
-                    </div>
-                );
-            }
         },
         {
             title: '创建时间',
@@ -338,30 +410,145 @@ const OrderManager = () => {
                         详情
                     </Button>
 
-                    {Number(record.status) === 4 && (
-                        <>
-                            <Button
-                                size="small"
-                                type="primary"
-                                icon={<CheckCircleOutlined />}
-                                onClick={() => openRefund(record, 'approve')}
-                            >
-                                同意
-                            </Button>
-                            <Button
-                                size="small"
-                                danger
-                                icon={<CloseCircleOutlined />}
-                                onClick={() => openRefund(record, 'reject')}
-                            >
-                                拒绝
-                            </Button>
-                        </>
+                    {(Number(record.status) === 4 || record.refundStatus) && (
+                        <Button
+                            size="small"
+                            onClick={() => openRefund(record)}
+                        >
+                            退款详情
+                        </Button>
                     )}
                 </Space>
             )
         }
     ], []);
+
+    const renderRefundModalContent = () => {
+        if (!refundOrder) {
+            return <div className="aom-detail-loading">加载中...</div>;
+        }
+
+        const failText = getRefundFailText(refundOrder);
+
+        const stepItems = [
+            {
+                title: '申请退款',
+                description: refundOrder.refundApplyTime || '已提交'
+            },
+            {
+                title: '后台审核',
+                description: refundOrder.refundAuditTime || '等待审核'
+            },
+            {
+                title: '金额退还',
+                description: refundOrder.refundReturnTime || '等待退款'
+            },
+            {
+                title: '退款完成',
+                description: refundOrder.refundFinishTime || '等待完成'
+            }
+        ];
+
+        return (
+            <div className="aom-refund-flow">
+                <Descriptions title="退款订单信息" bordered size="small" column={2}>
+                    <Descriptions.Item label="订单ID">{refundOrder.id}</Descriptions.Item>
+                    <Descriptions.Item label="订单状态">
+                        <Tag color={getStatusColor(refundOrder.status)}>
+                            {getStatusText(refundOrder)}
+                        </Tag>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="用户ID">{readRecord(refundOrder, 'userId', 'user.id')}</Descriptions.Item>
+                    <Descriptions.Item label="用户名">{readRecord(refundOrder, 'username', 'user.username')}</Descriptions.Item>
+                    <Descriptions.Item label="演出">{readRecord(refundOrder, 'eventTitle', 'event.title')}</Descriptions.Item>
+                    <Descriptions.Item label="实付金额">¥{formatMoney(refundOrder.totalAmount)}</Descriptions.Item>
+                    <Descriptions.Item label="退款原因" span={2}>
+                        {refundOrder.refundReason || '-'}
+                    </Descriptions.Item>
+                </Descriptions>
+
+                <div className="aom-refund-steps">
+                    <Steps
+                        current={getRefundStepCurrent(refundOrder)}
+                        status={getRefundStepStatus(refundOrder)}
+                        items={stepItems}
+                    />
+                </div>
+
+                {failText && (
+                    <div className="aom-refund-error-box">
+                        {failText}
+                    </div>
+                )}
+
+                {canAuditRefund(refundOrder) && (
+                    <div className="aom-refund-audit-panel">
+                        <div className="aom-refund-audit-title">审核操作</div>
+
+                        {refundMode === 'reject' && (
+                            <>
+                                <div style={{ marginBottom: 8 }}>拒绝退票原因：</div>
+                                <TextArea
+                                    rows={4}
+                                    maxLength={500}
+                                    showCount
+                                    value={refundReason}
+                                    onChange={(e) => setRefundReason(e.target.value)}
+                                    placeholder="请输入拒绝退票原因"
+                                />
+                            </>
+                        )}
+
+                        <div className="aom-refund-audit-actions">
+                            {refundMode === 'reject' ? (
+                                <>
+                                    <Button
+                                        onClick={() => {
+                                            setRefundMode('view');
+                                            setRefundReason('');
+                                        }}
+                                        disabled={refundSubmitting}
+                                    >
+                                        返回
+                                    </Button>
+
+                                    <Button
+                                        danger
+                                        onClick={() => submitRefundAudit('reject')}
+                                        loading={refundSubmitting}
+                                    >
+                                        确认拒绝
+                                    </Button>
+                                </>
+                            ) : (
+                                <>
+                                    <Button
+                                        danger
+                                        onClick={() => {
+                                            setRefundMode('reject');
+                                            setRefundReason('');
+                                        }}
+                                        disabled={refundSubmitting}
+                                    >
+                                        拒绝退票
+                                    </Button>
+
+                                    <Button
+                                        type="primary"
+                                        onClick={() => submitRefundAudit('approve')}
+                                        loading={refundSubmitting}
+                                        style={{ backgroundColor: '#52c41a', border: 'none' }}
+                                    >
+                                        同意退票
+                                    </Button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     const renderDetail = () => {
         if (!currentOrder) {
@@ -384,6 +571,20 @@ const OrderManager = () => {
                     <Descriptions.Item label="创建时间">{order.createTime || '-'}</Descriptions.Item>
                     <Descriptions.Item label="过期时间">{order.expireTime || '-'}</Descriptions.Item>
                 </Descriptions>
+
+                {canForceRefund(order) && (
+                    <div className="aom-detail-force-refund">
+                        <Button
+                            danger
+                            onClick={handleForceRefund}
+                        >
+                            强制退款
+                        </Button>
+                        <span className="aom-force-refund-tip">
+            注意：请谨慎操作！
+        </span>
+                    </div>
+                )}
 
                 <Descriptions title="用户信息" bordered size="small" column={2} style={{ marginTop: 18 }}>
                     <Descriptions.Item label="用户ID">{readRecord(order, 'userId', 'user.id')}</Descriptions.Item>
@@ -419,15 +620,6 @@ const OrderManager = () => {
                     </Descriptions.Item>
                 </Descriptions>
 
-                {(order.refundReason || order.refundRejectReason) && (
-                    <Descriptions title="退款信息" bordered size="small" column={1} style={{ marginTop: 18 }}>
-                        <Descriptions.Item label="退款理由">{order.refundReason || '-'}</Descriptions.Item>
-                        <Descriptions.Item label="申请时间">{order.refundApplyTime || '-'}</Descriptions.Item>
-                        <Descriptions.Item label="审核时间">{order.refundAuditTime || '-'}</Descriptions.Item>
-                        <Descriptions.Item label="拒绝原因">{order.refundRejectReason || '-'}</Descriptions.Item>
-                        <Descriptions.Item label="操作人ID">{order.refundOperatorId || '-'}</Descriptions.Item>
-                    </Descriptions>
-                )}
 
                 <div className="aom-detail-section">
                     <div className="aom-detail-title">观演人</div>
@@ -510,9 +702,6 @@ const OrderManager = () => {
                     </Form.Item>
                 </Form>
 
-                <Button icon={<ReloadOutlined />} onClick={() => fetchOrders(pagination.current, pagination.pageSize)}>
-                    刷新
-                </Button>
             </div>
 
             <Table
@@ -544,48 +733,18 @@ const OrderManager = () => {
             </Modal>
 
             <Modal
-                title={refundMode === 'approve' ? '同意退票' : '拒绝退票'}
+                title="退款处理"
                 open={refundVisible}
-                onOk={submitRefundAudit}
                 onCancel={() => {
                     setRefundVisible(false);
                     setRefundOrder(null);
                     setRefundReason('');
                 }}
-                confirmLoading={refundSubmitting}
-                okText={refundMode === 'approve' ? '确认同意' : '确认拒绝'}
-                cancelText="取消"
+                footer={null}
+                width={860}
                 className="admin-order-refund-modal"
-                okButtonProps={{
-                    danger: refundMode === 'reject',
-                    style: refundMode === 'approve' ? { backgroundColor: '#52c41a', border: 'none' } : undefined
-                }}
             >
-                {refundMode === 'approve' ? (
-                    <div className="aom-refund-confirm">
-                        <div>
-                            确认同意该订单退票吗？系统应先完成钱包/支付退款，退款成功后订单才会变为“已退票”。
-                        </div>
-                        {refundOrder?.refundReason && (
-                            <div className="aom-refund-reason-box">
-                                <strong>用户退款理由：</strong>
-                                <div>{refundOrder.refundReason}</div>
-                            </div>
-                        )}
-                    </div>
-                ) : (
-                    <div>
-                        <div style={{ marginBottom: 8 }}>请输入拒绝退票原因：</div>
-                        <TextArea
-                            rows={4}
-                            maxLength={500}
-                            showCount
-                            value={refundReason}
-                            onChange={(e) => setRefundReason(e.target.value)}
-                            placeholder="例如：该订单不符合退票规则"
-                        />
-                    </div>
-                )}
+                {renderRefundModalContent()}
             </Modal>
         </Card>
     );

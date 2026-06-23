@@ -74,4 +74,19 @@ public class AdminOrderController {
         return Result.success("操作成功");
     }
 
+    /**
+     * 管理员强制退款。
+     *
+     * body:
+     * {
+     *   "orderId": 123
+     * }
+     */
+    @PostMapping("/refund/force")
+    @PreAuthorize(AuthExp.AUDIT_MANAGE + " or authentication.name == '1'")
+    public Result<String> forceRefund(@RequestBody Map<String, Object> body) {
+        orderService.forceRefund(body);
+        return Result.success("强制退款成功");
+    }
+
 }

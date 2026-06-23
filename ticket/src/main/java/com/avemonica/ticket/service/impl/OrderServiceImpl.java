@@ -579,22 +579,37 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         Long operatorId = getCurrentAdminId();
 
         if (approve) {
-            /*
-             * 正式环境应先调用钱包/支付渠道退款。
-             * 只有退款成功，才能把订单状态改为 7 已退票。
-             */
+            Order refunding = new Order();
+            refunding.setId(orderId);
+            refunding.setRefundAuditTime(LocalDateTime.now());
+            refunding.setRefundOperatorId(operatorId);
+            refunding.setRefundStatus(3);
+            refunding.setRefundStep(3);
+            this.updateById(refunding);
+
+// 第二步：调用钱包/支付退款
             boolean walletRefundSuccess = refundToWallet(order);
+
             if (!walletRefundSuccess) {
+                Order fail = new Order();
+                fail.setId(orderId);
+                fail.setRefundStatus(6);
+                fail.setRefundStep(3);
+                fail.setRefundFailStep(3);
+                fail.setRefundFailReason("钱包退款失败，请人工处理");
+                this.updateById(fail);
                 throw new BusinessException("钱包退款失败，订单状态未修改");
             }
 
-            Order update = new Order();
-            update.setId(orderId);
-            update.setStatus(ORDER_STATUS_REFUNDED);
-            update.setRefundAuditTime(LocalDateTime.now());
-            update.setRefundOperatorId(operatorId);
-
-            this.updateById(update);
+// 第三步：退款成功，订单变为已退票
+            Order success = new Order();
+            success.setId(orderId);
+            success.setStatus(ORDER_STATUS_REFUNDED);
+            success.setRefundStatus(4);
+            success.setRefundStep(4);
+            success.setRefundReturnTime(LocalDateTime.now());
+            success.setRefundFinishTime(LocalDateTime.now());
+            this.updateById(success);
             return;
         }
 
@@ -604,12 +619,111 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         Order update = new Order();
         update.setId(orderId);
+
+// 退回到已支付未检票
         update.setStatus(ORDER_STATUS_PAID_UNCHECKED);
+
+// 审核信息
         update.setRefundAuditTime(LocalDateTime.now());
         update.setRefundRejectReason(rejectReason);
         update.setRefundOperatorId(operatorId);
 
+// 退款流程：卡在第 2 步“后台审核”，并标红
+        update.setRefundStatus(5);
+        update.setRefundStep(2);
+        update.setRefundFailStep(2);
+        update.setRefundFailReason(rejectReason);
+
         this.updateById(update);
+    }
+
+    /**
+     * 管理员强制退款。
+     *
+     * 不依赖用户是否提交退款申请。
+     * 适用于后台人工处理异常订单、特殊售后等场景。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void forceRefund(Map<String, Object> body) {
+        Long orderId = parseLong(body.get("orderId"));
+        if (orderId == null) {
+            throw new BusinessException("订单ID不能为空");
+        }
+
+        Order order = this.getById(orderId);
+        if (order == null) {
+            throw new BusinessException("订单不存在");
+        }
+
+        Integer status = order.getStatus();
+
+        if (Objects.equals(status, ORDER_STATUS_PENDING_PAY)) {
+            throw new BusinessException("未支付订单不能退款，请取消订单");
+        }
+
+        if (Objects.equals(status, ORDER_STATUS_CANCELED)) {
+            throw new BusinessException("已取消订单不能退款");
+        }
+
+        if (Objects.equals(status, ORDER_STATUS_REFUNDED)) {
+            throw new BusinessException("订单已退票，请勿重复退款");
+        }
+
+        Long operatorId = getCurrentAdminId();
+        LocalDateTime now = LocalDateTime.now();
+
+        /*
+         * 第一步：如果用户没有申请过退款，后台强制创建一条退款流程。
+         */
+        Order start = new Order();
+        start.setId(orderId);
+        start.setStatus(ORDER_STATUS_REFUND_APPLYING);
+        start.setRefundReason(
+                StringUtils.hasText(order.getRefundReason())
+                        ? order.getRefundReason()
+                        : "管理员强制退款"
+        );
+        start.setRefundApplyTime(order.getRefundApplyTime() != null ? order.getRefundApplyTime() : now);
+        start.setRefundAuditTime(now);
+        start.setRefundOperatorId(operatorId);
+        start.setRefundStatus(3);
+        start.setRefundStep(3);
+        start.setRefundFailStep(null);
+        start.setRefundFailReason(null);
+        start.setRefundRejectReason(null);
+
+        this.updateById(start);
+
+        /*
+         * 第二步：调用真实退款接口。
+         */
+        boolean walletRefundSuccess = refundToWallet(order);
+
+        if (!walletRefundSuccess) {
+            Order fail = new Order();
+            fail.setId(orderId);
+            fail.setRefundStatus(6);
+            fail.setRefundStep(3);
+            fail.setRefundFailStep(3);
+            fail.setRefundFailReason("强制退款失败，请人工处理");
+            this.updateById(fail);
+
+            throw new BusinessException("强制退款失败，订单状态未修改为已退票");
+        }
+
+        /*
+         * 第三步：退款成功。
+         */
+        Order success = new Order();
+        success.setId(orderId);
+        success.setStatus(ORDER_STATUS_REFUNDED);
+        success.setRefundStatus(4);
+        success.setRefundStep(4);
+        success.setRefundReturnTime(now);
+        success.setRefundFinishTime(now);
+
+        this.updateById(success);
     }
 
     /**
@@ -667,17 +781,26 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         Order update = new Order();
         update.setId(orderId);
+
+// 主订单状态：申请退款中
         update.setStatus(ORDER_STATUS_REFUND_APPLYING);
+
+// 退款申请信息
         update.setRefundReason(reason.trim());
         update.setRefundApplyTime(LocalDateTime.now());
 
-        /*
-         * 清理上一轮退款审核残留字段。
-         * 如果之前被拒绝过，再次申请时应重新进入待审核状态。
-         */
+// 退款进度初始化：走到第 1 步“申请退款”
+        update.setRefundStatus(1);
+        update.setRefundStep(1);
+
+// 清理上一轮退款残留
         update.setRefundAuditTime(null);
         update.setRefundRejectReason(null);
         update.setRefundOperatorId(null);
+        update.setRefundFailStep(null);
+        update.setRefundFailReason(null);
+        update.setRefundReturnTime(null);
+        update.setRefundFinishTime(null);
 
         this.updateById(update);
     }
