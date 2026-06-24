@@ -63,6 +63,8 @@ dependencies {
     implementation 'com.aliyun:dypnsapi20170525:2.0.0'
     implementation 'com.aliyun:tea-openapi:0.3.2'
     implementation 'com.aliyun:tea-util:0.2.23'
+
+    implementation 'com.belerweb:pinyin4j:2.5.1'
 }
 
 tasks.named('test') {

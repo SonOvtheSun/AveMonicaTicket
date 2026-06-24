@@ -12,6 +12,7 @@ import com.avemonica.ticket.mapper.EventMapper;
 import com.avemonica.ticket.mapper.EventSessionMapper;
 import com.avemonica.ticket.mapper.OrderSpectatorMapper;
 import com.avemonica.ticket.mapper.TicketCategoryMapper;
+import com.avemonica.ticket.service.ArtistHeatService;
 import com.avemonica.ticket.service.OrderService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -70,6 +71,9 @@ public class OrderController {
 
     @Autowired
     private EventSessionMapper eventSessionMapper;
+
+    @Autowired
+    private ArtistHeatService artistHeatService;
 
     /** 演出隐藏状态。隐藏演出不允许进入购票流程。 */
     private static final int EVENT_STATUS_HIDDEN = 4;
@@ -322,6 +326,7 @@ public class OrderController {
 
         order.setStatus(ORDER_STATUS_PAID_UNCHECKED);
         orderService.updateById(order);
+        artistHeatService.markEventDirty(order.getEventId());
 
         try {
             List<OrderSpectator> osList = orderSpectatorMapper.selectList(

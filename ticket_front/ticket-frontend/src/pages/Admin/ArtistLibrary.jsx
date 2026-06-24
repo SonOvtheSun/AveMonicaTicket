@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Table, Button, Space, Input, Tag, Popconfirm, message, Modal, Form, Select, Upload, Image, Empty } from 'antd';
-import { SearchOutlined, EditOutlined, StopOutlined, CheckCircleOutlined, UploadOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+    SearchOutlined,
+    EditOutlined,
+    StopOutlined,
+    CheckCircleOutlined,
+    UploadOutlined,
+    DeleteOutlined,
+    PlusOutlined,
+    ReloadOutlined,
+    FireOutlined
+} from '@ant-design/icons';
 import axios from '../../utils/request';
 import ImgCrop from "antd-img-crop";
 import { compressImageByShotEasy } from '../../shot-easy/compressImage.jsx';
@@ -17,6 +27,8 @@ const splitStyleText = (style) => {
 const ArtistLibrary = () => {
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [refreshingHeatId, setRefreshingHeatId] = useState(null);
+    const [refreshingAllHeat, setRefreshingAllHeat] = useState(false);
     const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
     const [searchText, setSearchText] = useState('');
 
@@ -91,6 +103,54 @@ const ArtistLibrary = () => {
         }
 
         return '';
+    };
+
+    const handleRefreshArtistHeat = async (id) => {
+        if (!id) return;
+
+        setRefreshingHeatId(id);
+
+        try {
+            const res = await axios.post(`/api/admin/artist/${id}/refresh-heat`);
+
+            if (res.data.code === 200) {
+                message.success(res.data.message || '热度已刷新');
+                fetchData(pagination.current);
+            } else {
+                message.error(res.data.message || '刷新热度失败');
+            }
+        } catch (error) {
+            message.error(error.response?.data?.message || '刷新热度失败');
+        } finally {
+            setRefreshingHeatId(null);
+        }
+    };
+
+    const handleRefreshAllArtistHeat = () => {
+        Modal.confirm({
+            title: '确认刷新全部音乐人热度？',
+            content: '该操作会重新计算全部已上架音乐人的热度值。数据量较大时可能需要等待一段时间。',
+            okText: '确认刷新',
+            cancelText: '取消',
+            async onOk() {
+                setRefreshingAllHeat(true);
+
+                try {
+                    const res = await axios.post('/api/admin/artist/refresh-heat/all');
+
+                    if (res.data.code === 200) {
+                        message.success(res.data.message || '全部音乐人热度已刷新');
+                        fetchData(1);
+                    } else {
+                        message.error(res.data.message || '刷新失败');
+                    }
+                } catch (error) {
+                    message.error(error.response?.data?.message || '刷新失败');
+                } finally {
+                    setRefreshingAllHeat(false);
+                }
+            }
+        });
     };
 
     const addUncommittedUploadUrl = (url) => {
@@ -470,6 +530,31 @@ const ArtistLibrary = () => {
             }
         },
         {
+            title: '热度',
+            dataIndex: 'heatValue',
+            key: 'heatValue',
+            width: 110,
+            render: (value) => (
+                <Tag color="volcano" icon={<FireOutlined />}>
+                    {Number(value || 0).toLocaleString()}
+                </Tag>
+            )
+        },
+        {
+            title: '关注数',
+            dataIndex: 'likeCount',
+            key: 'likeCount',
+            width: 100,
+            render: (value) => Number(value || 0).toLocaleString()
+        },
+        {
+            title: '近期演出',
+            dataIndex: 'recentEventCount',
+            key: 'recentEventCount',
+            width: 100,
+            render: (value) => `${Number(value || 0)} 场`
+        },
+        {
             title: '状态',
             dataIndex: 'auditStatus',
             key: 'auditStatus',
@@ -496,6 +581,16 @@ const ArtistLibrary = () => {
 
                 return (
                     <Space>
+                        {canManageArtist && (
+                            <Button
+                                size="small"
+                                icon={<ReloadOutlined />}
+                                loading={refreshingHeatId === record.id}
+                                onClick={() => handleRefreshArtistHeat(record.id)}
+                            >
+                                刷新热度
+                            </Button>
+                        )}
                         {/* 修改被驳回后的确认：管理员可确认所有；提交人只能确认自己的 */}
                         {canOperateThis && record.editAuditStatus === 2 && (
                             <Popconfirm
@@ -611,16 +706,28 @@ const ArtistLibrary = () => {
                 </div>
 
                 {/* 🚨 仅拥有 add 或 manage 权限的人可见新增按钮 */}
-                {canAddArtist && (
-                    <Button
-                        type="primary"
-                        icon={<PlusOutlined />}
-                        style={{ backgroundColor: '#FF8899', borderColor: '#FF8899' }}
-                        onClick={openAddModal}
-                    >
-                        新增音乐人
-                    </Button>
-                )}
+                <Space>
+                    {canManageArtist && (
+                        <Button
+                            icon={<ReloadOutlined />}
+                            loading={refreshingAllHeat}
+                            onClick={handleRefreshAllArtistHeat}
+                        >
+                            刷新全部热度
+                        </Button>
+                    )}
+
+                    {canAddArtist && (
+                        <Button
+                            type="primary"
+                            icon={<PlusOutlined />}
+                            style={{ backgroundColor: '#FF8899', borderColor: '#FF8899' }}
+                            onClick={openAddModal}
+                        >
+                            新增音乐人
+                        </Button>
+                    )}
+                </Space>
             </div>
 
             {/* 🚨 仅拥有 view 权限的人可见列表 */}

@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Pagination, Spin, Empty, Input, ConfigProvider } from 'antd';
+import { FireFilled } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import axios from '../../utils/request';
 import locale from 'antd/locale/zh_CN';
-import PublicHeader from '../../components/PublicHeader/PublicHeader'; // 替换为你的路径
+import PublicHeader from '../../components/PublicHeader/PublicHeader';
 import './ArtistsPage.css';
-import dayjs from "dayjs";
 
 const { Search } = Input;
 
@@ -14,6 +14,8 @@ const STYLE_LIST = [
     '全部', '流行', '世界音乐', '独立', '摇滚', '爵士', 'HipHop', '轻音乐', '民谣',
     '动漫', '朋克', '电子', '金属', '核', '雷鬼'
 ];
+
+const LETTER_LIST = ['全部', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), '#'];
 
 const getStyleTags = (styleText) => {
     if (!styleText) return ['流派未定'];
@@ -31,6 +33,8 @@ const ArtistsPage = () => {
     const [style, setStyle] = useState('全部');
     const [keyword, setKeyword] = useState('');
 
+    const [firstLetter, setFirstLetter] = useState('全部');
+
     const [artists, setArtists] = useState([]);
     const [loading, setLoading] = useState(false);
     const [pagination, setPagination] = useState({ current: 1, pageSize: 18, total: 0 }); // 每页18个，正好排满3行
@@ -43,7 +47,8 @@ const ArtistsPage = () => {
                     current: page,
                     size: pagination.pageSize,
                     style: style,
-                    keyword: currentKeyword
+                    keyword: currentKeyword,
+                    firstLetter
                 }
             });
             if (res.data.code === 200) {
@@ -60,7 +65,7 @@ const ArtistsPage = () => {
     // 当流派筛选发生变化时，回到第一页重新获取
     useEffect(() => {
         fetchArtists(1, keyword);
-    }, [style]);
+    }, [style, firstLetter]);
 
     // 搜索框触发
     const handleSearch = (value) => {
@@ -103,6 +108,20 @@ const ArtistsPage = () => {
                             ))}
                         </div>
                     </div>
+                    <div className="artist-filter-panel artist-letter-panel">
+                        <div className="artist-filter-title">首字母</div>
+                        <div className="filter-options artist-letter-options">
+                            {LETTER_LIST.map(letter => (
+                                <span
+                                    key={letter}
+                                    className={`filter-item ${firstLetter === letter ? 'active' : ''}`}
+                                    onClick={() => setFirstLetter(letter)}
+                                >
+                {letter}
+            </span>
+                            ))}
+                        </div>
+                    </div>
 
                     {/* 3. 音乐人网格展示区 (1排6个) */}
                     <Spin spinning={loading}>
@@ -125,6 +144,14 @@ const ArtistsPage = () => {
                                                     />
                                                     <div className="artist-list-image-mask" />
                                                     <div className="artist-list-card-glow" />
+
+                                                    {Number(pagination.current) === 1 && index < 5 && Number(artist.heatValue || 0) > 0 && (
+                                                        <div className="artist-list-heat-badge">
+                                                            <FireFilled />
+                                                            <span>热度 {Number(artist.heatValue || 0).toLocaleString()}</span>
+                                                        </div>
+                                                    )}
+
                                                     <div className="artist-list-hover-action">查看主页</div>
                                                 </div>
 

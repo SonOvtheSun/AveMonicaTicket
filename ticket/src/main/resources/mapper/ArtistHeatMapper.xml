@@ -107,4 +107,28 @@
         AND f.user_id = #{userId}
     </select>
 
+    <select id="calculateRecentEventCount" resultType="java.lang.Integer">
+        SELECT COUNT(DISTINCT e.id)
+        FROM tb_event e
+        INNER JOIN tb_event_artist ea ON ea.event_id = e.id
+        WHERE ea.artist_id = #{artistId}
+        AND e.status &lt;&gt; 4
+        AND EXISTS (
+        SELECT 1
+        FROM tb_event_session s
+        WHERE s.event_id = e.id
+        AND s.status &lt;&gt; 4
+        AND s.show_time &gt;= NOW()
+        )
+    </select>
+
+    <select id="selectArtistIdsByEventIds" resultType="java.lang.Long">
+        SELECT DISTINCT artist_id
+        FROM tb_event_artist
+        WHERE event_id IN
+        <foreach collection="eventIds" item="eventId" open="(" separator="," close=")">
+            #{eventId}
+        </foreach>
+    </select>
+
 </mapper>

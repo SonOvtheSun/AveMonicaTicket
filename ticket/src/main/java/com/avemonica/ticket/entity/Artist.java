@@ -45,17 +45,15 @@ public class Artist {
 
     private Integer likeCount;
 
-    /**
-     * 最近/未来关联演出数量，仅用于 C 端展示，不映射数据库字段。
-     */
-    @TableField(exist = false)
-    private Integer recentEventCount;
-
-    @TableField(exist = false)
     private Long heatValue;
 
-    @TableField(exist = false)
     private Integer recentWeekLikeCount;
+
+    private Integer recentEventCount;
+
+    private String firstLetter;
+
+    private LocalDateTime heatUpdateTime;
 
     @TableField(exist = false)
     private Boolean isFavorited;

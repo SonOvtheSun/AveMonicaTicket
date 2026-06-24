@@ -4,6 +4,7 @@ import com.avemonica.ticket.entity.Artist;
 import com.avemonica.ticket.entity.Event;
 import com.avemonica.ticket.entity.UserFavorite;
 import com.avemonica.ticket.mapper.UserFavoriteMapper;
+import com.avemonica.ticket.service.ArtistHeatService;
 import com.avemonica.ticket.service.ArtistService;
 import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.UserFavoriteService;
@@ -33,6 +34,9 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
 
     @Autowired
     private ArtistService artistService;
+
+    @Autowired
+    private ArtistHeatService artistHeatService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -72,6 +76,7 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
             } else {
                 redisTemplate.opsForSet().remove(wantKey, userId.toString());
             }
+            artistHeatService.markEventDirty(targetId);
         }
 
         // type=2：音乐人关注，同步 tb_artist.like_count
@@ -89,6 +94,8 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
                                 .setSql("like_count = GREATEST(like_count - 1, 0)")
                 );
             }
+
+            artistHeatService.markEventDirty(targetId);
         }
 
         return isNowFavorited;

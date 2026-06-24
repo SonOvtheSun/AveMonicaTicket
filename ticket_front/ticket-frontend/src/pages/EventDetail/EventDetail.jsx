@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Spin, message, Row, Col, Avatar, Button, InputNumber, Modal, Form, Input, Select } from 'antd';
 import {
     CalendarOutlined,
@@ -16,23 +16,12 @@ import axios from '../../utils/request';
 import './EventDetail.css';
 import EventComments from './EventComments';
 import dayjs from 'dayjs';
+import { FireFilled } from '@ant-design/icons';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
 
 const sortTicketsByPriceAsc = (tickets = []) =>
     [...tickets].sort((a, b) => Number(a.price ?? 0) - Number(b.price ?? 0));
 
-// 放到组件外，避免组件每次 render 都重新生成 Map，导致同一页面可能重复计浏览量。
-const eventViewTokenMap = new Map();
-
-const getEventViewToken = (eventId) => {
-    if (!eventViewTokenMap.has(eventId)) {
-        const token = window.crypto?.randomUUID
-            ? window.crypto.randomUUID()
-            : `${Date.now()}-${Math.random()}`;
-        eventViewTokenMap.set(eventId, token);
-    }
-    return eventViewTokenMap.get(eventId);
-};
 
 const normalizeSessions = (eventData) => {
     if (!eventData) return [];
@@ -54,6 +43,8 @@ const normalizeSessions = (eventData) => {
 const EventDetail = () => {
     const { id } = useParams();
     const navigate = useNavigate();
+
+    const location = useLocation();
 
     const [event, setEvent] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -85,6 +76,33 @@ const EventDetail = () => {
     const [wantCount, setWantCount] = useState(0);
     const [isWanted, setIsWanted] = useState(false);
     const [pageViews, setPageViews] = useState(0);
+
+    const viewTokenRef = useRef({
+        eventId: null,
+        locationKey: null,
+        token: null
+    });
+
+    const getPageEntryViewToken = () => {
+        const eventId = String(id);
+        const locationKey = location.key || window.location.pathname;
+
+        if (
+            viewTokenRef.current.eventId !== eventId ||
+            viewTokenRef.current.locationKey !== locationKey ||
+            !viewTokenRef.current.token
+        ) {
+            viewTokenRef.current = {
+                eventId,
+                locationKey,
+                token: window.crypto?.randomUUID
+                    ? window.crypto.randomUUID()
+                    : `${Date.now()}-${Math.random()}`
+            };
+        }
+
+        return viewTokenRef.current.token;
+    };
 
     // 同一合集下的其他演出，用于切换巡演站点
     const [collectionEvents, setCollectionEvents] = useState([]);
@@ -188,7 +206,7 @@ const EventDetail = () => {
 
             try {
                 const res = await axios.get(`/api/event/detail/${id}`, {
-                    params: { viewToken: getEventViewToken(id) }
+                    params: { viewToken: getPageEntryViewToken() }
                 });
 
                 if (res.data.code === 200) {
@@ -232,7 +250,7 @@ const EventDetail = () => {
 
         fetchDetail();
         window.scrollTo(0, 0);
-    }, [id, navigate]);
+    },  [id, navigate, location.key]);
 
     // 切换具体时间场次时，重置票档、数量，并按 eventId + sessionId 拉取当前用户的预约配置。
     useEffect(() => {

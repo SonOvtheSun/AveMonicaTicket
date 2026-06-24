@@ -16,6 +16,7 @@ import com.avemonica.ticket.mapper.OrderSpectatorMapper;
 import com.avemonica.ticket.mapper.OrderTicketMapper;
 import com.avemonica.ticket.mapper.SpectatorMapper;
 import com.avemonica.ticket.mapper.TicketCategoryMapper;
+import com.avemonica.ticket.service.ArtistHeatService;
 import com.avemonica.ticket.service.OrderService;
 import com.avemonica.ticket.service.UserService;
 import com.avemonica.ticket.vo.OrderVO;
@@ -68,6 +69,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Autowired
     private OrderTicketMapper orderTicketMapper;
+
+    @Autowired
+    private ArtistHeatService artistHeatService;
 
     /**
      * 订单状态：
@@ -174,6 +178,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         order.setStatus(ORDER_STATUS_CANCELED);
         this.updateById(order);
+        markOrderEventDirty(order);
 
         ticketMapper.addStock(order.getTicketId(), order.getQuantity());
 
@@ -201,6 +206,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     public List<OrderVO> getUserOrderList(Long userId, String status) {
         LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<Order>()
                 .eq(Order::getUserId, userId)
+                .and(w -> w.eq(Order::getUserDeleted, 0).or().isNull(Order::getUserDeleted))
                 .orderByDesc(Order::getCreateTime);
 
         // 待检票/已完成基于电子票 checkStatus 动态归类，不能只看订单主表 status。
@@ -237,14 +243,22 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new RuntimeException("订单不存在或无权操作");
         }
 
+        if (Objects.equals(order.getUserDeleted(), 1)) {
+            throw new RuntimeException("订单已删除");
+        }
+
         if (!Objects.equals(order.getStatus(), ORDER_STATUS_CANCELED)
                 && !Objects.equals(order.getStatus(), ORDER_STATUS_COMPLETED)
                 && !Objects.equals(order.getStatus(), ORDER_STATUS_REFUNDED)) {
             throw new RuntimeException("只有已取消、已完成、已退票订单允许删除");
         }
 
-        this.removeById(orderId);
-        orderSpectatorMapper.delete(new LambdaQueryWrapper<OrderSpectator>().eq(OrderSpectator::getOrderId, orderId));
+        Order update = new Order();
+        update.setId(orderId);
+        update.setUserDeleted(1);
+        update.setUserDeleteTime(LocalDateTime.now());
+
+        this.updateById(update);
     }
 
 
@@ -610,6 +624,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             success.setRefundReturnTime(LocalDateTime.now());
             success.setRefundFinishTime(LocalDateTime.now());
             this.updateById(success);
+            markOrderEventDirty(order);
             return;
         }
 
@@ -635,6 +650,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         update.setRefundFailReason(rejectReason);
 
         this.updateById(update);
+        markOrderEventDirty(order);
     }
 
     /**
@@ -724,6 +740,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         success.setRefundFinishTime(now);
 
         this.updateById(success);
+        markOrderEventDirty(order);
     }
 
     /**
@@ -803,6 +820,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         update.setRefundFinishTime(null);
 
         this.updateById(update);
+        markOrderEventDirty(order);
     }
 
     /**
@@ -944,5 +962,11 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     private String sceneKey(Long eventId, Long sessionId) {
         return eventId + ":" + sessionId;
+    }
+
+    private void markOrderEventDirty(Order order) {
+        if (order != null && order.getEventId() != null) {
+            artistHeatService.markEventDirty(order.getEventId());
+        }
     }
 }

@@ -8,6 +8,7 @@ import com.avemonica.ticket.entity.EventSession;
 import com.avemonica.ticket.entity.TicketCategory;
 import com.avemonica.ticket.mapper.ArtistMapper;
 import com.avemonica.ticket.mapper.EventSessionMapper;
+import com.avemonica.ticket.service.ArtistHeatService;
 import com.avemonica.ticket.service.BannerService;
 import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.TicketService;
@@ -65,6 +66,9 @@ public class PublicEventController {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private ArtistHeatService artistHeatService;
 
     private static final String EVENT_CACHE_KEY_PREFIX = "event:detail:";
     private static final String EVENT_VIEW_KEY_PREFIX = "event:views:";
@@ -408,6 +412,8 @@ public class PublicEventController {
                             .eq(Event::getId, eventId)
                             .setSql("page_views = COALESCE(page_views, 0) + 1")
             );
+
+            artistHeatService.markEventDirty(eventId);
         }
 
         event.setPageViews(getLatestPageViews(eventId));

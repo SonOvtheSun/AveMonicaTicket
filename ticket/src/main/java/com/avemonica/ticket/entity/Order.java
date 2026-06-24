@@ -89,4 +89,16 @@ public class Order {
      * 退款完成时间。
      */
     private LocalDateTime refundFinishTime;
+
+    /**
+     * 用户端是否删除：
+     * 0 未删除
+     * 1 已删除
+     */
+    private Integer userDeleted;
+
+    /**
+     * 用户端删除时间。
+     */
+    private LocalDateTime userDeleteTime;
 }

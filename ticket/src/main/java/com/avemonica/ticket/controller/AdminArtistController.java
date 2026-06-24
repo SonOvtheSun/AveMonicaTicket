@@ -7,6 +7,7 @@ import com.avemonica.ticket.entity.EventArtist;
 import com.avemonica.ticket.entity.User;
 import com.avemonica.ticket.exception.BusinessException;
 import com.avemonica.ticket.mapper.ArtistMapper;
+import com.avemonica.ticket.service.ArtistHeatService;
 import com.avemonica.ticket.service.ArtistService;
 import com.avemonica.ticket.service.EventArtistService;
 import com.avemonica.ticket.service.UserService;
@@ -54,6 +55,9 @@ public class AdminArtistController {
 
     @Autowired
     private StringRedisTemplate redisTemplate;
+
+    @Autowired
+    private ArtistHeatService artistHeatService;
 
     @Autowired
     @Qualifier("eventLocalCache")
@@ -239,7 +243,7 @@ public class AdminArtistController {
             artist.setPendingPayload(null);
             artist.setAuditSubmitTime(LocalDateTime.now());
             artistService.updateById(artist);
-
+            artist.setFirstLetter(com.avemonica.ticket.util.ArtistInitialUtil.resolveFirstLetter(artist.getName()));
             evictArtistRelatedEventDetailCache(artist.getId());
             return Result.success("修改成功");
         }
@@ -276,6 +280,26 @@ public class AdminArtistController {
 
         evictArtistRelatedEventDetailCache(artist.getId());
         return Result.success("艺人已重新提交审核");
+    }
+
+    /**
+     * 强制刷新单个音乐人热度。
+     */
+    @PostMapping("/{id}/refresh-heat")
+    @PreAuthorize("hasAuthority('artist:manage') or authentication.name == '1'")
+    public Result<String> refreshArtistHeat(@PathVariable Long id) {
+        artistHeatService.refreshArtistHeat(id);
+        return Result.success("音乐人热度已刷新");
+    }
+
+    /**
+     * 强制刷新全部音乐人热度。
+     */
+    @PostMapping("/refresh-heat/all")
+    @PreAuthorize("hasAuthority('artist:manage') or authentication.name == '1'")
+    public Result<String> refreshAllArtistHeat() {
+        artistHeatService.refreshAllArtistHeat();
+        return Result.success("全部音乐人热度已刷新");
     }
 
     // 修改艺人状态 (例如：下架、恢复)
@@ -343,11 +367,11 @@ public class AdminArtistController {
 
         // 超管免审，普通管理员强制待审核
         if (isSuperAdmin) {
+            artist.setFirstLetter(com.avemonica.ticket.util.ArtistInitialUtil.resolveFirstLetter(artist.getName()));
             artist.setAuditStatus(1); // 1: 审核通过
         } else {
             artist.setAuditStatus(0); // 0: 待审核
         }
-
         artistMapper.insert(artist);
         return Result.success("艺人提交成功");
     }
@@ -420,6 +444,7 @@ public class AdminArtistController {
                     );
 
                     evictArtistRelatedEventDetailCache(id);
+                    artist.setFirstLetter(com.avemonica.ticket.util.ArtistInitialUtil.resolveFirstLetter(artist.getName()));
                     return Result.success("艺人修改审核已通过，客户端信息已同步更新");
                 } catch (Exception e) {
                     throw new BusinessException("解析艺人修改审核快照失败");
@@ -505,5 +530,6 @@ public class AdminArtistController {
 
         return Result.success("已确认修改驳回结果");
     }
+
 
 }

@@ -406,3 +406,49 @@
     }
 }
 
+.artist-letter-panel {
+    margin-top: -14px;
+}
+
+.artist-filter-title {
+    margin-bottom: 10px;
+    color: #999;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.artist-letter-options .filter-item {
+    min-width: 38px;
+    padding: 0 12px;
+}
+
+.artist-list-heat-badge {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: calc(100% - 20px);
+    height: 26px;
+    padding: 0 10px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    border-radius: 999px;
+    background: linear-gradient(135deg, rgba(255, 183, 77, 0.98), rgba(255, 107, 80, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.42);
+    box-shadow: 0 8px 18px rgba(255, 107, 80, 0.26);
+    backdrop-filter: blur(8px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.artist-list-heat-badge .anticon {
+    color: #fff7d6;
+    font-size: 13px;
+}
+
