@@ -1,12 +1,28 @@
+
 .events-page-bg {
+    position: relative;
     min-height: 100vh;
     padding-bottom: 64px;
+    overflow-x: hidden;
+    background: #fff9fb !important;
+    isolation: isolate;
+}
+
+/* 固定铺满整个视口，防止 body / root 的黑色背景露出来 */
+.events-page-bg::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
     background:
             radial-gradient(circle at 8% 8%, rgba(255, 136, 153, 0.08), transparent 28%),
             linear-gradient(180deg, #fff9fb 0%, #ffffff 42%, #ffffff 100%);
 }
 
 .events-container {
+    position: relative;
+    z-index: 1;
     width: 1200px;
     margin: 30px auto 0;
 }

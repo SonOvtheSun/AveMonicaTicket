@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.avemonica.ticket.mapper.ArtistHeatMapper">
+
+    <!--
+        音乐人热度 =
+        （即将上演演出想看数量 * 3 + 即将上演演出浏览量 * 1） * 1
+        +
+        （在售演出想看数量 * 3 + 在售演出浏览量 * 1 + 在售演出售出票数 * 10） * 2
+        +
+        近一周关注量 * 10
+    -->
+    <select id="calculateArtistHeat" resultType="java.lang.Long">
+        SELECT
+        CAST(
+        COALESCE(upcoming.upcoming_score, 0) * 1
+        + COALESCE(on_sale.on_sale_score, 0) * 2
+        + COALESCE(follow_week.week_follow_count, 0) * 10
+        AS SIGNED) AS heat_value
+        FROM
+        (SELECT 1) base
+
+        LEFT JOIN (
+        SELECT
+        SUM(
+        COALESCE(e.want_count, 0) * 3
+        + COALESCE(e.page_views, 0) * 0.5
+        ) AS upcoming_score
+        FROM tb_event e
+        INNER JOIN tb_event_artist ea ON ea.event_id = e.id
+        WHERE ea.artist_id = #{artistId}
+        AND e.status &lt;&gt; 4
+        AND EXISTS (
+        SELECT 1
+        FROM tb_event_session s
+        WHERE s.event_id = e.id
+        AND s.status &lt;&gt; 4
+        AND s.show_time &gt;= NOW()
+        )
+        AND NOT EXISTS (
+        SELECT 1
+        FROM tb_event_session s2
+        WHERE s2.event_id = e.id
+        AND s2.status &lt;&gt; 4
+        AND s2.sale_time IS NOT NULL
+        AND s2.sale_time &lt;= NOW()
+        AND s2.show_time &gt;= NOW()
+        )
+        ) upcoming ON 1 = 1
+
+        LEFT JOIN (
+        SELECT
+        SUM(
+        COALESCE(e.want_count, 0) * 3
+        + COALESCE(e.page_views, 0) * 0.5
+        + COALESCE(sold.sold_count, 0) * 10
+        ) AS on_sale_score
+        FROM tb_event e
+        INNER JOIN tb_event_artist ea ON ea.event_id = e.id
+        LEFT JOIN (
+        SELECT
+        event_id,
+        SUM(quantity) AS sold_count
+        FROM tb_order
+        WHERE status IN (3, 4, 6)
+        GROUP BY event_id
+        ) sold ON sold.event_id = e.id
+        WHERE ea.artist_id = #{artistId}
+        AND e.status = 1
+        AND EXISTS (
+        SELECT 1
+        FROM tb_event_session s
+        WHERE s.event_id = e.id
+        AND s.status &lt;&gt; 4
+        AND s.sale_time IS NOT NULL
+        AND s.sale_time &lt;= NOW()
+        AND s.show_time &gt;= NOW()
+        )
+        ) on_sale ON 1 = 1
+
+        LEFT JOIN (
+        SELECT
+        COUNT(1) AS week_follow_count
+        FROM tb_user_favorite f
+        WHERE f.type = 2
+        AND f.target_id = #{artistId}
+        AND f.create_time &gt;= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        ) follow_week ON 1 = 1
+    </select>
+
+    <select id="calculateRecentWeekLikeCount" resultType="java.lang.Integer">
+        SELECT COUNT(1)
+        FROM tb_user_favorite f
+        WHERE f.type = 2
+        AND f.target_id = #{artistId}
+        AND f.create_time &gt;= DATE_SUB(NOW(), INTERVAL 7 DAY)
+    </select>
+
+    <select id="countArtistFavorited" resultType="java.lang.Integer">
+        SELECT COUNT(1)
+        FROM tb_user_favorite f
+        WHERE f.type = 2
+        AND f.target_id = #{artistId}
+        AND f.user_id = #{userId}
+    </select>
+
+</mapper>

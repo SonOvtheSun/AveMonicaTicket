@@ -8,6 +8,7 @@ import com.avemonica.ticket.service.ArtistService;
 import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.UserFavoriteService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -36,7 +37,10 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean toggleFavorite(Long userId, Long targetId, Integer type) {
-        // 1. 查询数据库中是否已存在该记录
+        if (userId == null || targetId == null || type == null) {
+            throw new RuntimeException("参数不能为空");
+        }
+
         LambdaQueryWrapper<UserFavorite> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(UserFavorite::getUserId, userId)
                 .eq(UserFavorite::getTargetId, targetId)
@@ -46,11 +50,11 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
         boolean isNowFavorited;
 
         if (exist != null) {
-            // 如果存在，说明是“取消收藏”
+            // 取消收藏/关注
             this.removeById(exist.getId());
             isNowFavorited = false;
         } else {
-            // 如果不存在，说明是“添加收藏”
+            // 添加收藏/关注
             UserFavorite fav = new UserFavorite();
             fav.setUserId(userId);
             fav.setTargetId(targetId);
@@ -60,13 +64,30 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
             isNowFavorited = true;
         }
 
-        // 🚨 2. 核心架构桥接：如果是演出(type=1)，同步更新 Redis 的 Set，保障演出详情页的秒开性能
-        if (type == 1) {
+        // type=1：演出想看，同步 Redis
+        if (Objects.equals(type, 1)) {
             String wantKey = "event:want:" + targetId;
             if (isNowFavorited) {
                 redisTemplate.opsForSet().add(wantKey, userId.toString());
             } else {
                 redisTemplate.opsForSet().remove(wantKey, userId.toString());
+            }
+        }
+
+        // type=2：音乐人关注，同步 tb_artist.like_count
+        if (Objects.equals(type, 2)) {
+            if (isNowFavorited) {
+                artistService.update(
+                        new LambdaUpdateWrapper<Artist>()
+                                .eq(Artist::getId, targetId)
+                                .setSql("like_count = like_count + 1")
+                );
+            } else {
+                artistService.update(
+                        new LambdaUpdateWrapper<Artist>()
+                                .eq(Artist::getId, targetId)
+                                .setSql("like_count = GREATEST(like_count - 1, 0)")
+                );
             }
         }
 

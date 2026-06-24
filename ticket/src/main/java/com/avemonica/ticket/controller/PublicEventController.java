@@ -12,6 +12,7 @@ import com.avemonica.ticket.service.BannerService;
 import com.avemonica.ticket.service.EventService;
 import com.avemonica.ticket.service.TicketService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -398,15 +399,24 @@ public class PublicEventController {
      * 注入浏览量、想看总数、当前用户是否已想看。
      */
     private void injectRealtimeStats(Long eventId, String viewToken, Event event) {
-        String viewsKey = EVENT_VIEW_KEY_PREFIX + eventId;
         String wantKey = EVENT_WANT_KEY_PREFIX + eventId;
 
-        Long currentViews = increasePageViews(eventId, viewToken, viewsKey);
-        event.setPageViews((event.getPageViews() != null ? event.getPageViews() : 0) + currentViews.intValue());
+        boolean shouldIncreaseView = shouldIncreasePageViews(eventId, viewToken);
+        if (shouldIncreaseView) {
+            eventService.update(
+                    new LambdaUpdateWrapper<Event>()
+                            .eq(Event::getId, eventId)
+                            .setSql("page_views = COALESCE(page_views, 0) + 1")
+            );
+        }
+
+        event.setPageViews(getLatestPageViews(eventId));
 
         Long wantCount = redisTemplate.opsForSet().size(wantKey);
         if (wantCount != null && wantCount > 0) {
             event.setWantCount(wantCount.intValue());
+        } else {
+            event.setWantCount(event.getWantCount() == null ? 0 : event.getWantCount());
         }
 
         String userId = getCurrentUserId();
@@ -418,20 +428,39 @@ public class PublicEventController {
      * 浏览量去重。
      * 前端每次进入详情页会传 viewToken，同一 token 十分钟内只计一次。
      */
-    private Long increasePageViews(Long eventId, String viewToken, String viewsKey) {
+    /**
+     * 浏览量去重。
+     * 同一个 viewToken 十分钟内只计一次。
+     */
+    private boolean shouldIncreasePageViews(Long eventId, String viewToken) {
         if (StringUtils.hasText(viewToken)) {
             String dedupKey = EVENT_VIEW_DEDUP_KEY_PREFIX + eventId + ":" + viewToken;
-            Boolean firstView = redisTemplate.opsForValue().setIfAbsent(dedupKey, "1", 10, TimeUnit.MINUTES);
+            Boolean firstView = redisTemplate.opsForValue()
+                    .setIfAbsent(dedupKey, "1", 10, TimeUnit.MINUTES);
 
-            if (Boolean.TRUE.equals(firstView)) {
-                return redisTemplate.opsForValue().increment(viewsKey);
-            }
-
-            String currentValue = redisTemplate.opsForValue().get(viewsKey);
-            return StringUtils.hasText(currentValue) ? Long.valueOf(currentValue) : 0L;
+            return Boolean.TRUE.equals(firstView);
         }
 
-        return redisTemplate.opsForValue().increment(viewsKey);
+        // 兼容旧请求：没有 viewToken 时仍然统计
+        return true;
+    }
+
+    /**
+     * 读取数据库中的最新浏览量。
+     */
+    private Integer getLatestPageViews(Long eventId) {
+        Event latest = eventService.getOne(
+                new LambdaQueryWrapper<Event>()
+                        .select(Event::getId, Event::getPageViews)
+                        .eq(Event::getId, eventId),
+                false
+        );
+
+        if (latest == null || latest.getPageViews() == null) {
+            return 0;
+        }
+
+        return latest.getPageViews();
     }
 
     private String getCurrentUserId() {

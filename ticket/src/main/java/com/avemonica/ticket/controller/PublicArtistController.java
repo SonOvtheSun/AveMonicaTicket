@@ -3,12 +3,15 @@ package com.avemonica.ticket.controller;
 import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.entity.Artist;
 import com.avemonica.ticket.entity.Event;
+import com.avemonica.ticket.mapper.ArtistHeatMapper;
 import com.avemonica.ticket.service.ArtistService;
 import com.avemonica.ticket.service.EventService; // 🚨 引入演出服务
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,6 +28,12 @@ public class PublicArtistController {
 
     @Autowired
     private EventService eventService; // 🚨 注入演出服务层用于数量穿透统计
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ArtistHeatMapper artistHeatMapper;
 
     /**
      * C端获取已上架音乐人列表 (带演出数量动态统计)
@@ -91,7 +100,36 @@ public class PublicArtistController {
         if (artist == null || artist.getAuditStatus() != 1) {
             return Result.error("该音乐人不存在或暂未上架");
         }
+
+        Long userId = getCurrentUserIdQuietly();
+
+        Long heatValue = artistHeatMapper.calculateArtistHeat(id);
+        Integer recentWeekLikeCount = artistHeatMapper.calculateRecentWeekLikeCount(id);
+
+        boolean isFavorited = false;
+        if (userId != null) {
+            Integer count = artistHeatMapper.countArtistFavorited(id, userId);
+            isFavorited = count != null && count > 0;
+        }
+
+        artist.setLikeCount(artist.getLikeCount() == null ? 0 : artist.getLikeCount());
+        artist.setHeatValue(heatValue == null ? 0L : heatValue);
+        artist.setRecentWeekLikeCount(recentWeekLikeCount == null ? 0 : recentWeekLikeCount);
+        artist.setIsFavorited(isFavorited);
+
         return Result.success(artist);
+    }
+
+    private Long getCurrentUserIdQuietly() {
+        try {
+            String name = SecurityContextHolder.getContext().getAuthentication().getName();
+            if (!StringUtils.hasText(name) || "anonymousUser".equals(name)) {
+                return null;
+            }
+            return Long.valueOf(name);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
 }

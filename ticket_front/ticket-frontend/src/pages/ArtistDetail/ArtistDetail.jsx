@@ -6,7 +6,7 @@ import dayjs from 'dayjs';
 import locale from 'antd/locale/zh_CN';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
 import './ArtistDetail.css';
-import {CheckCircleOutlined, HeartOutlined} from "@ant-design/icons";
+import {CheckCircleOutlined, HeartOutlined, FireFilled} from "@ant-design/icons";
 
 const EVENT_PAGE_SIZE = 10;
 
@@ -35,8 +35,20 @@ const ArtistDetail = () => {
             // 假设后端接口为 /api/favorite/toggle，type=2 代表艺人
             const res = await axios.post('/api/favorite/toggle', { targetId: id, type: 2 });
             if (res.data.code === 200) {
-                setIsFavorited(!isFavorited);
-                message.success(isFavorited ? '已取消关注' : '已关注该音乐人');
+                const nextFavorited = !isFavorited;
+                setIsFavorited(nextFavorited);
+
+                setArtist(prev => {
+                    if (!prev) return prev;
+
+                    const oldCount = Number(prev.likeCount || 0);
+                    return {
+                        ...prev,
+                        likeCount: nextFavorited ? oldCount + 1 : Math.max(0, oldCount - 1)
+                    };
+                });
+
+                message.success(nextFavorited ? '已关注该音乐人' : '已取消关注');
             }
         } catch (err) {
             message.error('操作失败');
@@ -114,19 +126,71 @@ const ArtistDetail = () => {
         window.scrollTo(0, 0);
     }, [id, navigate]);
 
-    // 票价计算方法 (与首页保持一致)
-    const getMinPrice = (tickets) => {
-        if (!tickets || tickets.length === 0) return '票档待定';
-        const prices = tickets.map(t => Number(t.price)).filter(p => Number.isFinite(p));
+    // 新 session 结构：票档在 event.sessions[*].tickets
+    const getAllSessionTickets = (event) => {
+        if (!event || !Array.isArray(event.sessions)) return [];
+
+        return event.sessions.flatMap(session =>
+            Array.isArray(session.tickets) ? session.tickets : []
+        );
+    };
+
+// 计算全部场次中的最低票价
+    const getMinPrice = (event) => {
+        const tickets = getAllSessionTickets(event);
+        if (tickets.length === 0) return '票档待定';
+
+        const prices = tickets
+            .map(t => Number(t.price))
+            .filter(price => Number.isFinite(price));
+
         return prices.length === 0 ? '票档待定' : `¥${Math.min(...prices)}起`;
     };
 
-    const getPriceText = (event) => {
-        if (Number(event.status) === 3) {
-            const showTime = event.showTime ? new Date(event.showTime).getTime() : NaN;
-            return Number.isFinite(showTime) && showTime > Date.now() ? '敬请期待' : '已结束';
+// 获取展示用演出时间：优先 event.showTime，没有就从 sessions 取最早 showTime
+    const getDisplayShowTime = (event) => {
+        if (event?.showTime && dayjs(event.showTime).isValid()) {
+            return event.showTime;
         }
-        return getMinPrice(event.tickets);
+
+        const validTimes = Array.isArray(event?.sessions)
+            ? event.sessions
+                .map(session => session.showTime)
+                .filter(time => time && dayjs(time).isValid())
+                .sort((a, b) => dayjs(a).valueOf() - dayjs(b).valueOf())
+            : [];
+
+        return validTimes[0] || null;
+    };
+
+// 获取展示用开票时间：优先 event.saleTime，没有就从 sessions 取最早 saleTime
+    const getDisplaySaleTime = (event) => {
+        if (event?.saleTime && dayjs(event.saleTime).isValid()) {
+            return event.saleTime;
+        }
+
+        const validSaleTimes = Array.isArray(event?.sessions)
+            ? event.sessions
+                .map(session => session.saleTime)
+                .filter(time => time && dayjs(time).isValid())
+                .sort((a, b) => dayjs(a).valueOf() - dayjs(b).valueOf())
+            : [];
+
+        return validSaleTimes[0] || null;
+    };
+
+// 状态/价格显示
+    const getPriceText = (event) => {
+        const showTime = getDisplayShowTime(event);
+
+        // 没有任何场次时间时，不能判定为已结束
+        if (!showTime) return '敬请期待';
+
+        if (Number(event.status) === 3) {
+            return dayjs(showTime).isAfter(dayjs()) ? '敬请期待' : '已结束';
+        }
+
+        return getMinPrice(event);
     };
 
     if (loading) {
@@ -148,7 +212,11 @@ const ArtistDetail = () => {
                                 {events.map((event, index) => {
                                     const priceText = getPriceText(event);
                                     const isStatusText = priceText === '敬请期待' || priceText === '已结束' || priceText === '票档待定';
-                                    const isPresale = Number(event.status) === 1 && event.saleTime && dayjs().isBefore(dayjs(event.saleTime));
+                                    const displayShowTime = getDisplayShowTime(event);
+                                    const displaySaleTime = getDisplaySaleTime(event);
+                                    const isPresale = Number(event.status) === 1
+                                        && displaySaleTime
+                                        && dayjs().isBefore(dayjs(displaySaleTime));
                                     return (
                                         <div
                                             key={event.id}
@@ -192,7 +260,9 @@ const ArtistDetail = () => {
                                                     {priceText}
                                                 </div>
                                                 <div className="ad-event-meta">
-                                                    {event.showTime ? event.showTime.substring(0, 16) : '时间待定'}
+                                                    {displayShowTime && dayjs(displayShowTime).isValid()
+                                                        ? dayjs(displayShowTime).format('YYYY/MM/DD HH:mm')
+                                                        : '时间待定'}
                                                 </div>
                                                 <div className="ad-event-meta">
                                                     <i className="lucide-map-pin" style={{fontSize: 12, marginRight: 4}}></i>
@@ -269,6 +339,13 @@ const ArtistDetail = () => {
                         </div>
 
                         <div className="ad-hero-info">
+                            <div className="ad-hero-heat-badge">
+                                <FireFilled className="ad-hero-heat-icon" />
+                                <span className="ad-hero-heat-label">热度</span>
+                                <span className="ad-hero-heat-value">
+                                {Number(artist.heatValue || 0).toLocaleString()}
+                                </span>
+                            </div>
 
                             <div className="ad-hero-title-row">
                                 <h1 className="ad-artist-name">{artist.name}</h1>
@@ -283,14 +360,21 @@ const ArtistDetail = () => {
                             </div>
 
                             <div className="ad-hero-meta">
+        <span className="ad-hero-chip">
+            <span className="ad-hero-chip-label">地区</span>
+            {artist.region || '未知'}
+        </span>
+
                                 <span className="ad-hero-chip">
-                                    <span className="ad-hero-chip-label">地区</span>
-                                    {artist.region || '未知'}
-                                </span>
-                                <span className="ad-hero-chip">
-                                    <span className="ad-hero-chip-label">风格</span>
+            <span className="ad-hero-chip-label">风格</span>
                                     {artist.style || '未定'}
-                                </span>
+        </span>
+
+                                <span className="ad-hero-chip">
+            <span className="ad-hero-chip-label">关注</span>
+                                    {Number(artist.likeCount || 0).toLocaleString()} 人
+        </span>
+
                             </div>
                         </div>
                     </div>

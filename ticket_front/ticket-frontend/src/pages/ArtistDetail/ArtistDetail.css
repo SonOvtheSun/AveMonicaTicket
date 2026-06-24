@@ -469,6 +469,7 @@
     gap: 18px;
     min-width: 0;
     flex-wrap: wrap;
+    margin-bottom: 18px;
 }
 
 .ad-artist-name {
@@ -515,7 +516,7 @@
     display: flex;
     gap: 12px;
     flex-wrap: wrap;
-    margin-top: 20px;
+    margin-top: 0px;
 }
 
 .ad-hero-chip {
@@ -585,6 +586,11 @@
         justify-content: center;
     }
 
+    .ad-hero-heat-badge {
+        margin-left: auto;
+        margin-right: auto;
+    }
+
     .ad-artist-name {
         font-size: 36px;
     }
@@ -609,4 +615,56 @@
         padding: 18px 18px 40px;
         border-radius: 18px;
     }
+}
+
+.ad-hero-info {
+    text-align: left;
+    justify-self: start;
+}
+
+.ad-hero-heat-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    width: fit-content;
+    min-height: 40px;
+    margin: 0 0 14px 0;
+    padding: 0 16px;
+    border-radius: 999px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 800;
+    background: linear-gradient(135deg, rgba(255, 196, 87, 0.98), rgba(255, 120, 80, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.26);
+    box-shadow:
+            0 12px 24px rgba(255, 120, 80, 0.24),
+            inset 0 1px 0 rgba(255,255,255,0.24);
+    backdrop-filter: blur(8px);
+}
+
+.ad-hero-heat-icon {
+    font-size: 17px;
+    color: #fff7d6;
+}
+
+.ad-hero-heat-label {
+    color: rgba(255,255,255,0.86);
+    font-weight: 800;
+}
+
+.ad-hero-heat-value {
+    color: #ffffff;
+    font-size: 22px;
+    font-weight: 950;
+    line-height: 1;
+    letter-spacing: 0.01em;
+}
+
+.ad-hero-title-row {
+    margin-bottom: 18px;
+}
+
+.ad-hero-meta {
+    margin-top: 0;
 }
