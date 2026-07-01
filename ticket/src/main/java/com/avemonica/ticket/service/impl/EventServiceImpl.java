@@ -65,6 +65,9 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
     @Autowired
     private StringRedisTemplate redisTemplate;
 
+    @Autowired
+    private EventAiProfileMapper eventAiProfileMapper;
+
     // 记录某演出浏览量的 Key (String 类型: event:views:1)
     public static final String EVENT_VIEWS_KEY = "event:views:";
 
@@ -389,18 +392,37 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
                 // 情况 1：艺人被删了或者数据库找不到
                 artistInfo.put("id", ea.getArtistId());
                 artistInfo.put("name", "未知艺人 (ID:" + ea.getArtistId() + ")");
+                artistInfo.put("avatarUrl", null);
+                artistInfo.put("style", null);
+                artistInfo.put("auditStatus", null);
                 artistInfo.put("notFound", true);
             } else {
                 // 情况 2：正常找到艺人
                 artistInfo.put("id", artist.getId());
                 artistInfo.put("name", artist.getName());
-                artistInfo.put("auditStatus", artist.getAuditStatus()); // 假设 0 是待审核
+                artistInfo.put("avatarUrl", artist.getAvatarUrl());
+                artistInfo.put("style", artist.getStyle());
+                artistInfo.put("auditStatus", artist.getAuditStatus());
                 artistInfo.put("notFound", false);
             }
             eventArtistMap.computeIfAbsent(ea.getEventId(), k -> new ArrayList<>()).add(artistInfo);
         }
 
-        // ======================= 统一赋值 =======================
+        // ======================= 补丁 3：装配 AI 标注信息 =======================
+        List<EventAiProfile> aiProfiles = eventAiProfileMapper.selectList(
+                new LambdaQueryWrapper<EventAiProfile>()
+                        .in(EventAiProfile::getEventId, eventIds)
+        );
+
+        Map<Long, EventAiProfile> aiProfileMap = aiProfiles.stream()
+                .collect(Collectors.toMap(
+                        EventAiProfile::getEventId,
+                        item -> item,
+                        (a, b) -> a
+                ));
+
+
+// ======================= 统一赋值 =======================
         records.forEach(event -> {
             event.setSessions(sessionMapByEventId.getOrDefault(event.getId(), new ArrayList<>()));
 
@@ -408,6 +430,23 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
             event.setTickets(ticketMapByEventId.getOrDefault(event.getId(), new ArrayList<>()));
 
             event.setArtists(eventArtistMap.getOrDefault(event.getId(), new ArrayList<>()));
+
+            EventAiProfile aiProfile = aiProfileMap.get(event.getId());
+            if (aiProfile == null) {
+                event.setAiIndexStatus(null);
+                event.setAiEventType(null);
+                event.setAiStyleTags(null);
+                event.setAiSummary(null);
+                event.setAiErrorMsg(null);
+                event.setAiUpdateTime(null);
+            } else {
+                event.setAiIndexStatus(aiProfile.getIndexStatus());
+                event.setAiEventType(aiProfile.getEventType());
+                event.setAiStyleTags(aiProfile.getStyleTags());
+                event.setAiSummary(aiProfile.getAiSummary());
+                event.setAiErrorMsg(aiProfile.getErrorMsg());
+                event.setAiUpdateTime(aiProfile.getUpdateTime());
+            }
         });
 
         return pageData;

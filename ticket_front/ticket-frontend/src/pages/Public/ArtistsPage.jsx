@@ -109,7 +109,6 @@ const ArtistsPage = () => {
                         </div>
                     </div>
                     <div className="artist-filter-panel artist-letter-panel">
-                        <div className="artist-filter-title">首字母</div>
                         <div className="filter-options artist-letter-options">
                             {LETTER_LIST.map(letter => (
                                 <span

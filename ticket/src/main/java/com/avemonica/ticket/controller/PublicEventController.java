@@ -2,16 +2,10 @@
 package com.avemonica.ticket.controller;
 
 import com.avemonica.ticket.common.Result;
-import com.avemonica.ticket.entity.Banner;
-import com.avemonica.ticket.entity.Event;
-import com.avemonica.ticket.entity.EventSession;
-import com.avemonica.ticket.entity.TicketCategory;
+import com.avemonica.ticket.entity.*;
 import com.avemonica.ticket.mapper.ArtistMapper;
 import com.avemonica.ticket.mapper.EventSessionMapper;
-import com.avemonica.ticket.service.ArtistHeatService;
-import com.avemonica.ticket.service.BannerService;
-import com.avemonica.ticket.service.EventService;
-import com.avemonica.ticket.service.TicketService;
+import com.avemonica.ticket.service.*;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -69,6 +63,9 @@ public class PublicEventController {
 
     @Autowired
     private ArtistHeatService artistHeatService;
+
+    @Autowired
+    private RecommendBehaviorService recommendBehaviorService;
 
     private static final String EVENT_CACHE_KEY_PREFIX = "event:detail:";
     private static final String EVENT_VIEW_KEY_PREFIX = "event:views:";
@@ -132,7 +129,8 @@ public class PublicEventController {
     @GetMapping("/detail/{id}")
     public Result<Event> getEventDetail(
             @PathVariable Long id,
-            @RequestParam(required = false) String viewToken
+            @RequestParam(required = false) String viewToken,
+            @RequestParam(required = false) String visitorId
     ) {
         String cacheKey = EVENT_CACHE_KEY_PREFIX + id;
 
@@ -151,7 +149,7 @@ public class PublicEventController {
             }
 
             refreshCollectionFields(id, event);
-            injectRealtimeStats(id, viewToken, event);
+            injectRealtimeStats(id, viewToken, visitorId, event);
 
             return Result.success(event);
         } catch (Exception e) {
@@ -277,34 +275,44 @@ public class PublicEventController {
         return Result.success(result);
     }
 
-    /**
-     * 切换“想看”状态。
-     */
-    @PostMapping("/want/{id}")
-    public Result<Boolean> toggleWant(@PathVariable Long id) {
-        try {
-            String userId = getCurrentUserId();
-            if (!StringUtils.hasText(userId)) {
-                Result<Boolean> res = Result.error("请先登录");
-                res.setCode(401);
-                return res;
-            }
-
-            String wantKey = EVENT_WANT_KEY_PREFIX + id;
-            Boolean isMember = redisTemplate.opsForSet().isMember(wantKey, userId);
-
-            if (Boolean.TRUE.equals(isMember)) {
-                redisTemplate.opsForSet().remove(wantKey, userId);
-                return Result.success("操作成功", false);
-            }
-
-            redisTemplate.opsForSet().add(wantKey, userId);
-            return Result.success("操作成功", true);
-        } catch (Exception e) {
-            log.error("切换想看状态异常，eventId={}", id, e);
-            return Result.error("系统异常");
-        }
-    }
+//    /**
+//     * 切换“想看”状态。
+//     */
+//    @PostMapping("/want/{id}")
+//    public Result<Boolean> toggleWant(@PathVariable Long id) {
+//        try {
+//            String userId = getCurrentUserId();
+//            if (!StringUtils.hasText(userId)) {
+//                Result<Boolean> res = Result.error("请先登录");
+//                res.setCode(401);
+//                return res;
+//            }
+//
+//            String wantKey = EVENT_WANT_KEY_PREFIX + id;
+//            Boolean isMember = redisTemplate.opsForSet().isMember(wantKey, userId);
+//
+//            Long currentUserId = Long.valueOf(userId);
+//
+//            if (Boolean.TRUE.equals(isMember)) {
+//                redisTemplate.opsForSet().remove(wantKey, userId);
+//
+//                artistHeatService.markEventDirty(id);
+//                recordRecommendBehaviorQuietly(id, null, UserBehavior.TYPE_CANCEL_WANT_EVENT);
+//
+//                return Result.success("操作成功", false);
+//            }
+//
+//            redisTemplate.opsForSet().add(wantKey, userId);
+//
+//            artistHeatService.markEventDirty(id);
+//            recordRecommendBehaviorQuietly(id, null, UserBehavior.TYPE_WANT_EVENT);
+//
+//            return Result.success("操作成功", true);
+//        } catch (Exception e) {
+//            log.error("切换想看状态异常，eventId={}", id, e);
+//            return Result.error("系统异常");
+//        }
+//    }
 
     /**
      * 从 L1 / L2 缓存读取演出详情。
@@ -402,7 +410,7 @@ public class PublicEventController {
     /**
      * 注入浏览量、想看总数、当前用户是否已想看。
      */
-    private void injectRealtimeStats(Long eventId, String viewToken, Event event) {
+    private void injectRealtimeStats(Long eventId, String viewToken, String visitorId, Event event) {
         String wantKey = EVENT_WANT_KEY_PREFIX + eventId;
 
         boolean shouldIncreaseView = shouldIncreasePageViews(eventId, viewToken);
@@ -414,6 +422,8 @@ public class PublicEventController {
             );
 
             artistHeatService.markEventDirty(eventId);
+
+            recordRecommendBehaviorQuietly(eventId, visitorId, UserBehavior.TYPE_VIEW_EVENT);
         }
 
         event.setPageViews(getLatestPageViews(eventId));
@@ -477,6 +487,28 @@ public class PublicEventController {
                     .getName();
 
             return StringUtils.hasText(userId) && !"anonymousUser".equals(userId) ? userId : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void recordRecommendBehaviorQuietly(Long eventId, String visitorId, Integer behaviorType) {
+        try {
+            Long userId = parseCurrentUserId();
+            recommendBehaviorService.recordBehavior(userId, visitorId, eventId, behaviorType);
+        } catch (Exception e) {
+            log.warn("记录推荐行为失败，eventId={}, behaviorType={}", eventId, behaviorType, e);
+        }
+    }
+
+    private Long parseCurrentUserId() {
+        String userIdText = getCurrentUserId();
+        if (!StringUtils.hasText(userIdText)) {
+            return null;
+        }
+
+        try {
+            return Long.valueOf(userIdText);
         } catch (Exception e) {
             return null;
         }

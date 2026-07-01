@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Space, Card, Tag, Modal, Drawer, message, Image, Popover, Input, Tabs, Popconfirm, Form, Select, Descriptions } from 'antd';
+import { Table, Button, Space, Card, Tag, Modal, Drawer, message, Image, Popover, Input, Tabs, Popconfirm, Form, Select, Descriptions, Tooltip } from 'antd';
 import { Plus, Edit, Trash2, EyeOff, Eye, ShieldOff } from 'lucide-react';
 import axios from '../../utils/request';
 import AddEventForm from './AddEventForm';
 import './EventManager.css';
-import { SearchOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { SearchOutlined, MinusCircleOutlined, PlusOutlined, RobotOutlined, SyncOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
 const EventManager = () => {
@@ -13,6 +13,7 @@ const EventManager = () => {
     const [events, setEvents] = useState([]);
     const [loading, setLoading] = useState(false);
     const [drawerVisible, setDrawerVisible] = useState(false);
+    const [aiRefreshingIds, setAiRefreshingIds] = useState(new Set());
     const [editingRecord, setEditingRecord] = useState(null);
     const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
 
@@ -585,6 +586,150 @@ const EventManager = () => {
         4: { color: 'default', text: '已隐藏' }
     };
 
+    const resolveAiIndexStatus = (record) => {
+        const rawStatus =
+            record?.aiIndexStatus ??
+            record?.aiProfile?.indexStatus ??
+            null;
+
+        if (rawStatus !== null && rawStatus !== undefined) {
+            return Number(rawStatus);
+        }
+
+        // 兼容后端暂时只返回摘要 / 类型但没返回 indexStatus 的情况
+        if (record?.aiSummary || record?.aiEventType || record?.aiStyleTags) {
+            return 1;
+        }
+
+        return null;
+    };
+
+    const renderAiAnnotationTag = (record) => {
+        const status = resolveAiIndexStatus(record);
+
+        if (status === 1) {
+            const content = (
+                <div style={{ maxWidth: 360 }}>
+                    <Descriptions column={1} size="small" bordered>
+                        <Descriptions.Item label="演出类型">
+                            {record.aiEventType || '未识别'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="AI风格">
+                            {record.aiStyleTags || '未识别'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="AI摘要">
+                            {record.aiSummary || '暂无摘要'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="更新时间">
+                            {record.aiUpdateTime ? formatDateTime(record.aiUpdateTime) : '未知'}
+                        </Descriptions.Item>
+                    </Descriptions>
+                </div>
+            );
+
+            return (
+                <Popover content={content} title="AI标注详情" trigger="click">
+                    <Tag color="green" icon={<RobotOutlined />} style={{ cursor: 'pointer' }}>
+                        已标注
+                    </Tag>
+                </Popover>
+            );
+        }
+
+        if (status === 0) {
+            return (
+                <Tag color="processing" icon={<RobotOutlined />}>
+                    待处理
+                </Tag>
+            );
+        }
+
+        if (status === 2) {
+            const content = (
+                <div style={{ maxWidth: 320, color: '#ff4d4f', whiteSpace: 'pre-wrap' }}>
+                    {record.aiErrorMsg || 'AI标注失败，暂无错误详情'}
+                </div>
+            );
+
+            return (
+                <Popover content={content} title="失败原因" trigger="click">
+                    <Tag color="red" icon={<RobotOutlined />} style={{ cursor: 'pointer' }}>
+                        标注失败
+                    </Tag>
+                </Popover>
+            );
+        }
+
+        return (
+            <Tag color="default" icon={<RobotOutlined />}>
+                未标注
+            </Tag>
+        );
+    };
+
+    const isStatusValue = (value, target) => {
+        return value !== null
+            && value !== undefined
+            && Number(value) === target;
+    };
+
+    const canRefreshAiIndex = (record) => {
+        if (!record?.id) return false;
+
+        // 新增待审核
+        if (isStatusValue(record.auditStatus, 0)) return false;
+
+        // 修改待审核。注意：editAuditStatus = null 是正常状态，不能 Number(null)
+        if (isStatusValue(record.editAuditStatus, 0)) return false;
+
+        // 只允许新增审核已通过的演出刷新 AI 标注
+        return isStatusValue(record.auditStatus, 1);
+    };
+
+    const handleRefreshAiIndex = async (record) => {
+        if (!record?.id) return;
+
+        if (!canRefreshAiIndex(record)) {
+            message.warning('该演出尚未正式审核通过，暂不能刷新AI标注');
+            return;
+        }
+
+        const eventId = record.id;
+
+        setAiRefreshingIds(prev => {
+            const next = new Set(prev);
+            next.add(eventId);
+            return next;
+        });
+
+        try {
+            const res = await axios.post(`/api/admin/event/${eventId}/rebuild-ai-index`);
+
+            if (res.data.code === 200) {
+                message.success(res.data.message || 'AI标注刷新任务已提交');
+
+                // 后端是异步任务，稍后刷新列表拿最新状态。
+                setTimeout(() => {
+                    fetchEvents(pagination.current, pagination.pageSize, searchText);
+                }, 1500);
+            } else {
+                message.error(res.data.message || 'AI标注刷新失败');
+            }
+        } catch (error) {
+            message.error(
+                error.response?.data?.message ||
+                error.response?.data?.msg ||
+                'AI标注刷新请求失败'
+            );
+        } finally {
+            setAiRefreshingIds(prev => {
+                const next = new Set(prev);
+                next.delete(eventId);
+                return next;
+            });
+        }
+    };
+
     const columns = [
         { title: '演出ID', dataIndex: 'id', key: 'id', width: 90 },
         {
@@ -693,9 +838,15 @@ const EventManager = () => {
             }
         },
         {
+            title: 'AI标注',
+            key: 'aiAnnotation',
+            width: 110,
+            render: (_, record) => renderAiAnnotationTag(record)
+        },
+        {
             title: '管理操作',
             key: 'action',
-            width: 160,
+            width: 190,
             render: (_, record) => {
                 // 🚨 补充丢失的权限计算变量
                 const isNewPending = record.auditStatus === 0;
@@ -736,6 +887,29 @@ const EventManager = () => {
                                     </Popconfirm>
                                 )}
                                 <Button type="text" icon={<Edit size={14} />} disabled={!canEdit} style={{ color: canEdit ? '#1890ff' : '#999', padding: 0 }} onClick={() => handleEditClick(record)}>编辑</Button>
+                                {(hasEditPerm || isSuperAdmin) && (
+                                    <Tooltip
+                                        title={
+                                            canRefreshAiIndex(record)
+                                                ? '重新生成AI标签、中文摘要和向量索引'
+                                                : '演出尚未审核通过或存在待审核修改，暂不能刷新AI标注'
+                                        }
+                                    >
+                                        <Button
+                                            type="text"
+                                            icon={<SyncOutlined spin={aiRefreshingIds.has(record.id)} />}
+                                            loading={aiRefreshingIds.has(record.id)}
+                                            disabled={!canRefreshAiIndex(record)}
+                                            onClick={() => handleRefreshAiIndex(record)}
+                                            style={{
+                                                color: canRefreshAiIndex(record) ? '#722ed1' : '#999',
+                                                padding: 0
+                                            }}
+                                        >
+                                            AI标注
+                                        </Button>
+                                    </Tooltip>
+                                )}
                                 {record.status !== 4 ? (
                                     <Button type="text" icon={<EyeOff size={14} />} onClick={() => handleQuickHide(record.id)} style={{ color: '#faad14', padding: 0 }}>隐藏</Button>
                                 ) : (

@@ -5,6 +5,20 @@ aliyun:
     sign-name: 速通互联验证码
     template-code: 100001
 
+ai:
+  ollama:
+    base-url: http://localhost:11434
+    vision-model: qwen3-vl:8b
+    embedding-model: qwen3-embedding
+
+  vector:
+    qdrant-url: http://localhost:6333
+    collection: event_rag
+    dimension: 4096
+
+  event-index:
+    enabled: true
+
 
 avemonica:
   upload:

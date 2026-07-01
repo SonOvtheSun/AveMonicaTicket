@@ -3,21 +3,28 @@ package com.avemonica.ticket.controller;
 import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.dto.EventCommentAddDTO;
 import com.avemonica.ticket.dto.EventCommentVoteDTO;
+import com.avemonica.ticket.entity.UserBehavior;
 import com.avemonica.ticket.service.EventCommentService;
+import com.avemonica.ticket.service.RecommendBehaviorService;
 import com.avemonica.ticket.vo.EventCommentVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.web.bind.annotation.*;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/event/comment")
 public class PublicEventCommentController {
 
     @Autowired
     private EventCommentService eventCommentService;
+
+    @Autowired
+    private RecommendBehaviorService recommendBehaviorService;
 
     /**
      * 评论分页。
@@ -45,6 +52,9 @@ public class PublicEventCommentController {
     public Result<String> addComment(@RequestBody EventCommentAddDTO dto) {
         Long userId = getCurrentUserId();
         eventCommentService.addComment(dto, userId);
+
+        recordCommentBehaviorQuietly(userId, dto);
+
         return Result.success("评论发布成功");
     }
 
@@ -80,6 +90,23 @@ public class PublicEventCommentController {
             return Long.valueOf(auth.getName());
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private void recordCommentBehaviorQuietly(Long userId, EventCommentAddDTO dto) {
+        if (userId == null || dto == null || dto.getEventId() == null) {
+            return;
+        }
+
+        try {
+            recommendBehaviorService.recordBehavior(
+                    userId,
+                    null,
+                    dto.getEventId(),
+                    UserBehavior.TYPE_COMMENT
+            );
+        } catch (Exception e) {
+            log.warn("记录评论推荐行为失败，userId={}, eventId={}", userId, dto.getEventId(), e);
         }
     }
 }

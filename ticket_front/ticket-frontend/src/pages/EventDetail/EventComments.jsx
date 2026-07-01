@@ -348,7 +348,7 @@ const EventComments = ({ eventId, event }) => {
 
     return (
         <div className="section-block event-comments-section">
-            <div className="section-header">观演评价</div>
+            <div className="section-header">讨论区</div>
 
             <div className="event-comment-summary-box">
                 <div className="event-comment-summary-head">
@@ -361,7 +361,7 @@ const EventComments = ({ eventId, event }) => {
 
                 <Spin spinning={previewLoading}>
                     {previewComments.length === 0 ? (
-                        <Empty description="暂无评论" />
+                        <Empty description="暂无讨论" />
                     ) : (
                         <div className="event-comment-preview-list">
                             {previewComments.map(comment => (
@@ -380,12 +380,12 @@ const EventComments = ({ eventId, event }) => {
                     className="event-comment-more-link"
                     onClick={handleOpenAllComments}
                 >
-                    查看全部评论
+                    查看全部讨论
                 </Button>
             </div>
 
             <Modal
-                title="全部评论"
+                title="全部讨论"
                 open={modalVisible}
                 onCancel={() => setModalVisible(false)}
                 footer={null}
@@ -426,7 +426,7 @@ const EventComments = ({ eventId, event }) => {
                             onClick={handleSubmitComment}
                             loading={submitting}
                         >
-                            发布评论
+                            发布讨论
                         </Button>
                     </div>
                 </div>
@@ -434,7 +434,7 @@ const EventComments = ({ eventId, event }) => {
                 <div className="event-comment-toolbar">
                     <div className="event-comment-count">
                         <PictureOutlined />
-                        <span>{pageInfo.total || comments.length} 条评论</span>
+                        <span>{pageInfo.total || comments.length} 条讨论</span>
                     </div>
 
                     <Select
@@ -447,7 +447,7 @@ const EventComments = ({ eventId, event }) => {
 
                 <Spin spinning={commentLoading}>
                     {comments.length === 0 ? (
-                        <Empty description="暂无评论" />
+                        <Empty description="暂无讨论" />
                     ) : (
                         <div className="event-comment-full-list">
                             {comments.map(comment => (

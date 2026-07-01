@@ -1,13 +1,6 @@
 package com.avemonica.ticket.service.impl;
 
-import com.avemonica.ticket.entity.Event;
-import com.avemonica.ticket.entity.EventSession;
-import com.avemonica.ticket.entity.Order;
-import com.avemonica.ticket.entity.OrderSpectator;
-import com.avemonica.ticket.entity.OrderTicket;
-import com.avemonica.ticket.entity.Spectator;
-import com.avemonica.ticket.entity.TicketCategory;
-import com.avemonica.ticket.entity.User;
+import com.avemonica.ticket.entity.*;
 import com.avemonica.ticket.exception.BusinessException;
 import com.avemonica.ticket.mapper.EventMapper;
 import com.avemonica.ticket.mapper.EventSessionMapper;
@@ -18,11 +11,13 @@ import com.avemonica.ticket.mapper.SpectatorMapper;
 import com.avemonica.ticket.mapper.TicketCategoryMapper;
 import com.avemonica.ticket.service.ArtistHeatService;
 import com.avemonica.ticket.service.OrderService;
+import com.avemonica.ticket.service.RecommendBehaviorService;
 import com.avemonica.ticket.service.UserService;
 import com.avemonica.ticket.vo.OrderVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -43,6 +38,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements OrderService {
 
@@ -73,6 +69,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Autowired
     private ArtistHeatService artistHeatService;
 
+    @Autowired
+    private RecommendBehaviorService recommendBehaviorService;
+
     /**
      * 订单状态：
      * 1 已创建，未支付
@@ -90,6 +89,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private static final int ORDER_STATUS_EXCEPTION = 5;
     private static final int ORDER_STATUS_PAID_UNCHECKED = 6;
     private static final int ORDER_STATUS_REFUNDED = 7;
+
+    private static final int EVENT_STATUS_ONLINE = 1;
+    private static final int EVENT_STATUS_STOPPED = 3;
+    private static final int EVENT_STATUS_HIDDEN = 4;
+
+    private static final int SESSION_STATUS_ON_SALE = 1;
 
     private static final int TICKET_CHECK_STATUS_PENDING_ISSUE = 4;
     private static final int TICKET_CHECK_STATUS_CHECKED = 2;
@@ -130,7 +135,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new RuntimeException("演出场次不存在或不属于当前演出");
         }
 
-        // 所有归属校验通过后再扣库存，避免错误扣减。
+        Event event = eventMapper.selectById(order.getEventId());
+        validatePurchasableEventAndSession(event, session);
+
+// 所有归属校验通过后再扣库存，避免错误扣减。
         int updateRows = ticketMapper.deductStock(order.getTicketId(), order.getQuantity());
         if (updateRows == 0) {
             throw new RuntimeException("手慢了，该票档库存不足！");
@@ -161,6 +169,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             os.setDeleteToken(0L);
             orderSpectatorMapper.insert(os);
         }
+
+        recordRecommendBehaviorQuietly(
+                order.getUserId(),
+                order.getEventId(),
+                UserBehavior.TYPE_CREATE_ORDER
+        );
 
         return order;
     }
@@ -625,6 +639,13 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             success.setRefundFinishTime(LocalDateTime.now());
             this.updateById(success);
             markOrderEventDirty(order);
+
+            recordRecommendBehaviorQuietly(
+                    order.getUserId(),
+                    order.getEventId(),
+                    UserBehavior.TYPE_REFUND_SUCCESS
+            );
+
             return;
         }
 
@@ -741,6 +762,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         this.updateById(success);
         markOrderEventDirty(order);
+
+        recordRecommendBehaviorQuietly(
+                order.getUserId(),
+                order.getEventId(),
+                UserBehavior.TYPE_REFUND_SUCCESS
+        );
     }
 
     /**
@@ -967,6 +994,55 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private void markOrderEventDirty(Order order) {
         if (order != null && order.getEventId() != null) {
             artistHeatService.markEventDirty(order.getEventId());
+        }
+    }
+
+    private void recordRecommendBehaviorQuietly(Long userId, Long eventId, Integer behaviorType) {
+        if (userId == null || eventId == null || behaviorType == null) {
+            return;
+        }
+
+        try {
+            recommendBehaviorService.recordBehavior(userId, null, eventId, behaviorType);
+        } catch (Exception e) {
+            log.warn("记录订单推荐行为失败，userId={}, eventId={}, behaviorType={}",
+                    userId, eventId, behaviorType, e);
+        }
+    }
+
+    private void validatePurchasableEventAndSession(Event event, EventSession session) {
+        LocalDateTime now = LocalDateTime.now();
+
+        if (event == null || Objects.equals(event.getStatus(), EVENT_STATUS_HIDDEN)) {
+            throw new RuntimeException("该演出信息不存在或已下架");
+        }
+
+        if (Objects.equals(event.getStatus(), EVENT_STATUS_STOPPED)) {
+            throw new RuntimeException("该演出已停售，无法创建订单");
+        }
+
+        if (!Objects.equals(event.getStatus(), EVENT_STATUS_ONLINE)) {
+            throw new RuntimeException("该演出当前状态暂不可购票");
+        }
+
+        if (session == null || !Objects.equals(session.getStatus(), SESSION_STATUS_ON_SALE)) {
+            throw new RuntimeException("该场次尚未上架或已停售，无法创建订单");
+        }
+
+        if (session.getShowTime() == null) {
+            throw new RuntimeException("该场次尚未配置演出时间，暂不可购票");
+        }
+
+        if (!now.isBefore(session.getShowTime())) {
+            throw new RuntimeException("该演出已结束，无法创建订单");
+        }
+
+        if (session.getSaleTime() == null) {
+            throw new RuntimeException("该场次尚未配置开票时间，暂不可购票");
+        }
+
+        if (now.isBefore(session.getSaleTime())) {
+            throw new RuntimeException("该场次尚未正式开售，无法创建订单");
         }
     }
 }

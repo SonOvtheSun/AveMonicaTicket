@@ -129,6 +129,24 @@ public class Event {
 
     private Integer allowRefund;
 
+    @TableField(exist = false)
+    private Integer aiIndexStatus;
+
+    @TableField(exist = false)
+    private String aiEventType;
+
+    @TableField(exist = false)
+    private String aiStyleTags;
+
+    @TableField(exist = false)
+    private String aiSummary;
+
+    @TableField(exist = false)
+    private String aiErrorMsg;
+
+    @TableField(exist = false)
+    private LocalDateTime aiUpdateTime;
+
 
     // ==========================================
     // 💡 状态字典常量定义，拒绝魔法数字

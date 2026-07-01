@@ -65,6 +65,8 @@ dependencies {
     implementation 'com.aliyun:tea-util:0.2.23'
 
     implementation 'com.belerweb:pinyin4j:2.5.1'
+
+    implementation 'com.twelvemonkeys.imageio:imageio-webp:3.13.0'
 }
 
 tasks.named('test') {

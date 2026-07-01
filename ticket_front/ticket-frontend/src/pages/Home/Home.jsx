@@ -14,6 +14,10 @@ const Home = () => {
 
     const [upcomingEvents, setUpcomingEvents] = useState([]);
     const [loadingEvents, setLoadingEvents] = useState(true);
+
+    const [recommendEvents, setRecommendEvents] = useState([]);
+    const [loadingRecommend, setLoadingRecommend] = useState(true);
+
     const [banners, setBanners] = useState([]);
     const [currentCity, setCurrentCity] = useState(localStorage.getItem('currentCity') || '全国');
 
@@ -66,9 +70,48 @@ const Home = () => {
             }
         };
 
+        const fetchRecommendEvents = async () => {
+            setLoadingRecommend(true);
+            try {
+                const res = await axios.get('/api/recommend/events', {
+                    params: {
+                        scene: 'home',
+                        size: 10,
+                        city: currentCity
+                    }
+                });
+
+                if (res.data.code === 200) {
+                    setRecommendEvents(res.data.data || []);
+                } else {
+                    setRecommendEvents([]);
+                }
+            } catch (error) {
+                console.error('获取为您推荐数据异常', error);
+                setRecommendEvents([]);
+            } finally {
+                setLoadingRecommend(false);
+            }
+        };
+
         fetchEvents();
         fetchBanners();
+        fetchRecommendEvents();
     }, [currentCity]);
+
+    const getEventTickets = (event) => {
+        if (!event) return [];
+
+        if (Array.isArray(event.tickets) && event.tickets.length > 0) {
+            return event.tickets;
+        }
+
+        if (Array.isArray(event.sessions)) {
+            return event.sessions.flatMap(session => Array.isArray(session.tickets) ? session.tickets : []);
+        }
+
+        return [];
+    };
 
     const CustomPrevArrow = ({ className, style, onClick }) => (
         <div className={className} style={style} onClick={onClick}>
@@ -82,24 +125,22 @@ const Home = () => {
         </div>
     );
 
-    // 新场次模型：票档不再从 event.tickets 读取，而是从 sessions[*].tickets 汇总
-    const getAllSessionTickets = (event) => {
-        if (!event || !Array.isArray(event.sessions)) return [];
-
-        return event.sessions.flatMap(session =>
-            Array.isArray(session.tickets) ? session.tickets : []
-        );
-    };
 
     const getMinPrice = (event) => {
-        const tickets = getAllSessionTickets(event);
-        if (tickets.length === 0) return '票档待定';
+        const tickets = getEventTickets(event);
+
+        if (tickets.length === 0) {
+            return '票档待定';
+        }
 
         const prices = tickets
             .map(t => Number(t.price))
             .filter(price => Number.isFinite(price));
 
-        if (prices.length === 0) return '票档待定';
+        if (prices.length === 0) {
+            return '票档待定';
+        }
+
         return `¥${Math.min(...prices)}起`;
     };
 
@@ -136,13 +177,10 @@ const Home = () => {
     };
 
     const getPriceText = (event) => {
-        const showTime = getDisplayShowTime(event);
-
-        // 没有任何演出时间时，不应判定为“已结束”，统一显示“敬请期待”
-        if (!showTime) return '敬请期待';
-
         if (Number(event.status) === 3) {
-            return dayjs(showTime).isAfter(dayjs()) ? '敬请期待' : '已结束';
+            const displayShowTime = getDisplayShowTime(event);
+            const showTime = displayShowTime ? new Date(displayShowTime).getTime() : NaN;
+            return Number.isFinite(showTime) && showTime > Date.now() ? '敬请期待' : '已结束';
         }
 
         return getMinPrice(event);
@@ -155,6 +193,63 @@ const Home = () => {
             .map(item => item.trim())
             .filter(Boolean)
             .slice(0, 2);
+    };
+
+    const renderEventCard = (event, index) => {
+        const styleTags = getStyleTags(event.style);
+        const priceText = getPriceText(event);
+        const isStatusText = priceText === '敬请期待' || priceText === '已结束' || priceText === '票档待定';
+        const displayShowTime = getDisplayShowTime(event);
+        const displaySaleTime = getDisplaySaleTime(event);
+        const isPresale = Number(event.status) === 1
+            && displaySaleTime
+            && dayjs().isBefore(dayjs(displaySaleTime));
+
+        return (
+            <div
+                key={event.id}
+                className="home-event-card"
+                style={{ '--card-index': index }}
+                onClick={() => navigate(`/event/${event.id}`)}
+            >
+                <div className="home-event-cover-wrapper">
+                    <img
+                        src={event.posterUrl || 'https://via.placeholder.com/300x424?text=No+Poster'}
+                        alt={event.title}
+                        className="home-event-cover"
+                    />
+                    <div className="home-event-image-mask" />
+
+                    <div className="home-event-style-tags">
+                        {styleTags.length > 0 ? styleTags.map(tag => (
+                            <span key={tag} className="home-event-style-tag">{tag}</span>
+                        )) : (
+                            <span className="home-event-style-tag">现场</span>
+                        )}
+                    </div>
+
+                    <div className={`home-event-price-on-cover ${isStatusText ? 'is-status' : ''} ${priceText === '敬请期待' ? 'is-coming-soon' : ''} ${priceText === '已结束' ? 'is-ended' : ''}`}>
+                        {priceText}
+                    </div>
+
+                    {isPresale && (
+                        <div className="home-event-presale-tag">
+                            预售中
+                        </div>
+                    )}
+                </div>
+
+                <div className="home-event-info">
+                    <h3 className="home-event-title" title={event.title}>{event.title}</h3>
+                    <div className="home-event-meta">
+                        {displayShowTime ? displayShowTime.substring(0, 16) : '时间待定'}
+                    </div>
+                    <div className="home-event-meta">
+                        [{event.city || currentCity || '全国'}] {event.venue || '场馆待定'}
+                    </div>
+                </div>
+            </div>
+        );
     };
 
     return (
@@ -188,6 +283,36 @@ const Home = () => {
                     </Carousel>
                 </section>
 
+                <section className="home-event-section home-recommend-section">
+                    <div className="home-section-header">
+                        <div>
+                            <h2 className="home-section-title">
+                                为您推荐
+                            </h2>
+                            <p className="home-section-subtitle">
+                                {localStorage.getItem('token')
+                                    ? '根据偏好生成'
+                                    : `${currentCity === '全国' ? '全国' : currentCity} · 热门精选推荐`}
+                            </p>
+                        </div>
+                        <Button className="home-section-more" onClick={() => navigate('/events')}>
+                            发现更多
+                        </Button>
+                    </div>
+
+                    {loadingRecommend ? (
+                        <div className="home-loading-container">
+                            <Spin size="large" tip="正在生成您的推荐..." />
+                        </div>
+                    ) : recommendEvents.length > 0 ? (
+                        <div className="home-event-grid">
+                            {recommendEvents.map((event, index) => renderEventCard(event, index))}
+                        </div>
+                    ) : (
+                        <Empty description="暂无推荐内容，先浏览几场演出试试吧~" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    )}
+                </section>
+
                 <section className="home-event-section">
                     <div className="home-section-header">
                         <div>
@@ -207,70 +332,7 @@ const Home = () => {
                         </div>
                     ) : upcomingEvents.length > 0 ? (
                         <div className="home-event-grid">
-                            {upcomingEvents.map((event, index) => {
-                                const styleTags = getStyleTags(event.style);
-                                const priceText = getPriceText(event);
-                                const isStatusText = priceText === '敬请期待' || priceText === '已结束' || priceText === '票档待定';
-                                const displayShowTime = getDisplayShowTime(event);
-                                const displaySaleTime = getDisplaySaleTime(event);
-                                const isPresale = Number(event.status) === 1 && displaySaleTime && dayjs().isBefore(dayjs(displaySaleTime));
-                                return (
-                                    <div
-                                        key={event.id}
-                                        className="home-event-card"
-                                        style={{ '--card-index': index }}
-                                        onClick={() => navigate(`/event/${event.id}`)}
-                                    >
-                                        <div className="home-event-cover-wrapper">
-                                            <img
-                                                src={event.posterUrl || 'https://via.placeholder.com/300x424?text=No+Poster'}
-                                                alt={event.title}
-                                                className="home-event-cover"
-                                            />
-                                            <div className="home-event-image-mask" />
-                                            <div className="home-event-style-tags">
-                                                {styleTags.length > 0 ? styleTags.map(tag => (
-                                                    <span key={tag} className="home-event-style-tag">{tag}</span>
-                                                )) : (
-                                                    <span className="home-event-style-tag">现场</span>
-                                                )}
-                                            </div>
-                                            <div className={`home-event-price-on-cover ${isStatusText ? 'is-status' : ''} ${priceText === '敬请期待' ? 'is-coming-soon' : ''} ${priceText === '已结束' ? 'is-ended' : ''}`}>
-                                                {priceText}
-                                            </div>
-                                            {/* 🚨 新增：与演出大厅完全一致的右下角“预售中”标签 */}
-                                            {isPresale && (
-                                                <div style={{
-                                                    position: 'absolute',
-                                                    bottom: 14,
-                                                    right: 14,
-                                                    padding: '2px 8px',
-                                                    color: '#FF8899',
-                                                    fontSize: '12px',
-                                                    fontWeight: 'bold',
-                                                    backgroundColor: '#fff0f3',
-                                                    zIndex: 3,
-                                                    border: '1px solid rgba(255, 136, 153, 0.3)',
-                                                    borderRadius: '4px',
-                                                    lineHeight: '1.2'
-                                                }}>
-                                                    预售中
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <div className="home-event-info">
-                                            <h3 className="home-event-title" title={event.title}>{event.title}</h3>
-                                            <div className="home-event-meta">
-                                                {displayShowTime ? dayjs(displayShowTime).format('YYYY-MM-DD HH:mm') : '时间待定'}
-                                            </div>
-                                            <div className="home-event-meta">
-                                                [{event.city || currentCity || '全国'}] {event.venue || '场馆待定'}
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                            {upcomingEvents.map((event, index) => renderEventCard(event, index))}
                         </div>
                     ) : (
                         <Empty description="最近暂无即将上演的演出哦~" image={Empty.PRESENTED_IMAGE_SIMPLE} />

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Table, Tabs, Button, Modal, Form, Input, DatePicker, Upload, message, Tag, Image, Space, Popconfirm, Select, Spin } from 'antd';
-// 🚨 引入 StopOutlined 用于下架按钮
-import { PlusOutlined, UploadOutlined, EditOutlined, DeleteOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons';
+import { Card, Table, Tabs, Button, Modal, Form, Input, DatePicker, Upload, message, Tag, Image, Space, Popconfirm, Select, Spin, Tooltip } from 'antd';// 🚨 引入 StopOutlined 用于下架按钮
+import { PlusOutlined, UploadOutlined, EditOutlined, DeleteOutlined, SearchOutlined, StopOutlined, InboxOutlined } from '@ant-design/icons';
 import axios from '../../utils/request';
 import dayjs from 'dayjs';
 import ImgCrop from 'antd-img-crop';
@@ -12,7 +11,7 @@ const BannerManager = () => {
     const [fetchingEvents, setFetchingEvents] = useState(false);
     const searchTimeoutRef = useRef(null);
 
-    const [activeTab, setActiveTab] = useState('2');
+    const [activeTab, setActiveTab] = useState('-1');
     const [banners, setBanners] = useState([]);
     const [loading, setLoading] = useState(false);
 
@@ -20,6 +19,7 @@ const BannerManager = () => {
 
     const [modalVisible, setModalVisible] = useState(false);
     const [editingId, setEditingId] = useState(null);
+    const [editingRecord, setEditingRecord] = useState(null);
     const [form] = Form.useForm();
     const [fileList, setFileList] = useState([]);
 
@@ -245,6 +245,8 @@ const BannerManager = () => {
         await cleanupUncommittedUploads();
         setModalVisible(false);
         setFileList([]);
+        setEditingId(null);
+        setEditingRecord(null);
     };
 
     useEffect(() => {
@@ -344,6 +346,52 @@ const BannerManager = () => {
         }
     };
 
+    const handleArchive = async (id) => {
+        try {
+            const res = await axios.put(`/api/admin/banner/archive/${id}`);
+
+            if (res.data.code === 200) {
+                message.success(res.data.message || '横幅已归档');
+                fetchBanners();
+            } else {
+                message.error(res.data.message || '归档失败');
+            }
+        } catch (error) {
+            message.error(error.response?.data?.message || '归档失败');
+        }
+    };
+
+    const isBannerExpired = (record) => {
+        if (!record || !record.endTime) {
+            return false;
+        }
+
+        return dayjs(record.endTime).isBefore(dayjs());
+    };
+
+    const isBannerUpcoming = (record) => {
+        if (!record || !record.startTime) {
+            return false;
+        }
+
+        return dayjs(record.startTime).isAfter(dayjs());
+    };
+
+    const isBannerActive = (record) => {
+        if (!record || !record.startTime || !record.endTime) {
+            return false;
+        }
+
+        const now = dayjs();
+        return dayjs(record.startTime).isBefore(now) && dayjs(record.endTime).isAfter(now);
+    };
+
+    const isExpiredUnarchivedBanner = (record) => {
+        return activeTab !== '3'
+            && record?.auditStatus === 1
+            && isBannerExpired(record);
+    };
+
     const getBannerStatusTag = (record) => {
         if (record?.editAuditStatus === 0) return <Tag color="processing">修改待审核</Tag>;
         if (record?.editAuditStatus === 2) return <Tag color="red">修改被驳回</Tag>;
@@ -351,9 +399,23 @@ const BannerManager = () => {
         if (record?.auditStatus === 2) return <Tag color="red">新增被驳回</Tag>;
         if (record?.auditStatus === 3) return <Tag color="default">已撤销</Tag>;
 
-        if (activeTab === '1') return <Tag color="blue">即将展示</Tag>;
-        if (activeTab === '2') return <Tag color="green">展示中</Tag>;
-        return <Tag color="default">已过期</Tag>;
+        if (activeTab === '3') {
+            return <Tag color="default">已归档</Tag>;
+        }
+
+        if (isBannerExpired(record)) {
+            return <Tag color="volcano">已过期待归档</Tag>;
+        }
+
+        if (isBannerActive(record)) {
+            return <Tag color="green">展示中</Tag>;
+        }
+
+        if (isBannerUpcoming(record)) {
+            return <Tag color="blue">即将展示</Tag>;
+        }
+
+        return <Tag color="default">未知状态</Tag>;
     };
 
     const columns = [
@@ -412,14 +474,32 @@ const BannerManager = () => {
 
                         {/* 编辑按钮：需横幅管理权 */}
                         {canManageBanner && (
-                            <Button
-                                type="link"
-                                icon={<EditOutlined />}
-                                disabled={!canClickEdit}
-                                onClick={() => openModal(record)}
+                            <Tooltip title={isExpiredUnarchivedBanner(record) ? '该横幅已过期，请先归档后再编辑' : ''}>
+                                <span>
+                                    <Button
+                                        type="link"
+                                        icon={<EditOutlined />}
+                                        disabled={!canClickEdit || isExpiredUnarchivedBanner(record)}
+                                        onClick={() => openModal(record)}
+                                    >
+                                        编辑
+                                    </Button>
+                                </span>
+                            </Tooltip>
+                        )}
+
+                        {canManageBanner && isExpiredUnarchivedBanner(record) && (
+                            <Popconfirm
+                                title="确定归档该过期横幅吗？"
+                                description="归档后该横幅会移入“展示过期（已归档）”，之后可在已归档栏目中编辑。"
+                                onConfirm={() => handleArchive(record.id)}
+                                okText="确认归档"
+                                cancelText="取消"
                             >
-                                编辑
-                            </Button>
+                                <Button type="link" icon={<InboxOutlined />}>
+                                    归档
+                                </Button>
+                            </Popconfirm>
                         )}
 
                         {/* 撤销审核：需横幅管理权 */}
@@ -439,7 +519,7 @@ const BannerManager = () => {
                         )}
 
                         {/* 🚨 下架按钮：需审核权 或 横幅管理权，且当前必须是审核通过的正常状态 */}
-                        {canTakeDown && record.auditStatus === 1 && (
+                        {canTakeDown && record.auditStatus === 1 && !isBannerExpired(record) && activeTab !== '3' && (
                             <Popconfirm
                                 title="确定要下架该横幅吗？"
                                 description="下架后该横幅将立即隐藏，并退回待审核状态。"
@@ -454,7 +534,7 @@ const BannerManager = () => {
 
                         {/* 删除按钮：需横幅管理权 */}
                         {canManageBanner && (
-                            <Popconfirm title="确定删除吗？" onConfirm={() => handleDelete(record.id)}>
+                            <Popconfirm title="确定删除吗？" onConfirm={() => handleDelete(record)}>
                                 <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
                             </Popconfirm>
                         )}
@@ -466,6 +546,7 @@ const BannerManager = () => {
 
     const openModal = (record = null) => {
         setEditingId(record ? record.id : null);
+        setEditingRecord(record);
         if (record) {
             form.setFieldsValue({
                 eventId: record.eventId,
@@ -481,6 +562,7 @@ const BannerManager = () => {
             form.resetFields();
             setFileList([]);
             setEventOptions([]);
+            setEditingRecord(null);
         }
         setModalVisible(true);
     };
@@ -499,7 +581,7 @@ const BannerManager = () => {
                 eventId: values.eventId,
                 startTime: values.timeRange[0].format('YYYY-MM-DD HH:mm:ss'),
                 endTime: values.timeRange[1].format('YYYY-MM-DD HH:mm:ss'),
-                isExpiredEdit: activeTab === '3'
+                isExpiredEdit: editingRecord ? isBannerExpired(editingRecord) : false
             };
 
             const res = await axios.post('/api/admin/banner/save', payload);
@@ -513,6 +595,8 @@ const BannerManager = () => {
                 message.success(res.data.message || '操作成功');
                 setModalVisible(false);
                 setFileList([]);
+                setEditingId(null);
+                setEditingRecord(null);
                 fetchBanners();
             } else {
                 message.error(res.data.message || '操作失败');
@@ -524,9 +608,10 @@ const BannerManager = () => {
         }
     };
 
-    const handleDelete = async (id) => {
+    const handleDelete = async (record) => {
         try {
-            const res = await axios.delete(`/api/admin/banner/${id}?isExpired=${activeTab === '3'}`);
+            const isExpired = isBannerExpired(record);
+            const res = await axios.delete(`/api/admin/banner/${record.id}?isExpired=${isExpired}`);
             if (res.data.code === 200) {
                 message.success('删除成功');
                 fetchBanners();
@@ -595,9 +680,10 @@ const BannerManager = () => {
             </div>
 
             <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key)} items={[
+                { key: '-1', label: '全部横幅' },
                 { key: '2', label: '展示中' },
                 { key: '1', label: '即将展示' },
-                { key: '0', label: '审核中' }, // 🚨 新增的审核中栏目
+                { key: '0', label: '审核中' },
                 { key: '3', label: '展示过期 (已归档)' }
             ]} />
 

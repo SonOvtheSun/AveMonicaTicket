@@ -262,7 +262,8 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
 
                 setArtistOptions(prev => {
                     const selectedIds = form.getFieldValue('artistIds') || [];
-                    const preservedOptions = prev.filter(p => selectedIds.includes(p.value));
+                    const selectedIdSet = new Set(selectedIds.map(id => String(id)));
+                    const preservedOptions = prev.filter(p => selectedIdSet.has(String(p.value)));
                     const merged = append ? [...prev] : [...preservedOptions];
                     newOptions.forEach(opt => {
                         if (!merged.find(m => m.value === opt.value)) merged.push(opt);
@@ -286,6 +287,38 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         searchTimeoutRef.current = setTimeout(() => {
             fetchRemoteArtists(value, 1, false);
         }, 500);
+    };
+
+    const normalizeId = (value) => String(value ?? '');
+
+    const findArtistOption = (value) => {
+        return artistOptions.find(opt => normalizeId(opt.value) === normalizeId(value));
+    };
+
+    const renderArtistTag = ({ label, value, closable, onClose }) => {
+        const option = findArtistOption(value);
+        const displayLabel = option?.label || label || '未知艺人';
+
+        return (
+            <Tag
+                closable={closable}
+                onClose={onClose}
+                className="event-artist-selected-tag"
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }}
+            >
+                <Avatar
+                    src={option?.avatarUrl || 'https://via.placeholder.com/24'}
+                    size={20}
+                    className="event-artist-selected-avatar"
+                />
+                <span className="event-artist-selected-name">
+                {displayLabel}
+            </span>
+            </Tag>
+        );
     };
 
     const loadMoreArtists = (e) => {
@@ -400,21 +433,6 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
         }
     };
 
-    const fetchArtists = async () => {
-        try {
-            const res = await axios.get('/api/admin/artist/listAll');
-            if (res.data.code === 200 && res.data.data == null) {
-                const options = res.data.data.map(artist => {
-                    const labelName = artist.auditStatus === 0 ? `${artist.name} (待审核)` : artist.name;
-                    return { label: labelName, value: artist.id };
-                });
-                setArtistOptions(options);
-            }
-        } catch (err) {
-            message.error('获取艺人库失败，请检查网络');
-        }
-    };
-
     const fetchCollections = async () => {
         try {
             const res = await axios.get('/api/admin/collection/list');
@@ -423,7 +441,6 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
     };
 
     useEffect(() => {
-        fetchArtists();
         fetchCollections();
     }, []);
 
@@ -472,7 +489,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 const initArtistOpts = editingRecord.artists.map(a => ({
                     label: a.auditStatus === 0 ? `${a.name} (待审核)` : a.name,
                     value: a.id,
-                    avatarUrl: a.avatarUrl
+                    avatarUrl: a.avatarUrl || a.avatar_url || a.avatar || ''
                 }));
                 setArtistOptions(initArtistOpts);
             }
@@ -564,7 +581,8 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                 setArtistModalVisible(false);
                 artistForm.resetFields();
                 setAvatarFileList([]);
-                fetchArtists();
+                setArtistKeyword(values.name);
+                fetchRemoteArtists(values.name, 1, false);
             } else {
                 message.error(res.data.message || '艺人提交失败');
             }
@@ -785,6 +803,7 @@ const AddEventForm = ({ onSuccess, editingRecord }) => {
                         placeholder="输入音乐人姓名"
                         size="large"
                         options={artistOptions}
+                        tagRender={renderArtistTag}
                         notFoundContent={fetchingArtists ? <Spin size="small" /> : "请在框内打字以搜索艺人库..."}
                         dropdownRender={(menu) => (
                             <>

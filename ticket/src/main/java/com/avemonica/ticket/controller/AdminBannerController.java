@@ -15,6 +15,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import com.avemonica.ticket.entity.User;
@@ -23,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Objects;
 
 import java.time.LocalDate;
@@ -72,39 +74,226 @@ public class AdminBannerController {
 
     @GetMapping("/list")
     @PreAuthorize(AuthExp.BANNER_VIEW)
-    public Result<?> getBanners(@RequestParam Integer type) {
+    public Result<?> getBanners(@RequestParam(defaultValue = "-1") Integer type) {
         LocalDateTime now = LocalDateTime.now();
 
-        if (type == 0) {
-            // 🚨 新增分支：审核中（查询 新增待审核 或 修改待审核 的数据）
+        if (type == -1) {
+            // 全部未归档横幅：只查主表
             return Result.success(bannerService.list(
                     new LambdaQueryWrapper<Banner>()
-                            .and(w -> w.eq(Banner::getAuditStatus, 0).or().eq(Banner::getEditAuditStatus, 0)).or().eq(Banner::getAuditStatus, 3)
                             .orderByDesc(Banner::getCreateTime)
             ));
-        } else if (type == 1) {
-            // 即将展示：开始时间大于当前时间，且主状态必须是已审核通过
+        }
+
+        if (type == 0) {
+            // 审核中：新增待审核 / 修改待审核 / 已撤销
             return Result.success(bannerService.list(
                     new LambdaQueryWrapper<Banner>()
-                            .eq(Banner::getAuditStatus, 1) // 🚨 过滤掉处于“新增待审核”的脏数据
+                            .and(w -> w
+                                    .eq(Banner::getAuditStatus, 0)
+                                    .or()
+                                    .eq(Banner::getEditAuditStatus, 0)
+                                    .or()
+                                    .eq(Banner::getAuditStatus, 3)
+                            )
+                            .orderByDesc(Banner::getCreateTime)
+            ));
+        }
+
+        if (type == 1) {
+            // 即将展示
+            return Result.success(bannerService.list(
+                    new LambdaQueryWrapper<Banner>()
+                            .eq(Banner::getAuditStatus, 1)
                             .gt(Banner::getStartTime, now)
                             .orderByDesc(Banner::getCreateTime)
             ));
-        } else if (type == 2) {
-            // 展示中：当前时间处于开始与结束之间，且主状态必须是已审核通过
+        }
+
+        if (type == 2) {
+            // 展示中
             return Result.success(bannerService.list(
                     new LambdaQueryWrapper<Banner>()
-                            .eq(Banner::getAuditStatus, 1) // 🚨 过滤掉处于“新增待审核”的脏数据
+                            .eq(Banner::getAuditStatus, 1)
                             .le(Banner::getStartTime, now)
                             .ge(Banner::getEndTime, now)
                             .orderByDesc(Banner::getCreateTime)
             ));
-        } else {
-            // 已过期：查冷库
+        }
+
+        if (type == 3) {
+            // 已归档过期横幅
             return Result.success(overdateService.list(
-                    new LambdaQueryWrapper<BannerOverdate>().orderByDesc(BannerOverdate::getArchiveTime)
+                    new LambdaQueryWrapper<BannerOverdate>()
+                            .orderByDesc(BannerOverdate::getArchiveTime)
             ));
         }
+
+        throw new BusinessException("未知的横幅筛选类型");
+    }
+
+    @PutMapping("/archive/{id}")
+    @PreAuthorize(AuthExp.BANNER_MANAGE)
+    @Transactional(rollbackFor = Exception.class)
+    public Result<String> archiveBanner(@PathVariable Long id) {
+        Banner banner = bannerService.getById(id);
+        if (banner == null) {
+            throw new BusinessException("横幅不存在");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (!Objects.equals(banner.getAuditStatus(), 1)) {
+            throw new BusinessException("只有已审核通过的横幅才能归档");
+        }
+
+        if (Objects.equals(banner.getEditAuditStatus(), 0)) {
+            throw new BusinessException("该横幅有修改审核待处理，请先审核或撤销后再归档");
+        }
+
+        if (banner.getEndTime() == null || !banner.getEndTime().isBefore(now)) {
+            throw new BusinessException("该横幅尚未过期，不能归档");
+        }
+
+        BannerOverdate overdate = new BannerOverdate();
+        BeanUtils.copyProperties(banner, overdate);
+
+        if (overdate.getCreateTime() == null) {
+            overdate.setCreateTime(banner.getCreateTime());
+        }
+        overdate.setArchiveTime(now);
+
+        // 如果历史数据里冷库已存在同 ID，直接更新，避免重复主键。
+        BannerOverdate exists = overdateService.getById(id);
+        if (exists == null) {
+            overdateService.save(overdate);
+        } else {
+            overdateService.updateById(overdate);
+        }
+
+        // 归档成功后，从主表删除。
+        bannerService.removeById(id);
+
+        return Result.success("横幅已归档");
+    }
+
+    private List<Banner> listActiveBanners(Integer type, String keyword, LocalDateTime now) {
+        LambdaQueryWrapper<Banner> wrapper = new LambdaQueryWrapper<>();
+
+        applyActiveBannerKeyword(wrapper, keyword);
+
+        if (type == null) {
+            // 全部主表横幅：不加状态过滤
+        } else if (type == 0) {
+            // 审核中：新增待审核 / 修改待审核 / 已撤销
+            wrapper.and(w -> w
+                    .eq(Banner::getAuditStatus, 0)
+                    .or()
+                    .eq(Banner::getEditAuditStatus, 0)
+                    .or()
+                    .eq(Banner::getAuditStatus, 3)
+            );
+        } else if (type == 1) {
+            // 即将展示：已审核通过 + 未开始
+            wrapper.eq(Banner::getAuditStatus, 1)
+                    .gt(Banner::getStartTime, now);
+        } else if (type == 2) {
+            // 展示中：已审核通过 + 当前时间在展示区间内
+            wrapper.eq(Banner::getAuditStatus, 1)
+                    .le(Banner::getStartTime, now)
+                    .ge(Banner::getEndTime, now);
+        }
+
+        wrapper.orderByDesc(Banner::getCreateTime);
+        return bannerService.list(wrapper);
+    }
+
+    private List<Banner> listExpiredBannersAsActive(String keyword) {
+        LambdaQueryWrapper<BannerOverdate> wrapper = new LambdaQueryWrapper<>();
+
+        applyExpiredBannerKeyword(wrapper, keyword);
+
+        wrapper.orderByDesc(BannerOverdate::getArchiveTime);
+
+        List<BannerOverdate> expiredList = overdateService.list(wrapper);
+        List<Banner> result = new ArrayList<>();
+
+        for (BannerOverdate expired : expiredList) {
+            Banner banner = new Banner();
+            BeanUtils.copyProperties(expired, banner);
+
+            // 冷库里的横幅本质上是曾经审核通过并归档的横幅。
+            // 前端状态显示会根据 endTime 判断“已过期”。
+            banner.setAuditStatus(1);
+            banner.setEditAuditStatus(null);
+            banner.setPendingPayload(null);
+
+            result.add(banner);
+        }
+
+        return result;
+    }
+
+    private void applyActiveBannerKeyword(LambdaQueryWrapper<Banner> wrapper, String keyword) {
+        if (!StringUtils.hasText(keyword)) {
+            return;
+        }
+
+        String kw = "%" + keyword.trim() + "%";
+
+        wrapper.and(w -> w
+                .apply("CAST(id AS CHAR) LIKE {0}", kw)
+                .or()
+                .apply("CAST(event_id AS CHAR) LIKE {0}", kw)
+                .or()
+                .apply(
+                        "EXISTS (" +
+                                "SELECT 1 FROM tb_event e " +
+                                "WHERE e.id = tb_banner.event_id " +
+                                "AND e.title LIKE {0}" +
+                                ")",
+                        kw
+                )
+        );
+    }
+
+    private void applyExpiredBannerKeyword(LambdaQueryWrapper<BannerOverdate> wrapper, String keyword) {
+        if (!StringUtils.hasText(keyword)) {
+            return;
+        }
+
+        String kw = "%" + keyword.trim() + "%";
+
+        wrapper.and(w -> w
+                .apply("CAST(id AS CHAR) LIKE {0}", kw)
+                .or()
+                .apply("CAST(event_id AS CHAR) LIKE {0}", kw)
+                .or()
+                .apply(
+                        "EXISTS (" +
+                                "SELECT 1 FROM tb_event e " +
+                                "WHERE e.id = tb_banner_overdate.event_id " +
+                                "AND e.title LIKE {0}" +
+                                ")",
+                        kw
+                )
+        );
+    }
+
+    private LocalDateTime resolveBannerSortTime(Banner banner) {
+        if (banner == null) {
+            return LocalDateTime.MIN;
+        }
+
+        if (banner.getCreateTime() != null) {
+            return banner.getCreateTime();
+        }
+
+        if (banner.getStartTime() != null) {
+            return banner.getStartTime();
+        }
+
+        return LocalDateTime.MIN;
     }
 
     @PostMapping("/save")
@@ -113,6 +302,8 @@ public class AdminBannerController {
     public Result<String> saveBanner(@RequestBody @Validated BannerSaveDTO dto) {
         LocalDateTime now = LocalDateTime.now();
         boolean superAdmin = isSuperAdmin();
+
+        checkExpiredActiveBannerBeforeEdit(dto, now);
 
         boolean isNowExpired = dto.getEndTime().isBefore(now);
         if (!isNowExpired) {
@@ -193,6 +384,26 @@ public class AdminBannerController {
         }
 
         throw new BusinessException("当前横幅状态不允许修改");
+    }
+
+    private void checkExpiredActiveBannerBeforeEdit(BannerSaveDTO dto, LocalDateTime now) {
+        if (dto == null || dto.getId() == null) {
+            return;
+        }
+
+        // 已归档横幅允许在 tb_banner_overdate 里编辑。
+        if (Boolean.TRUE.equals(dto.getIsExpiredEdit())) {
+            return;
+        }
+
+        Banner oldBanner = bannerService.getById(dto.getId());
+        if (oldBanner == null) {
+            return;
+        }
+
+        if (oldBanner.getEndTime() != null && oldBanner.getEndTime().isBefore(now)) {
+            throw new BusinessException("该横幅已过期，请先归档后再编辑");
+        }
     }
 
     /**

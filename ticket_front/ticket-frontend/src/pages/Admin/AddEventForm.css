@@ -63,3 +63,55 @@
 .ant-drawer-body {
     padding-bottom: 80px; /* 给底部按钮留出空间，防止内容被遮挡 */
 }
+
+/* ==========================================
+   演出表单：参演音乐人选择器
+   ========================================== */
+.event-artist-option {
+    max-width: 100%;
+}
+
+.event-artist-option-avatar {
+    border: 1px solid #eeeeee;
+    flex: 0 0 auto;
+}
+
+.event-artist-load-more {
+    text-align: center;
+    padding: 10px 0;
+    border-top: 1px solid #f0f0f0;
+}
+
+.event-artist-selected-tag.ant-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    max-width: 180px;
+    padding: 2px 8px;
+    margin-inline-end: 6px;
+    border-radius: 999px;
+    background: #fff0f3;
+    border: 1px solid rgba(255, 136, 153, 0.28);
+    color: #333333;
+}
+
+.event-artist-selected-avatar {
+    flex: 0 0 auto;
+}
+
+.event-artist-selected-name {
+    max-width: 120px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.event-artist-selected-tag .ant-tag-close-icon {
+    color: #ff8899;
+    margin-inline-start: 2px;
+}
+
+.event-artist-selected-tag .ant-tag-close-icon:hover {
+    color: #ff4f70;
+}

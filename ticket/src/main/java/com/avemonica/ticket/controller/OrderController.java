@@ -3,21 +3,19 @@ package com.avemonica.ticket.controller;
 import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.dto.OrderCreateMessage;
 import com.avemonica.ticket.dto.TicketIssueMessage;
-import com.avemonica.ticket.entity.Event;
-import com.avemonica.ticket.entity.EventSession;
-import com.avemonica.ticket.entity.Order;
-import com.avemonica.ticket.entity.OrderSpectator;
-import com.avemonica.ticket.entity.TicketCategory;
+import com.avemonica.ticket.entity.*;
 import com.avemonica.ticket.mapper.EventMapper;
 import com.avemonica.ticket.mapper.EventSessionMapper;
 import com.avemonica.ticket.mapper.OrderSpectatorMapper;
 import com.avemonica.ticket.mapper.TicketCategoryMapper;
 import com.avemonica.ticket.service.ArtistHeatService;
 import com.avemonica.ticket.service.OrderService;
+import com.avemonica.ticket.service.RecommendBehaviorService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -44,6 +42,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/order")
 public class OrderController {
@@ -74,6 +73,9 @@ public class OrderController {
 
     @Autowired
     private ArtistHeatService artistHeatService;
+
+    @Autowired
+    private RecommendBehaviorService recommendBehaviorService;
 
     /** 演出隐藏状态。隐藏演出不允许进入购票流程。 */
     private static final int EVENT_STATUS_HIDDEN = 4;
@@ -110,6 +112,12 @@ public class OrderController {
     private static final String KEY_RISK_IP_EVENT_USERS = "risk:ip:event:users:";
     private static final String KEY_RISK_UA_EVENT_USERS = "risk:ua:event:users:";
     private static final String KEY_RISK_DEVICE_EVENT_USERS = "risk:device:event:users:";
+
+    /** 演出上架中状态。 */
+    private static final int EVENT_STATUS_ONLINE = 1;
+
+    /** 演出已停售状态。 */
+    private static final int EVENT_STATUS_STOPPED = 3;
 
     private static final int RISK_NEED_CAPTCHA_SCORE = 70;
     private static final int RISK_BLOCK_SCORE = 120;
@@ -328,6 +336,12 @@ public class OrderController {
         orderService.updateById(order);
         artistHeatService.markEventDirty(order.getEventId());
 
+        recordRecommendBehaviorQuietly(
+                order.getUserId(),
+                order.getEventId(),
+                UserBehavior.TYPE_PAY_ORDER
+        );
+
         try {
             List<OrderSpectator> osList = orderSpectatorMapper.selectList(
                     new LambdaQueryWrapper<OrderSpectator>()
@@ -415,9 +429,19 @@ public class OrderController {
     }
 
     private PurchaseContext validateSessionForPurchase(Long eventId, Long sessionId, Long ticketId, boolean requireTicket) {
+        LocalDateTime now = LocalDateTime.now();
+
         Event event = eventMapper.selectById(eventId);
         if (event == null || Objects.equals(event.getStatus(), EVENT_STATUS_HIDDEN)) {
             throw new IllegalArgumentException("该演出信息不存在或已下架！");
+        }
+
+        if (Objects.equals(event.getStatus(), EVENT_STATUS_STOPPED)) {
+            throw new IllegalArgumentException("该演出已停售，无法购票");
+        }
+
+        if (!Objects.equals(event.getStatus(), EVENT_STATUS_ONLINE)) {
+            throw new IllegalArgumentException("该演出当前状态暂不可购票");
         }
 
         EventSession session = eventSessionMapper.selectById(sessionId);
@@ -429,11 +453,19 @@ public class OrderController {
             throw new IllegalArgumentException("该场次尚未上架或已停售，无法购票！");
         }
 
+        if (session.getShowTime() == null) {
+            throw new IllegalArgumentException("该场次尚未配置演出时间，暂不可购票！");
+        }
+
+        if (!now.isBefore(session.getShowTime())) {
+            throw new IllegalArgumentException("该演出已结束，无法购票");
+        }
+
         if (session.getSaleTime() == null) {
             throw new IllegalArgumentException("该场次尚未配置开票时间，暂不可购票！");
         }
 
-        if (LocalDateTime.now().isBefore(session.getSaleTime())) {
+        if (now.isBefore(session.getSaleTime())) {
             throw new IllegalArgumentException("该场次尚未正式开售，请等待倒计时结束！");
         }
 
@@ -656,6 +688,19 @@ public class OrderController {
 
         private static ScalperRiskResult block(String message) {
             return new ScalperRiskResult(true, false, message);
+        }
+    }
+
+    private void recordRecommendBehaviorQuietly(Long userId, Long eventId, Integer behaviorType) {
+        if (userId == null || eventId == null || behaviorType == null) {
+            return;
+        }
+
+        try {
+            recommendBehaviorService.recordBehavior(userId, null, eventId, behaviorType);
+        } catch (Exception e) {
+            log.warn("记录支付推荐行为失败，userId={}, eventId={}, behaviorType={}",
+                    userId, eventId, behaviorType, e);
         }
     }
 }

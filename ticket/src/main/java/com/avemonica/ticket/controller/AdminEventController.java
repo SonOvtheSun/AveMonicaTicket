@@ -7,9 +7,7 @@ import com.avemonica.ticket.entity.*;
 import com.avemonica.ticket.exception.BusinessException;
 import com.avemonica.ticket.mapper.ArtistMapper;
 import com.avemonica.ticket.mapper.EventSessionMapper;
-import com.avemonica.ticket.service.ArtistService;
-import com.avemonica.ticket.service.EventService;
-import com.avemonica.ticket.service.UploadFileService;
+import com.avemonica.ticket.service.*;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -23,8 +21,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
-import com.avemonica.ticket.service.TicketService;
-import com.avemonica.ticket.service.EventArtistService;
 import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -71,6 +67,9 @@ public class AdminEventController {
     @Qualifier("eventLocalCache")
     private Cache<String, String> localCache;
 
+    @Autowired
+    private EventAiIndexService eventAiIndexService;
+
     private static final String EVENT_CACHE_KEY_PREFIX = "event:detail:";
 
     private void evictEventDetailCache(Long eventId) {
@@ -99,6 +98,13 @@ public class AdminEventController {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    @PostMapping("/{id}/rebuild-ai-index")
+    @PreAuthorize(AuthExp.EVENT_EDIT)
+    public Result<String> rebuildEventAiIndex(@PathVariable Long id) {
+        eventAiIndexService.rebuildEventAiIndex(id, true);
+        return Result.success("AI索引重建任务已提交，请稍后查看索引状态");
     }
 
 

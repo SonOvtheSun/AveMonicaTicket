@@ -113,20 +113,40 @@ const EventDetail = () => {
         ? (sessions.find(s => String(s.id) === String(selectedSessionId)) || sessions[0] || null)
         : null;
 
+    const EVENT_STATUS_ONSALE = 1;
+    const EVENT_STATUS_STOPPED = 3;
+    const SESSION_STATUS_ONSALE = 1;
+
     const activeStatus = selectedSession?.status ?? null;
     const activeShowTime = selectedSession?.showTime ?? null;
     const activeSaleTime = selectedSession?.saleTime ?? null;
 
     const isNoSession = !!event && !hasSession;
 
-    const isPresale = activeStatus === 1 && !saleAvailable;
-    const showPurchaseOptions = activeStatus === 1 && saleAvailable;
-
     const showTimeObj = activeShowTime ? dayjs(activeShowTime) : null;
     const isShowTimeValid = !!showTimeObj && showTimeObj.isValid();
-    const isStatus3Future = activeStatus === 3 && isShowTimeValid && showTimeObj.isAfter(dayjs());
-    const isStatus3Past = activeStatus === 3 && isShowTimeValid && showTimeObj.isBefore(dayjs());
-    const hidePurchaseOptions = isStatus3Future;
+
+// 演出状态为已停售
+    const isEventStopped = Number(event?.status) === EVENT_STATUS_STOPPED;
+
+// 场次不是上架中，也视为不可购票
+    const isSessionStopped = activeStatus !== null && Number(activeStatus) !== SESSION_STATUS_ONSALE;
+
+// 演出时间已经到期：这里按 showTime <= 当前时间 判断
+    const isSessionTimeExpired = isShowTimeValid && !showTimeObj.isAfter(dayjs());
+
+    const isStatus3Future = Number(activeStatus) === 3 && isShowTimeValid && showTimeObj.isAfter(dayjs());
+    const isStatus3Past = Number(activeStatus) === 3 && isShowTimeValid && !showTimeObj.isAfter(dayjs());
+
+// 因为已停售 / 已结束导致不可购买
+    const purchaseClosed = isEventStopped || isSessionStopped || isSessionTimeExpired;
+
+    const isPresale = !purchaseClosed && Number(activeStatus) === SESSION_STATUS_ONSALE && !saleAvailable;
+    const showPurchaseOptions = !purchaseClosed && Number(activeStatus) === SESSION_STATUS_ONSALE && saleAvailable;
+
+// 已停售 / 已结束时仍然展示票档，但只读灰色不可点
+    const showReadonlyTicketOptions = purchaseClosed && hasSession;
+    const showTicketOptions = showPurchaseOptions || showReadonlyTicketOptions;
 
     const sortedTickets = sortTicketsByPriceAsc(selectedSession?.tickets || []);
     const totalPrice = selectedTicket ? (Number(selectedTicket.price || 0) * quantity).toFixed(2) : '0.00';
@@ -222,9 +242,19 @@ const EventDetail = () => {
                     const firstSession = normalizedSessions[0] || null;
                     setSelectedSessionId(firstSession?.id ?? null);
 
-                    const firstAvailable = sortTicketsByPriceAsc(firstSession?.tickets || [])
-                        .find(t => Number(t.remainingStock ?? 0) > 0);
-                    setSelectedTicket(firstAvailable || null);
+                    const firstShowTimeObj = firstSession?.showTime ? dayjs(firstSession.showTime) : null;
+                    const firstSessionExpired = firstShowTimeObj?.isValid() && !firstShowTimeObj.isAfter(dayjs());
+                    const firstSessionStopped = firstSession?.status != null
+                        && Number(firstSession.status) !== SESSION_STATUS_ONSALE;
+                    const firstEventStopped = Number(eventData?.status) === EVENT_STATUS_STOPPED;
+
+                    if (!firstSession || firstSessionExpired || firstSessionStopped || firstEventStopped) {
+                        setSelectedTicket(null);
+                    } else {
+                        const firstAvailable = sortTicketsByPriceAsc(firstSession.tickets || [])
+                            .find(t => Number(t.remainingStock ?? 0) > 0);
+                        setSelectedTicket(firstAvailable || null);
+                    }
 
                     if (eventData.collectionId) {
                         try {
@@ -242,7 +272,8 @@ const EventDetail = () => {
                     navigate('/');
                 }
             } catch (err) {
-                message.error('网络请求失败');
+                console.error('加载演出详情失败：', err);
+                message.error(err?.response?.data?.message || '加载演出详情失败');
             } finally {
                 setLoading(false);
             }
@@ -259,9 +290,19 @@ const EventDetail = () => {
         hasAutoFilled.current = false;
         setQuantity(1);
 
-        const firstAvailable = sortTicketsByPriceAsc(selectedSession.tickets || [])
-            .find(t => Number(t.remainingStock ?? 0) > 0);
-        setSelectedTicket(firstAvailable || null);
+        const currentShowTimeObj = selectedSession?.showTime ? dayjs(selectedSession.showTime) : null;
+        const currentSessionExpired = currentShowTimeObj?.isValid() && !currentShowTimeObj.isAfter(dayjs());
+        const currentSessionStopped = selectedSession?.status != null
+            && Number(selectedSession.status) !== SESSION_STATUS_ONSALE;
+        const currentEventStopped = Number(event?.status) === EVENT_STATUS_STOPPED;
+
+        if (currentSessionExpired || currentSessionStopped || currentEventStopped) {
+            setSelectedTicket(null);
+        } else {
+            const firstAvailable = sortTicketsByPriceAsc(selectedSession.tickets || [])
+                .find(t => Number(t.remainingStock ?? 0) > 0);
+            setSelectedTicket(firstAvailable || null);
+        }
 
         const fetchCloudReservation = async () => {
             const token = localStorage.getItem('token');
@@ -290,7 +331,7 @@ const EventDetail = () => {
         };
 
         fetchCloudReservation();
-    }, [id, event?.id, selectedSessionId]);
+    }, [id, event?.id, event?.status, selectedSessionId]);
 
     // 按当前 session 轮询库存，不再按 eventId 拉取全部票档库存。
     useEffect(() => {
@@ -466,8 +507,18 @@ const EventDetail = () => {
             return;
         }
 
-        if (isStatus3Future) {
-            message.info('演出暂未开放购票，敬请期待');
+        if (isEventStopped) {
+            message.info('该演出已停售，暂无法购票');
+            return;
+        }
+
+        if (isSessionTimeExpired) {
+            message.info('该演出已结束，暂无法购票');
+            return;
+        }
+
+        if (isSessionStopped) {
+            message.info(isStatus3Future ? '演出暂未开放购票，敬请期待' : '该场次已停售，暂无法购票');
             return;
         }
 
@@ -558,19 +609,24 @@ const EventDetail = () => {
         );
     }
 
-    const actionButtonDisabled = isNoSession || activeStatus !== 1;
+    const actionButtonDisabled =
+        isNoSession
+        || isEventStopped
+        || isSessionTimeExpired
+        || isSessionStopped
+        || (showPurchaseOptions && !selectedTicket);
 
     const actionButtonText = isNoSession
         ? '敬请期待'
-        : activeStatus === 1
-            ? (!saleAvailable
-                ? (reservedData ? '已预约' : '立即预约')
-                : '立即购票')
-            : isStatus3Future
-                ? '敬请期待'
-                : isStatus3Past
-                    ? '已结束'
-                    : '已停售';
+        : isEventStopped
+            ? '已停售'
+            : isSessionTimeExpired
+                ? '已结束'
+                : isSessionStopped
+                    ? (isStatus3Future ? '敬请期待' : '已停售')
+                    : !saleAvailable
+                        ? (reservedData ? '已预约' : '立即预约')
+                        : '立即购票';
 
     if (!event) return null;
 
@@ -740,24 +796,34 @@ const EventDetail = () => {
                             </div>
                         )}
 
-                        {showPurchaseOptions && (
+                        {showTicketOptions && (
                             <div style={{ marginTop: '24px', textAlign: 'left' }}>
                                 <div style={{ fontWeight: 'bold', color: '#333', marginBottom: 8 }}>选择票档</div>
                                 <div className="tickets-container">
-                                    {sortedTickets.map(ticket => {
+                                    {sortedTickets.length > 0 ? sortedTickets.map(ticket => {
                                         const isSoldOut = Number(ticket.remainingStock ?? 0) <= 0;
-                                        const isActive = Number(selectedTicket?.id) === Number(ticket.id);
+                                        const isTicketDisabled = !showPurchaseOptions || isSoldOut;
+                                        const isActive = showPurchaseOptions && Number(selectedTicket?.id) === Number(ticket.id);
+
                                         return (
                                             <div
                                                 key={ticket.id}
-                                                className={`ticket-pill ${isActive ? 'active' : ''} ${isSoldOut ? 'sold-out' : ''}`}
-                                                onClick={() => !isSoldOut && setSelectedTicket(ticket)}
+                                                className={`ticket-pill ${isActive ? 'active' : ''} ${isSoldOut ? 'sold-out' : ''} ${isTicketDisabled ? 'disabled' : ''}`}
+                                                onClick={() => {
+                                                    if (isTicketDisabled) return;
+                                                    setSelectedTicket(ticket);
+                                                }}
                                             >
                                                 <span className="ticket-name">{ticket.name}</span>
-                                                <span className="ticket-price">¥ {ticket.price} {isSoldOut ? '(售罄)' : ''}</span>
+                                                <span className="ticket-price">
+                                                    ¥ {ticket.price}
+                                                    {isSoldOut ? ' (售罄)' : ''}
+                                                </span>
                                             </div>
                                         );
-                                    })}
+                                    }) : (
+                                        <div style={{ color: '#999', fontSize: 14 }}>该场次暂未设置票档</div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -780,7 +846,7 @@ const EventDetail = () => {
                         )}
 
                         <div className="action-bar">
-                            {!isNoSession && !hidePurchaseOptions && !isPresale && (
+                            {showPurchaseOptions && (
                                 <div>
                                     <span style={{ color: '#666', marginRight: 8 }}>总计:</span>
                                     <span style={{ color: '#FF8899', fontSize: 20 }}>¥</span>
@@ -797,7 +863,7 @@ const EventDetail = () => {
                                     background: actionButtonDisabled ? '#ccc' : 'linear-gradient(135deg, #FF8899, #ff6b80)',
                                     boxShadow: actionButtonDisabled ? 'none' : '0 4px 12px rgba(255, 136, 153, 0.4)',
                                     border: 'none',
-                                    marginLeft: hidePurchaseOptions || isPresale || isNoSession ? 'auto' : 0
+                                    marginLeft: showPurchaseOptions ? 0 : 'auto'
                                 }}
                             >
                                 {actionButtonText}

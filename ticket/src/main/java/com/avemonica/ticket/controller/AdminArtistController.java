@@ -242,8 +242,8 @@ public class AdminArtistController {
             artist.setEditAuditStatus(null);
             artist.setPendingPayload(null);
             artist.setAuditSubmitTime(LocalDateTime.now());
-            artistService.updateById(artist);
             artist.setFirstLetter(com.avemonica.ticket.util.ArtistInitialUtil.resolveFirstLetter(artist.getName()));
+            artistService.updateById(artist);
             evictArtistRelatedEventDetailCache(artist.getId());
             return Result.success("修改成功");
         }
