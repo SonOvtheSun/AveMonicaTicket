@@ -91,6 +91,7 @@ public class EventAiIndexServiceImpl implements EventAiIndexService {
      * 第一版建议异步执行，避免管理员保存演出时被 AI 卡住。
      * 调试阶段如果想同步看报错，可以临时去掉 @Async。
      */
+    @Async("aiTaskExecutor")
     @Override
     public void rebuildEventAiIndex(Long eventId) {
         rebuildEventAiIndex(eventId, false);
@@ -108,15 +109,28 @@ public class EventAiIndexServiceImpl implements EventAiIndexService {
             return;
         }
 
+        updateAiIndexProgress(eventId, 0, 1, "正在读取演出主表信息", null);
+
         Event event = eventService.getById(eventId);
         if (event == null) {
             log.warn("演出不存在，跳过 AI 索引，eventId={}", eventId);
+            updateAiIndexProgress(eventId, 2, 100, "演出不存在，任务终止", "演出不存在");
             return;
         }
+
+        updateAiIndexProgress(eventId, 0, 3, "正在读取场次、票档、艺人信息", null);
 
         List<EventSession> sessions = loadSessions(eventId);
         List<TicketCategory> tickets = loadTickets(eventId);
         List<Map<String, Object>> artists = loadArtists(eventId);
+
+        updateAiIndexProgress(
+                eventId,
+                0,
+                4,
+                "基础数据读取完成：场次 " + sessions.size() + " 个，票档 " + tickets.size() + " 个，艺人 " + artists.size() + " 个",
+                null
+        );
 
         String sourceHash = buildSourceHash(event, sessions, tickets, artists);
 
@@ -127,6 +141,7 @@ public class EventAiIndexServiceImpl implements EventAiIndexService {
                 && Objects.equals(oldProfile.getSourceHash(), sourceHash)
                 && Objects.equals(oldProfile.getIndexStatus(), INDEX_STATUS_SUCCESS)) {
             log.info("演出 AI 索引未变化，跳过重建，eventId={}", eventId);
+            updateAiIndexProgress(eventId, 1, 100, "索引未变化，跳过重建", null);
             return;
         }
 
@@ -177,6 +192,26 @@ public class EventAiIndexServiceImpl implements EventAiIndexService {
         } else {
             eventAiProfileMapper.updateById(profile);
         }
+
+        // 控制台进度输出
+        if (StringUtils.hasText(errorMsg)) {
+            log.warn(
+                    "AI索引进度 eventId={} status={} progress={} step={} error={}",
+                    eventId,
+                    status,
+                    progress,
+                    step,
+                    errorMsg
+            );
+        } else {
+            log.info(
+                    "AI索引进度 eventId={} status={} progress={} step={}",
+                    eventId,
+                    status,
+                    progress,
+                    step
+            );
+        }
     }
 
     @Override
@@ -202,31 +237,66 @@ public class EventAiIndexServiceImpl implements EventAiIndexService {
                                        EventAiProfile oldProfile) throws Exception {
         Long eventId = event.getId();
 
+        updateAiIndexProgress(eventId, 0, 10, "已加载演出基础数据", null);
+
+        updateAiIndexProgress(eventId, 0, 18, "正在构建 AI 提示词", null);
         String prompt = buildTagPrompt(event, sessions, tickets, artists);
+
+        updateAiIndexProgress(eventId, 0, 25, "正在读取并压缩演出图片", null);
         List<String> base64Images = buildBase64Images(event);
+
+        updateAiIndexProgress(
+                eventId,
+                0,
+                35,
+                "图片处理完成，已加入 Ollama 输入图片数：" + base64Images.size(),
+                null
+        );
 
         EventAiTagResult aiResult;
 
         try {
+            updateAiIndexProgress(eventId, 0, 45, "正在调用 Ollama 生成 AI 标签", null);
             aiResult = ollamaClient.generateEventTags(prompt, base64Images);
+            updateAiIndexProgress(eventId, 0, 58, "AI 标签生成完成", null);
         } catch (Exception e) {
+            updateAiIndexProgress(eventId, 2, 100, "AI 标签生成失败", e.getMessage());
             log.warn("AI标签生成失败，eventId={}", eventId, e);
             throw e;
         }
 
+        updateAiIndexProgress(eventId, 0, 62, "正在规范化 AI 标签结果", null);
         normalizeAiResult(aiResult, event);
 
+        updateAiIndexProgress(eventId, 0, 68, "正在构建向量化文本", null);
         String embeddingText = buildEmbeddingText(event, sessions, tickets, artists, aiResult);
+
+        updateAiIndexProgress(eventId, 0, 75, "正在调用 Ollama 生成 embedding 向量", null);
         List<Double> vector = ollamaClient.embed(embeddingText);
+
+        updateAiIndexProgress(eventId, 0, 82, "正在校验 embedding 向量维度：" + vector.size(), null);
         validateVector(vector);
 
+        updateAiIndexProgress(eventId, 0, 88, "正在构建 Qdrant Payload", null);
         Map<String, Object> payload = buildVectorPayload(event, sessions, tickets, artists, aiResult);
+
+        updateAiIndexProgress(eventId, 0, 92, "正在写入 Qdrant 向量数据库", null);
 
         // Qdrant point id 统一使用 eventId。
         qdrantClient.upsertEventVector(eventId, vector, payload);
 
+        updateAiIndexProgress(eventId, 0, 96, "正在保存 AI 标签与摘要到 MySQL", null);
         saveSuccessProfile(event, aiResult, embeddingText, sourceHash, oldProfile);
-        log.info("演出 AI 索引重建成功，eventId={}", eventId);
+
+        updateAiIndexProgress(eventId, 1, 100, "AI 标注完成", null);
+
+        log.info(
+                "演出 AI 索引重建成功，eventId={}，eventType={}，city={}，styleTags={}",
+                eventId,
+                aiResult.getEventType(),
+                aiResult.getCity(),
+                join(aiResult.getStyle())
+        );
     }
 
     private List<EventSession> loadSessions(Long eventId) {

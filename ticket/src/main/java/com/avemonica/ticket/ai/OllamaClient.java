@@ -136,7 +136,7 @@ public class OllamaClient {
         options.put("num_ctx", 4096);
 
         // 图片描述只需要短文本，不要给太长，否则 qwen3-vl 更容易一直 thinking。
-        options.put("num_predict", 500);
+        options.put("num_predict", 6400);
 
         body.put("options", options);
 
