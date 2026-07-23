@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Space, Card, Tag, Modal, Drawer, message, Image, Popover, Input, Tabs, Popconfirm, Form, Select, Descriptions, Tooltip } from 'antd';
+import { Table, Button, Space, Card, Tag, Modal, Drawer, message, Image, Popover, Input, Tabs, Popconfirm, Form, Select, Descriptions, Tooltip, Dropdown } from 'antd';
 import { Plus, Edit, Trash2, EyeOff, Eye, ShieldOff } from 'lucide-react';
 import axios from '../../utils/request';
 import AddEventForm from './AddEventForm';
 import './EventManager.css';
-import { SearchOutlined, MinusCircleOutlined, PlusOutlined, RobotOutlined, SyncOutlined } from '@ant-design/icons';
+import { SearchOutlined, MinusCircleOutlined, PlusOutlined, RobotOutlined, SyncOutlined, MoreOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
 const EventManager = () => {
@@ -944,7 +944,16 @@ const EventManager = () => {
                                     <Button type="primary" icon={<Plus size={16} />} onClick={() => { setEditingRecord(null); setDrawerVisible(true); }} style={{ backgroundColor: '#FF8899', borderColor: '#FF8899', borderRadius: 8 }}>发布新演出</Button>
                                 )}
                             </div>
-                            <Table columns={columns} dataSource={events} rowKey="id" loading={loading} pagination={pagination} onChange={handleTableChange} />
+                            <Table
+                                className="event-manager-table"
+                                columns={columns}
+                                dataSource={events}
+                                rowKey="id"
+                                loading={loading}
+                                pagination={pagination}
+                                onChange={handleTableChange}
+                                scroll={{ x: 1700 }}
+                            />
                         </>
                     )
                 },

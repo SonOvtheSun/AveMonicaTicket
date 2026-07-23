@@ -72,6 +72,10 @@ public class AdminEventController {
 
     private static final String EVENT_CACHE_KEY_PREFIX = "event:detail:";
 
+    private static final int EVENT_STATUS_ONLINE = 1;
+    private static final int EVENT_STATUS_STOPPED = 3;
+    private static final int EVENT_STATUS_HIDDEN = 4;
+
     private void evictEventDetailCache(Long eventId) {
         if (eventId == null) {
             return;
@@ -190,6 +194,13 @@ public class AdminEventController {
 
                     eventService.applyEventMainData(id, dto, Event.AUDIT_APPROVED, finalStatus);
 
+                    // 修改审核通过后，如果目标状态是上架中，需要基于更新后的场次重新判断
+                    if (Objects.equals(finalStatus, EVENT_STATUS_ONLINE)) {
+                        Event updatedForValidation = eventService.getById(id);
+                        validateCanSetOnline(updatedForValidation);
+                    }
+
+
                     eventService.update(
                             new LambdaUpdateWrapper<Event>()
                                     .eq(Event::getId, id)
@@ -204,6 +215,8 @@ public class AdminEventController {
                     evictEventDetailCache(id);
 
                     return Result.success("演出修改审核已通过，客户端信息已同步更新");
+                } catch (BusinessException e) {
+                    throw e;
                 } catch (Exception e) {
                     throw new BusinessException("解析演出修改审核快照失败");
                 }
@@ -314,16 +327,20 @@ public class AdminEventController {
         if(event.getAuditStatus() != Event.AUDIT_APPROVED && status != 4){
             throw new BusinessException("未审核演出无法设置为其他状态");
         }
+        if (Objects.equals(status, EVENT_STATUS_ONLINE)) {
+            validateCanSetOnline(event);
+        }
+
         event.setStatus(status);
         eventService.updateById(event);
         evictEventDetailCache(id);
-
 
         return Result.success("状态更新成功", null);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize(AuthExp.EVENT_EDIT)
+    @Transactional(rollbackFor = Exception.class)
     public Result<String> updateEvent(@PathVariable Long id, @RequestBody @Validated EventAddDTO dto) {
         Event oldEvent = eventService.getById(id);
         if (oldEvent == null) {
@@ -331,6 +348,11 @@ public class AdminEventController {
         }
 
         eventService.updateEventWithTicketsAndArtists(id, dto);
+
+        if (isSuperAdmin() && Objects.equals(dto.getStatus(), EVENT_STATUS_ONLINE)) {
+            Event updatedForValidation = eventService.getById(id);
+            validateCanSetOnline(updatedForValidation);
+        }
 
         /*
          * 超管 admin 修改演出时，EventService 会直接覆盖主表，不走修改审核。
@@ -600,6 +622,78 @@ public class AdminEventController {
         } catch (Exception e) {
             log.warn("解析修改审核中的艺人信息失败，pendingPayload={}", pendingPayload, e);
             return new java.util.ArrayList<>();
+        }
+    }
+
+    /**
+     * 设置演出为“上架中”之前，校验是否已经过了演出时间。
+     *
+     * 规则：
+     * 1. 优先检查多场次 tb_event_session；
+     * 2. 只要存在一个未来场次，就允许上架；
+     * 3. 如果所有已配置场次都已经过期，则禁止上架；
+     * 4. 如果没有配置任何 showTime，认为是“时间待定”，不在这里拦截。
+     */
+    private void validateCanSetOnline(Event event) {
+        if (event == null || event.getId() == null) {
+            throw new BusinessException("演出不存在");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        List<EventSession> sessions = eventSessionMapper.selectList(
+                new LambdaQueryWrapper<EventSession>()
+                        .eq(EventSession::getEventId, event.getId())
+        );
+
+        boolean hasConfiguredShowTime = false;
+        boolean hasFutureShowTime = false;
+        LocalDateTime latestShowTime = null;
+
+        if (sessions != null && !sessions.isEmpty()) {
+            for (EventSession session : sessions) {
+                if (session == null) {
+                    continue;
+                }
+
+                // 隐藏场次不参与判断
+                if (Objects.equals(session.getStatus(), EVENT_STATUS_HIDDEN)) {
+                    continue;
+                }
+
+                LocalDateTime showTime = session.getShowTime();
+                if (showTime == null) {
+                    continue;
+                }
+
+                hasConfiguredShowTime = true;
+
+                if (latestShowTime == null || showTime.isAfter(latestShowTime)) {
+                    latestShowTime = showTime;
+                }
+
+                if (showTime.isAfter(now)) {
+                    hasFutureShowTime = true;
+                    break;
+                }
+            }
+
+            if (hasConfiguredShowTime && !hasFutureShowTime) {
+                throw new BusinessException(
+                        "该演出的所有场次均已结束，不能设置为上架中。最后一场演出时间："
+                                + latestShowTime
+                );
+            }
+
+            return;
+        }
+
+        // 兼容旧数据：如果主表 event.showTime 有值，也做一次兜底判断
+        if (event.getShowTime() != null && !event.getShowTime().isAfter(now)) {
+            throw new BusinessException(
+                    "该演出时间已过，不能设置为上架中。演出时间："
+                            + event.getShowTime()
+            );
         }
     }
 }

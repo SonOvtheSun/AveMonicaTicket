@@ -10,6 +10,8 @@ ai:
     base-url: http://localhost:11434
     vision-model: qwen3-vl:8b
     embedding-model: qwen3-embedding
+    chat-model: qwen3:8b
+
 
   vector:
     qdrant-url: http://localhost:6333

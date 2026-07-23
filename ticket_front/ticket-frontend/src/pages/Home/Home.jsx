@@ -3,6 +3,7 @@ import { Layout, Carousel, Button, Spin, Empty, message } from 'antd';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import PublicHeader from '../../components/PublicHeader/PublicHeader';
+import AiAssistantFloat from '../../components/AiAssistantFloat/AiAssistantFloat';
 import dayjs from 'dayjs';
 import axios from '../../utils/request';
 import './Home.css';
@@ -283,6 +284,8 @@ const Home = () => {
                     </Carousel>
                 </section>
 
+
+
                 <section className="home-event-section home-recommend-section">
                     <div className="home-section-header">
                         <div>
@@ -339,6 +342,11 @@ const Home = () => {
                     )}
                 </section>
             </Content>
+
+            <AiAssistantFloat
+                currentCity={currentCity}
+                onOpenEvent={(eventId) => navigate(`/event/${eventId}`)}
+            />
         </Layout>
     );
 };

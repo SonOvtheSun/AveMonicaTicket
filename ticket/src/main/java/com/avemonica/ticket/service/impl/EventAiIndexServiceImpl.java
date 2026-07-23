@@ -87,15 +87,6 @@ public class EventAiIndexServiceImpl implements EventAiIndexService {
         this.objectMapper = objectMapper;
     }
 
-    /**
-     * 第一版建议异步执行，避免管理员保存演出时被 AI 卡住。
-     * 调试阶段如果想同步看报错，可以临时去掉 @Async。
-     */
-    @Async("aiTaskExecutor")
-    @Override
-    public void rebuildEventAiIndex(Long eventId) {
-        rebuildEventAiIndex(eventId, false);
-    }
 
     @Async("aiTaskExecutor")
     @Override
