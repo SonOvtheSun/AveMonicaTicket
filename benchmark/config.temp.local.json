@@ -1,0 +1,45 @@
+{
+  "confirmation": "I_UNDERSTAND_THIS_MUTATES_DEDICATED_TEST_DATA",
+  "base_url": "http://localhost:18080",
+  "admin_token": "",
+  "inventory": 20,
+  "concurrency": 50,
+  "duplicate_deliveries": 5,
+  "settle_seconds": 2,
+  "wait_timeout_seconds": 25,
+  "rag_timeout_seconds": 90,
+  "rag_query": "",
+  "rag_city": "全国",
+  "mysql": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "root",
+    "password": "Sya20000204",
+    "database": "avemonica_benchmark_tmp"
+  },
+  "redis": {
+    "host": "localhost",
+    "port": 6379,
+    "password": "Sya20000204",
+    "db": 0,
+    "socket_timeout": 5
+  },
+  "kafka": {
+    "bootstrap_servers": [
+      "127.0.0.1:9092"
+    ],
+    "issue_topic": "order-ticket-issue-topic",
+    "dlt_topic": "order-ticket-issue-topic.DLT"
+  },
+  "fixture": {
+    "event_id": 6,
+    "session_id": 40,
+    "ticket_id": 139,
+    "ticket_name": "BENCHMARK专用票档",
+    "user_id": 990000001,
+    "spectator_ids": [
+      990001001
+    ],
+    "invalid_spectator_id": 9999999999999
+  }
+}

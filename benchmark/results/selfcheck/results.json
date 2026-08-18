@@ -1,0 +1,37 @@
+{
+  "runId": "selfcheck",
+  "startedAt": "2026-08-18T16:50:57+08:00",
+  "environment": {
+    "mode": "unit"
+  },
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "passRate": 100.0,
+    "durationMs": 0.0
+  },
+  "results": [
+    {
+      "scenario_id": 1,
+      "name": "自检",
+      "status": "PASS",
+      "duration_ms": 0.0,
+      "metrics": {
+        "QPS": 123.45,
+        "P95(ms)": 8.2
+      },
+      "checks": [
+        {
+          "name": "HTML断言",
+          "expected": true,
+          "actual": true,
+          "passed": true
+        }
+      ],
+      "notes": [],
+      "error": null
+    }
+  ]
+}
