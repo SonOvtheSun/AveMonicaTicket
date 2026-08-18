@@ -1,6 +1,7 @@
 package com.avemonica.ticket.service;
 
 import com.avemonica.ticket.entity.Order;
+import com.avemonica.ticket.entity.TicketIssueFailure;
 import com.avemonica.ticket.vo.OrderVO;
 import com.baomidou.mybatisplus.extension.service.IService;
 
@@ -42,4 +43,17 @@ public interface OrderService extends IService<Order> {
      * 管理员强制退款。
      */
     void forceRefund(Map<String, Object> body);
+
+    Order payOrderWithOutbox(Long orderId);
+
+    /**
+     * 管理员人工补偿异常出票。
+     */
+    void compensateTicketIssue(Long orderId);
+
+    /**
+     * 出票重试耗尽进入DLT后，
+     * 记录失败信息并把订单标记为异常。
+     */
+    void recordTicketIssueFailure(TicketIssueFailure failure);
 }

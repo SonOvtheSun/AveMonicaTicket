@@ -4,6 +4,7 @@ import com.avemonica.ticket.common.Result;
 import com.avemonica.ticket.dto.OrderCreateMessage;
 import com.avemonica.ticket.dto.TicketIssueMessage;
 import com.avemonica.ticket.entity.*;
+import com.avemonica.ticket.exception.BusinessException;
 import com.avemonica.ticket.mapper.EventMapper;
 import com.avemonica.ticket.mapper.EventSessionMapper;
 import com.avemonica.ticket.mapper.OrderSpectatorMapper;
@@ -325,56 +326,33 @@ public class OrderController {
 
     @PostMapping("/pay")
     public Result<String> payOrder(@RequestBody Map<String, Long> params) {
+
         Long orderId = params.get("orderId");
-        Order order = orderService.getById(orderId);
 
-        if (order == null) return Result.error("订单不存在");
-        if (order.getStatus() != ORDER_STATUS_PENDING_PAY) return Result.error("订单当前状态无法支付");
-        if (order.getSessionId() == null) return Result.error("订单缺少场次信息，无法支付");
-
-        order.setStatus(ORDER_STATUS_PAID_UNCHECKED);
-        orderService.updateById(order);
-        artistHeatService.markEventDirty(order.getEventId());
-
-        recordRecommendBehaviorQuietly(
-                order.getUserId(),
-                order.getEventId(),
-                UserBehavior.TYPE_PAY_ORDER
-        );
-
-        try {
-            List<OrderSpectator> osList = orderSpectatorMapper.selectList(
-                    new LambdaQueryWrapper<OrderSpectator>()
-                            .eq(OrderSpectator::getOrderId, orderId)
-                            .eq(OrderSpectator::getDeleteToken, 0L)
-            );
-
-            List<Long> spectatorIds = osList.stream().map(OrderSpectator::getSpectatorId).toList();
-            if (!spectatorIds.isEmpty()) {
-                TicketCategory ticket = ticketCategoryMapper.selectById(order.getTicketId());
-                String ticketName = ticket != null ? ticket.getName() : "未知票档";
-
-                TicketIssueMessage message = new TicketIssueMessage(
-                        orderId,
-                        order.getEventId(),
-                        order.getSessionId(),
-                        order.getTicketId(),
-                        ticketName,
-                        spectatorIds
-                );
-                kafkaTemplate.send("order-ticket-issue-topic", objectMapper.writeValueAsString(message));
-
-                String purchasedSetKey = KEY_PURCHASED_SPEC + sceneKey(order.getEventId(), order.getSessionId());
-                String[] specIdArray = spectatorIds.stream().map(String::valueOf).toArray(String[]::new);
-                redisTemplate.opsForSet().add(purchasedSetKey, specIdArray);
-                redisTemplate.expire(purchasedSetKey, 30, TimeUnit.DAYS);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            // 支付已成功但出票消息异常时，应接入报警或死信队列补偿。
+        if (orderId == null) {
+            return Result.error("订单ID不能为空");
         }
 
-        return Result.success("支付成功，正在为您出票");
+        try {
+            Order order = orderService.payOrderWithOutbox(orderId);
+
+            /*
+             * 以下属于非核心派生数据。
+             * 即使后续准备继续事件化，目前也先保留。
+             */
+            artistHeatService.markEventDirty(order.getEventId());
+
+            recordRecommendBehaviorQuietly(
+                    order.getUserId(),
+                    order.getEventId(),
+                    UserBehavior.TYPE_PAY_ORDER
+            );
+
+            return Result.success("支付成功，正在为您出票");
+
+        } catch (BusinessException e) {
+            return Result.error(e.getMessage());
+        }
     }
 
     /**

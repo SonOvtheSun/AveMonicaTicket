@@ -1,28 +1,24 @@
 package com.avemonica.ticket.service.impl;
 
+import com.avemonica.ticket.dto.TicketIssueMessage;
 import com.avemonica.ticket.entity.*;
 import com.avemonica.ticket.exception.BusinessException;
-import com.avemonica.ticket.mapper.EventMapper;
-import com.avemonica.ticket.mapper.EventSessionMapper;
-import com.avemonica.ticket.mapper.OrderMapper;
-import com.avemonica.ticket.mapper.OrderSpectatorMapper;
-import com.avemonica.ticket.mapper.OrderTicketMapper;
-import com.avemonica.ticket.mapper.SpectatorMapper;
-import com.avemonica.ticket.mapper.TicketCategoryMapper;
-import com.avemonica.ticket.service.ArtistHeatService;
-import com.avemonica.ticket.service.OrderService;
-import com.avemonica.ticket.service.RecommendBehaviorService;
-import com.avemonica.ticket.service.UserService;
+import com.avemonica.ticket.mapper.*;
+import com.avemonica.ticket.service.*;
 import com.avemonica.ticket.vo.OrderVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
@@ -71,6 +67,24 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Autowired
     private RecommendBehaviorService recommendBehaviorService;
+
+    @Autowired
+    private OutboxEventWriter outboxEventWriter;
+
+    @Autowired
+    private TicketIssueFailureMapper ticketIssueFailureMapper;
+
+    @Autowired
+    private TicketIssueProcessor ticketIssueProcessor;
+
+    @Autowired
+    private TicketPurchasedCacheService ticketPurchasedCacheService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     /**
      * 订单状态：
@@ -177,6 +191,292 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         );
 
         return order;
+    }
+
+    @Override
+    public void compensateTicketIssue(Long orderId) {
+
+        if (orderId == null) {
+            throw new BusinessException(
+                    "订单ID不能为空"
+            );
+        }
+
+        /*
+         * 1. 查询订单
+         */
+        Order order = this.getById(orderId);
+
+        if (order == null) {
+            throw new BusinessException(
+                    "订单不存在"
+            );
+        }
+
+        /*
+         * 只有 status=5 的异常订单
+         * 才允许人工补偿。
+         */
+        if (!Objects.equals(
+                order.getStatus(),
+                ORDER_STATUS_EXCEPTION
+        )) {
+            throw new BusinessException(
+                    "只有异常订单才能执行人工补偿"
+            );
+        }
+
+        /*
+         * 2. 找到这笔订单待处理的出票失败记录
+         */
+        TicketIssueFailure failure =
+                ticketIssueFailureMapper.selectOne(
+                        new LambdaQueryWrapper<TicketIssueFailure>()
+                                .eq(
+                                        TicketIssueFailure::getOrderId,
+                                        orderId
+                                )
+                                .eq(
+                                        TicketIssueFailure::getStatus,
+                                        0
+                                )
+                                .orderByDesc(
+                                        TicketIssueFailure::getFailTime
+                                )
+                                .last("LIMIT 1")
+                );
+
+        if (failure == null) {
+            throw new BusinessException(
+                    "没有找到待处理的出票失败记录"
+            );
+        }
+
+        /*
+         * 3. 解析原始出票消息
+         */
+        TicketIssueMessage message;
+
+        try {
+
+            message = objectMapper.readValue(
+                    failure.getPayload(),
+                    TicketIssueMessage.class
+            );
+
+        } catch (Exception e) {
+
+            throw new BusinessException(
+                    "出票失败消息无法解析"
+            );
+        }
+
+        /*
+         * 防止错误的失败记录补偿到别的订单。
+         */
+        if (!Objects.equals(
+                message.getOrderId(),
+                orderId
+        )) {
+            throw new BusinessException(
+                    "出票失败消息与当前订单不一致"
+            );
+        }
+
+        /*
+         * 4. 重新执行出票。
+         *
+         * 这里一定使用原来的 outboxEventId。
+         *
+         * 如果原事件其实已经成功处理过，
+         * Inbox 会识别出来，
+         * 不会再生成第二套电子票。
+         */
+        ticketIssueProcessor.processOnce(
+                failure.getOutboxEventId(),
+                failure.getEventType(),
+                message
+        );
+
+        /*
+         * 5. 修复Redis已购名单。
+         *
+         * Redis Set本身是幂等的，
+         * 重复执行不会产生重复成员。
+         */
+        ticketPurchasedCacheService.markPurchased(
+                message
+        );
+
+        /*
+         * 6. 前面全部成功后：
+         *
+         * failure:
+         * 0 → 1
+         *
+         * order:
+         * 5 → 6
+         *
+         * 这两个数据库修改必须是同一事务。
+         */
+        Long operatorId = getCurrentAdminId();
+
+        if (operatorId == null) {
+            throw new BusinessException(
+                    "无法获取当前管理员信息"
+            );
+        }
+
+        TransactionTemplate transactionTemplate =
+                new TransactionTemplate(
+                        transactionManager
+                );
+
+        transactionTemplate.executeWithoutResult(status -> {
+
+            int failureRows =
+                    ticketIssueFailureMapper.update(
+                            null,
+                            new LambdaUpdateWrapper<TicketIssueFailure>()
+                                    .eq(
+                                            TicketIssueFailure::getId,
+                                            failure.getId()
+                                    )
+                                    .eq(
+                                            TicketIssueFailure::getStatus,
+                                            0
+                                    )
+                                    .set(
+                                            TicketIssueFailure::getStatus,
+                                            1
+                                    )
+                                    .set(
+                                            TicketIssueFailure::getRepairTime,
+                                            LocalDateTime.now()
+                                    )
+                                    .set(
+                                            TicketIssueFailure::getRepairOperatorId,
+                                            operatorId
+                                    )
+                    );
+
+            if (failureRows == 0) {
+                throw new BusinessException(
+                        "该出票异常已经处理，请勿重复操作"
+                );
+            }
+
+            boolean orderUpdated =
+                    this.lambdaUpdate()
+                            .eq(
+                                    Order::getId,
+                                    orderId
+                            )
+                            .eq(
+                                    Order::getStatus,
+                                    ORDER_STATUS_EXCEPTION
+                            )
+                            .set(
+                                    Order::getStatus,
+                                    ORDER_STATUS_PAID_UNCHECKED
+                            )
+                            .update();
+
+            if (!orderUpdated) {
+                throw new BusinessException(
+                        "订单状态已发生变化，无法完成补偿"
+                );
+            }
+        });
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void recordTicketIssueFailure(
+            TicketIssueFailure failure
+    ) {
+
+        if (failure == null) {
+            throw new BusinessException(
+                    "出票失败记录不能为空"
+            );
+        }
+
+        if (!StringUtils.hasText(
+                failure.getOutboxEventId()
+        )) {
+            throw new BusinessException(
+                    "Outbox Event ID不能为空"
+            );
+        }
+
+        if (failure.getOrderId() == null) {
+            throw new BusinessException(
+                    "订单ID不能为空"
+            );
+        }
+
+        /*
+         * DLT也可能发生重复消费。
+         *
+         * 所以失败记录本身也必须幂等。
+         */
+        ticketIssueFailureMapper.upsert(
+                failure
+        );
+
+        /*
+         * 再读数据库状态。
+         *
+         * 如果已经人工补偿完成(status=1)，
+         * 重复DLT不能把订单重新打回异常状态。
+         */
+        TicketIssueFailure stored =
+                ticketIssueFailureMapper.selectOne(
+                        new LambdaQueryWrapper<TicketIssueFailure>()
+                                .eq(
+                                        TicketIssueFailure::getOutboxEventId,
+                                        failure.getOutboxEventId()
+                                )
+                                .last("LIMIT 1")
+                );
+
+        if (stored == null) {
+            throw new BusinessException(
+                    "出票失败记录保存失败"
+            );
+        }
+
+        if (!Objects.equals(
+                stored.getStatus(),
+                0
+        )) {
+            return;
+        }
+
+        /*
+         * 只允许：
+         *
+         * 6 已支付未检票
+         * →
+         * 5 异常订单
+         *
+         * 不能覆盖退款、已退票等状态。
+         */
+        this.lambdaUpdate()
+                .eq(
+                        Order::getId,
+                        failure.getOrderId()
+                )
+                .eq(
+                        Order::getStatus,
+                        ORDER_STATUS_PAID_UNCHECKED
+                )
+                .set(
+                        Order::getStatus,
+                        ORDER_STATUS_EXCEPTION
+                )
+                .update();
     }
 
     @Override
@@ -564,17 +864,81 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
      * 后台订单详情。
      */
     @Override
-    public Map<String, Object> getAdminOrderDetail(Long id) {
+    public Map<String, Object> getAdminOrderDetail(
+            Long id
+    ) {
+
         if (id == null) {
-            throw new BusinessException("订单ID不能为空");
+            throw new BusinessException(
+                    "订单ID不能为空"
+            );
         }
 
-        Map<String, Object> detail = baseMapper.selectAdminOrderDetail(id);
-        if (detail == null || detail.isEmpty()) {
-            throw new BusinessException("订单不存在");
+        Map<String, Object> detail =
+                baseMapper.selectAdminOrderDetail(id);
+
+        if (detail == null
+                || detail.isEmpty()) {
+            throw new BusinessException(
+                    "订单不存在"
+            );
         }
 
-        fillAdminOrderChildren(Collections.singletonList(detail));
+        fillAdminOrderChildren(
+                Collections.singletonList(detail)
+        );
+
+        /*
+         * 查询最近一次出票失败信息。
+         */
+        TicketIssueFailure failure =
+                ticketIssueFailureMapper.selectOne(
+                        new LambdaQueryWrapper<TicketIssueFailure>()
+                                .eq(
+                                        TicketIssueFailure::getOrderId,
+                                        id
+                                )
+                                .orderByDesc(
+                                        TicketIssueFailure::getFailTime
+                                )
+                                .last("LIMIT 1")
+                );
+
+        if (failure != null) {
+
+            detail.put(
+                    "ticketIssueError",
+                    failure.getErrorMessage()
+            );
+
+            detail.put(
+                    "ticketIssueFailTime",
+                    failure.getFailTime()
+            );
+
+            detail.put(
+                    "ticketIssueFailureStatus",
+                    failure.getStatus()
+            );
+
+            Long status =
+                    parseLong(
+                            detail.get("status")
+                    );
+
+            detail.put(
+                    "canCompensate",
+                    Objects.equals(
+                            status,
+                            5L
+                    )
+                            && Objects.equals(
+                            failure.getStatus(),
+                            0
+                    )
+            );
+        }
+
         return detail;
     }
 
@@ -672,6 +1036,92 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         this.updateById(update);
         markOrderEventDirty(order);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Order payOrderWithOutbox(Long orderId) {
+
+        Order order = this.getById(orderId);
+
+        if (order == null) {
+            throw new BusinessException("订单不存在");
+        }
+
+        if (!Objects.equals(order.getStatus(), ORDER_STATUS_PENDING_PAY)) {
+            throw new BusinessException("订单当前状态无法支付");
+        }
+
+        if (order.getSessionId() == null) {
+            throw new BusinessException("订单缺少场次信息，无法支付");
+        }
+
+        /*
+         * 1. 查询当前订单有效观演人
+         */
+        List<OrderSpectator> osList = orderSpectatorMapper.selectList(
+                new LambdaQueryWrapper<OrderSpectator>()
+                        .eq(OrderSpectator::getOrderId, orderId)
+                        .eq(OrderSpectator::getDeleteToken, 0L)
+        );
+
+        List<Long> spectatorIds = osList.stream()
+                .map(OrderSpectator::getSpectatorId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        if (spectatorIds.isEmpty()) {
+            throw new BusinessException("订单没有有效观演人，无法出票");
+        }
+
+        /*
+         * 2. 查询票档
+         */
+        TicketCategory ticket = ticketMapper.selectById(order.getTicketId());
+
+        if (ticket == null) {
+            throw new BusinessException("订单对应票档不存在");
+        }
+
+        /*
+         * 3. 修改订单状态
+         */
+        order.setStatus(ORDER_STATUS_PAID_UNCHECKED);
+
+        if (!this.updateById(order)) {
+            throw new BusinessException("更新订单支付状态失败");
+        }
+
+        /*
+         * 4. 构造原来的 Kafka 消息
+         *
+         * 注意：
+         * 这里只构造消息，不再调用 KafkaTemplate。
+         */
+        TicketIssueMessage message = new TicketIssueMessage(
+                order.getId(),
+                order.getEventId(),
+                order.getSessionId(),
+                order.getTicketId(),
+                ticket.getName(),
+                spectatorIds
+        );
+
+        /*
+         * 5. 写入 Outbox
+         *
+         * 因为当前方法有 @Transactional，
+         * 所以 order UPDATE 和 outbox INSERT 属于同一个 MySQL 事务。
+         */
+        outboxEventWriter.write(
+                "ORDER",
+                String.valueOf(order.getId()),
+                "TICKET_ISSUE_REQUESTED",
+                "order-ticket-issue-topic",
+                message
+        );
+
+        return order;
     }
 
     /**

@@ -1,121 +1,181 @@
 package com.avemonica.ticket.mq;
 
 import com.avemonica.ticket.dto.TicketIssueMessage;
-import com.avemonica.ticket.entity.OrderTicket;
-import com.avemonica.ticket.entity.Spectator;
-import com.avemonica.ticket.mapper.SpectatorMapper;
-import com.avemonica.ticket.service.OrderTicketService;
+import com.avemonica.ticket.service.TicketIssueProcessor;
+import com.avemonica.ticket.service.TicketPurchasedCacheService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.header.Header;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
 public class TicketIssueConsumer {
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    private static final String KEY_PURCHASED_SPEC =
+            "event:purchased:spectators:";
 
-    @Autowired
-    private SpectatorMapper spectatorMapper;
+    private final ObjectMapper objectMapper;
+    private final TicketIssueProcessor ticketIssueProcessor;
+    private final StringRedisTemplate redisTemplate;
+    private final TicketPurchasedCacheService ticketPurchasedCacheService;
 
-    @Autowired
-    private OrderTicketService orderTicketService;
+    public TicketIssueConsumer(
+            ObjectMapper objectMapper,
+            TicketIssueProcessor ticketIssueProcessor,
+            StringRedisTemplate redisTemplate,
+            TicketPurchasedCacheService ticketPurchasedCacheService
+    ) {
+        this.objectMapper = objectMapper;
+        this.ticketIssueProcessor = ticketIssueProcessor;
+        this.redisTemplate = redisTemplate;
+        this.ticketPurchasedCacheService = ticketPurchasedCacheService;
+    }
 
-    /**
-     * 监听出票 Topic。
-     * Kafka 会确保同一个消费组内，一条消息只被一个消费者实例消费。
-     */
-    @KafkaListener(topics = "order-ticket-issue-topic", groupId = "ticket-issue-group")
-    @Transactional(rollbackFor = Exception.class)
-    public void consumeTicketIssueMessage(String jsonMessage) {
+    @KafkaListener(
+            topics = "order-ticket-issue-topic",
+            groupId = "ticket-issue-group",
+            containerFactory = "ticketIssueKafkaListenerContainerFactory"
+    )
+    public void consumeTicketIssueMessage(
+            ConsumerRecord<String, String> record
+    ) {
         try {
-            TicketIssueMessage message = objectMapper.readValue(jsonMessage, TicketIssueMessage.class);
+            /*
+             * 1. 读取 Debezium Outbox Event ID
+             */
+            String outboxEventId = readHeader(record, "id");
 
-            Long orderId = message.getOrderId();
-            Long eventId = message.getEventId();
-            Long sessionId = message.getSessionId();
-            Long ticketId = message.getTicketId();
-            String ticketName = message.getTicketName();
-            List<Long> spectatorIds = message.getSpectatorIds();
+            /*
+             * 我们之前配置：
+             *
+             * event_type:header:type
+             *
+             * 所以这里可以顺手读取。
+             */
+            String eventType = readHeader(record, "type");
 
-            if (orderId == null) {
-                throw new RuntimeException("出票失败：订单ID为空");
-            }
-            if (eventId == null) {
-                throw new RuntimeException("出票失败：演出ID为空");
-            }
-            if (sessionId == null) {
-                throw new RuntimeException("出票失败：场次ID为空");
-            }
-            if (ticketId == null) {
-                throw new RuntimeException("出票失败：票档ID为空");
-            }
-            if (spectatorIds == null || spectatorIds.isEmpty()) {
-                throw new RuntimeException("出票失败：观演人为空");
+            if (outboxEventId == null || outboxEventId.isBlank()) {
+                throw new RuntimeException(
+                        "Kafka消息缺少Outbox Event ID Header"
+                );
             }
 
-            log.info(
-                    "MQ 收到异步出票任务，开始处理。orderId={}, eventId={}, sessionId={}, ticketId={}, spectatorCount={}",
-                    orderId,
-                    eventId,
-                    sessionId,
-                    ticketId,
-                    spectatorIds.size()
-            );
+            /*
+             * 2. 解析业务 payload
+             */
+            TicketIssueMessage message =
+                    objectMapper.readValue(
+                            record.value(),
+                            TicketIssueMessage.class
+                    );
 
-            List<OrderTicket> orderTicketList = new ArrayList<>();
+            /*
+             * 3. MySQL幂等出票
+             *
+             * 内部：
+             * Inbox INSERT
+             * +
+             * OrderTicket INSERT
+             *
+             * 同一个事务。
+             */
+            boolean firstProcessed =
+                    ticketIssueProcessor.processOnce(
+                            outboxEventId,
+                            eventType,
+                            message
+                    );
 
-            for (Long specId : spectatorIds) {
-                Spectator spectator = spectatorMapper.selectById(specId);
-                if (spectator == null) {
-                    throw new RuntimeException("出票失败：观演人不存在，spectatorId=" + specId);
-                }
-
-                OrderTicket ticketInstance = new OrderTicket();
-
-                ticketInstance.setOrderId(orderId);
-                ticketInstance.setEventId(eventId);
-
-                // 核心新增：写入具体时间场次ID
-                ticketInstance.setSessionId(sessionId);
-
-                ticketInstance.setTicketId(ticketId);
-                ticketInstance.setTicketName(ticketName);
-
-                ticketInstance.setSpectatorId(specId);
-                ticketInstance.setSpectatorName(spectator.getName());
-                ticketInstance.setSpectatorIdCard(spectator.getIdCard());
-
-                ticketInstance.setSeatInfo(null);
-                ticketInstance.setQrCode(UUID.randomUUID().toString().replace("-", ""));
-
-                // 建议保持和订单列表逻辑一致：1=未检票，2=已检票，4=未出票
-                ticketInstance.setCheckStatus(1);
-
-                orderTicketList.add(ticketInstance);
-            }
-
-            orderTicketService.saveBatch(orderTicketList);
-
-            log.info(
-                    "MQ 异步出票成功。orderId={}, eventId={}, sessionId={}, 出票数={}",
-                    orderId,
-                    eventId,
-                    sessionId,
-                    orderTicketList.size()
-            );
+            /*
+             * 无论是否重复事件都执行。
+             *
+             * 如果第一次出票成功但Redis失败，
+             * 下一次retry会被Inbox阻止重复出票，
+             * 然后重新执行这里。
+             */
+            ticketPurchasedCacheService.markPurchased(message);
 
         } catch (Exception e) {
-            log.error("MQ 消费出票消息异常，消息内容={}", jsonMessage, e);
-            throw new RuntimeException("处理出票失败", e);
+            log.error(
+                    "处理异步出票消息失败，topic={}, partition={}, offset={}",
+                    record.topic(),
+                    record.partition(),
+                    record.offset(),
+                    e
+            );
+
+            /*
+             * 必须继续抛异常。
+             *
+             * 不能 catch 后吞掉，
+             * 否则 Kafka 会认为消费成功。
+             */
+            throw new RuntimeException(
+                    "处理出票消息失败",
+                    e
+            );
         }
+    }
+
+    private void markPurchased(TicketIssueMessage message) {
+
+        Long eventId = message.getEventId();
+        Long sessionId = message.getSessionId();
+        List<Long> spectatorIds = message.getSpectatorIds();
+
+        if (eventId == null
+                || sessionId == null
+                || spectatorIds == null
+                || spectatorIds.isEmpty()) {
+            throw new RuntimeException(
+                    "更新已购名单失败：出票消息参数不完整"
+            );
+        }
+
+        String sceneKey =
+                eventId + ":" + sessionId;
+
+        String purchasedSetKey =
+                KEY_PURCHASED_SPEC + sceneKey;
+
+        String[] values = spectatorIds.stream()
+                .map(String::valueOf)
+                .toArray(String[]::new);
+
+        redisTemplate.opsForSet().add(
+                purchasedSetKey,
+                values
+        );
+
+        redisTemplate.expire(
+                purchasedSetKey,
+                30,
+                TimeUnit.DAYS
+        );
+    }
+
+    private String readHeader(
+            ConsumerRecord<String, String> record,
+            String name
+    ) {
+        Header header =
+                record.headers().lastHeader(name);
+
+        if (header == null || header.value() == null) {
+            return null;
+        }
+
+        return new String(
+                header.value(),
+                StandardCharsets.UTF_8
+        );
     }
 }

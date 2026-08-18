@@ -89,4 +89,24 @@ public class AdminOrderController {
         return Result.success("强制退款成功");
     }
 
+    @PostMapping(
+            "/ticket-issue/compensate/{orderId}"
+    )
+    @PreAuthorize(
+            AuthExp.AUDIT_MANAGE
+                    + " or authentication.name == '1'"
+    )
+    public Result<String> compensateTicketIssue(
+            @PathVariable Long orderId
+    ) {
+
+        orderService.compensateTicketIssue(
+                orderId
+        );
+
+        return Result.success(
+                "补偿出票成功"
+        );
+    }
+
 }

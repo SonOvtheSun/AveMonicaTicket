@@ -249,6 +249,52 @@ const OrderManager = () => {
         return Number(order?.status) === 4 && [1, 2].includes(Number(order?.refundStatus || 1));
     };
 
+    const compensateTicketIssue = (record) => {
+
+        Modal.confirm({
+            title: '确认重新出票？',
+            content: `订单 ${record.id} 将重新执行出票补偿。Inbox 会自动防止重复出票。`,
+            okText: '确认补偿',
+            cancelText: '取消',
+
+            async onOk() {
+
+                try {
+
+                    const res = await axios.post(
+                        `/api/admin/order/ticket-issue/compensate/${record.id}`
+                    );
+
+                    if (res.data.code === 200) {
+
+                        message.success(
+                            '补偿出票成功'
+                        );
+
+                        fetchOrders(
+                            pagination.current,
+                            pagination.pageSize
+                        );
+
+                    } else {
+
+                        message.error(
+                            res.data.message
+                            || '补偿失败'
+                        );
+                    }
+
+                } catch (error) {
+
+                    message.error(
+                        error.response?.data?.message
+                        || '补偿出票失败'
+                    );
+                }
+            }
+        });
+    };
+
     const canForceRefund = (order) => {
         const status = Number(order?.status);
 
@@ -410,6 +456,19 @@ const OrderManager = () => {
                         详情
                     </Button>
 
+                    {Number(record.status) === 5 && (
+                        <Button
+                            size="small"
+                            danger
+                            icon={<ReloadOutlined />}
+                            onClick={() =>
+                                compensateTicketIssue(record)
+                            }
+                        >
+                            补偿出票
+                        </Button>
+                    )}
+
                     {(Number(record.status) === 4 || record.refundStatus) && (
                         <Button
                             size="small"
@@ -421,7 +480,10 @@ const OrderManager = () => {
                 </Space>
             )
         }
-    ], []);
+    ], [
+        pagination.current,
+        pagination.pageSize
+    ]);
 
     const renderRefundModalContent = () => {
         if (!refundOrder) {
