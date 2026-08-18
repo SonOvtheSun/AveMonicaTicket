@@ -443,28 +443,5 @@ Kafka Value  ← payload
 
 ---
 
-## 公开仓库安全检查
-
-提交代码前请确认仓库中不包含：
-
-- MySQL、Redis、Kafka、Qdrant 的真实账号与密码
-- JWT Secret、短信或邮件服务密钥
-- 云服务 AccessKey / SecretKey
-- 真实服务器 IP、域名后台地址与证书私钥
-- 用户手机号、身份证号、订单信息和测试数据中的个人隐私
-- Ollama 模型本地绝对路径及内部网络地址
-
-建议提交脱敏后的 `.env.example`、`application-example.yml` 和 Connector 示例配置，并将真实配置加入 `.gitignore`。
-
----
-
-## 演示与联系
-
-- 在线演示：`待补充`
-- 演示视频：`待补充`
-- 项目作品集：`待补充`
-- 作者：`待补充`
-- 联系方式：`待补充`
-
 如果这个项目对你有帮助，欢迎提交 Issue 或 Star。
 
